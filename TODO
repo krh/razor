@@ -1,0 +1,37 @@
+- pkg manifest is list of files
+
+	/usr/bin/bash 1321321372198798
+
+  plus provides, requires and version?
+
+- keep history of installed packages/journal of package transaction,
+  so we can roll back to yesterday, or see what got installed in the
+  latest yum update.
+
+- we build a cache of the currently installed set to service
+  dependency inquiries fast:
+
+	map from property to pkg (as hash) providing it
+	map from property to pkgs requiring it
+	map from pkg name to manifest
+	map from string to string pool index
+
+	no implicit provides? not even pkgname?
+
+- properties are strings, stored in a string table
+
+- on disk maps are binary files of (string table index, hash) pairs
+
+- at run time, we mmap the map, and keep changes in memory in a splay
+  tree or similar.  if searching the splay tree fails we punt to the
+  mmap.  once the transaction is done, we merge the map and the splay
+  tree and write it back out.
+
+- the on-disk string pool is sorted and we keep a list of indices into
+  the string pool in sorted order so we can bsearch the list with a
+  string to get its string pool index.  maybe a hash table is better,
+  less I/O as we will expect to find the string within the block we
+  look up with the hash function.
+
+- signed pkgs
+- gzip pkg xml files somehow?

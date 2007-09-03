@@ -1,0 +1,7 @@
+.gitignore
+*.o
+*~
+*.repo
+razor
+pkgs
+set
