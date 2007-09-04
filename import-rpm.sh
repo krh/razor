@@ -1,7 +1,7 @@
 #!/bin/sh
 
 import_rpm() {
-    echo "<package name=\"$p\" version=\"3.2\" build=\"9\">"
+    echo "<package name=\"$1\" version=\"$2\" build=\"$3\">"
     echo "  <properties>"
 
     rpm -q --provides $p | sort -u | while read name ignore version; do
@@ -16,9 +16,13 @@ import_rpm() {
     echo "</package>"
 }
 
-mkdir pkgs
+mkdir -p pkgs
 rpm -qa | while read p; do
-    base=${p%-*-*}
-    echo $base
-    import_rpm $base > pkgs/$base.rzr
+    name=${p%-*-*}
+    vr=${p#$name-}
+    version=${vr%-*}
+    release=${vr#*-}
+
+    echo $name - $version - $release
+    import_rpm $name $version $release > pkgs/$name.rzr
 done
