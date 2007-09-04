@@ -50,6 +50,12 @@ struct hashtable_header {
 #define HASHTABLE_VERSION 1
 #define HASHTABLE_BUCKETS 1
 #define HASHTABLE_STRINGS 2
+#define HASHTABLE_PACKAGES 3
+
+struct package {
+	unsigned long name;
+	unsigned long version;
+};
 
 struct hashtable {
 	unsigned long *buckets;
@@ -57,6 +63,9 @@ struct hashtable {
 	char *string_pool;
 	int pool_size, pool_alloc;
 	struct hashtable_header *header;
+
+	struct package *packages;
+	int package_count, package_alloc;
 };
 
 static void *
@@ -83,6 +92,10 @@ hashtable_create(void)
 	ht->string_pool = zalloc(4096);
 	ht->pool_size = 1;
 	ht->pool_alloc = 4096;
+
+	ht->packages = zalloc(4096 * sizeof *ht->packages);
+	ht->package_count = 0;
+	ht->package_alloc = 4096;
 
 	return ht;
 }
@@ -120,6 +133,11 @@ hashtable_create_from_file(const char *filename)
 			ht->pool_size = size;
 			ht->pool_alloc = size;
 			break;
+		case HASHTABLE_PACKAGES:
+			ht->packages = (void *) ht->header + offset;
+			ht->package_count = size / sizeof *ht->packages;
+			ht->package_alloc = size / sizeof *ht->packages;
+			break;
 		}
 	}
 	close(fd);
@@ -149,9 +167,14 @@ hashtable_destroy(struct hashtable *ht)
 static int
 hashtable_write(struct hashtable *ht, const char *filename)
 {
-	int fd;
 	char data[4096];
 	struct hashtable_header *header = (struct hashtable_header *) data;
+	int fd, pool_size, package_size;
+
+	/* Align these to pages sizes */
+	pool_size = (ht->pool_size + 4095) & ~4095;
+	package_size =
+		(ht->package_alloc * sizeof *ht->packages + 4095) & ~4095;
 
 	memset(data, 0, sizeof data);
 	header->magic = HASHTABLE_MAGIC;
@@ -161,12 +184,14 @@ hashtable_write(struct hashtable *ht, const char *filename)
 	header->sections[0].offset = sizeof data;
 
 	header->sections[1].type = HASHTABLE_STRINGS;
-	header->sections[1].offset =
-		sizeof data + ht->bucket_alloc * sizeof *ht->buckets;
+	header->sections[1].offset = header->sections[0].offset +
+		ht->bucket_alloc * sizeof *ht->buckets;
 
-	header->sections[2].type = 0;
-	header->sections[2].offset =
-		header->sections[1].offset + ht->pool_size;
+	header->sections[2].type = HASHTABLE_PACKAGES;
+	header->sections[2].offset = header->sections[1].offset + pool_size;
+
+	header->sections[3].type = 0;
+	header->sections[3].offset = header->sections[2].offset + package_size;
 
 	fd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, 0666);
 	if (fd < 0)
@@ -174,7 +199,8 @@ hashtable_write(struct hashtable *ht, const char *filename)
 
 	write_to_fd(fd, data, sizeof data);
 	write_to_fd(fd, ht->buckets, ht->bucket_alloc * sizeof *ht->buckets);
-	write_to_fd(fd, ht->string_pool, ht->pool_size);
+	write_to_fd(fd, ht->string_pool, pool_size);
+	write_to_fd(fd, ht->packages, package_size);
 
 	return 0;
 }
@@ -297,6 +323,32 @@ hashtable_insert(struct hashtable *ht, const char *key)
 	return value;
 }
 
+static unsigned long
+hashtable_add_package(struct hashtable *ht,
+		      unsigned long name, unsigned long version)
+{
+	struct package *packages;
+	int alloc;
+
+	alloc = ht->package_alloc;
+	while (alloc < ht->package_count + 1)
+		alloc *= 2;
+	if (ht->package_alloc < alloc) {
+		packages = realloc(ht->packages, alloc * sizeof ht->packages);
+		if (packages == NULL)
+			return 0;
+		ht->packages = packages;
+		ht->package_alloc = alloc;
+	}
+
+	ht->packages[ht->package_count].name = name;
+	ht->packages[ht->package_count].version = version;
+	ht->package_count++;
+
+	return 0;
+}
+
+
 struct razor_context {
 	struct hashtable *global_ht;
 };
@@ -335,6 +387,27 @@ razor_context_tokenize(struct razor_context *ctx, const char *string)
 	return hashtable_insert(ctx->global_ht, string);
 }
 
+static struct hashtable *qsort_ht;
+
+static int
+compare_packages(const void *p1, const void *p2)
+{
+	const struct package *pkg1 = p1, *pkg2 = p2;
+
+	return strcmp(&qsort_ht->string_pool[pkg1->name],
+		      &qsort_ht->string_pool[pkg2->name]);
+}
+
+static void
+razor_context_sort(struct razor_context *ctx)
+{
+	struct hashtable *ht = ctx->global_ht;
+
+	qsort_ht = ht;
+	qsort(ht->packages, ht->package_count, sizeof *ht->packages,
+	      compare_packages);
+}
+
 struct razor_set {
 	struct razor_context *ctx;
 };
@@ -344,10 +417,35 @@ struct parsing_context {
 };
 
 static void
+parse_package(struct parsing_context *ctx, const char **atts)
+{
+	unsigned long name, version;
+	int i;
+
+	for (i = 0; atts[i]; i += 2) {
+		if (strcmp(atts[i], "name") == 0)
+			name = razor_context_tokenize(ctx->ctx, atts[i + 1]);
+		else if (strcmp(atts[i], "version") == 0)
+			version = razor_context_tokenize(ctx->ctx, atts[i + 1]);
+	}
+
+	if (name == 0 || version == 0) {
+		fprintf(stderr, "invalid package tag, "
+			"missing name or version attributes\n");
+		return;
+	}
+
+	hashtable_add_package(ctx->ctx->global_ht, name, version);
+}
+
+static void
 start_element(void *data, const char *name, const char **atts)
 {
 	struct parsing_context *ctx = data;
 	int i;
+
+	if (strcmp(name, "package") == 0)
+		parse_package(ctx, atts);
 
 	for (i = 0; atts[i]; i += 2)
 		razor_context_tokenize(ctx->ctx, atts[i + 1]);
@@ -432,6 +530,47 @@ razor_context_write(struct razor_context *ctx, const char *filename)
 }
 
 void
+razor_context_list_packages(struct razor_context *ctx)
+{
+	int i;
+	struct hashtable *ht = ctx->global_ht;
+	struct package *p;
+
+	p = ht->packages;
+	for (i = 0; i < ht->package_count && p->name; i++, p++) {
+		printf("%s %s\n",
+		       &ht->string_pool[p->name],
+		       &ht->string_pool[p->version]);
+	}
+}
+
+void
+razor_context_info(struct razor_context *ctx)
+{
+	struct hashtable *ht = ctx->global_ht;
+	unsigned int offset, size;
+	int i;
+
+	for (i = 0; i < ht->header->sections[i].type; i++) {
+		offset = ht->header->sections[i].offset;
+		size = ht->header->sections[i + 1].offset - offset;
+
+		switch (ht->header->sections[i].type) {
+		case HASHTABLE_BUCKETS:
+			printf("bucket section:\t\t%dkb\n", size / 1024);
+			break;
+		case HASHTABLE_STRINGS:
+			printf("string pool:\t\t%dkb\n", size / 1024);
+			break;
+		case HASHTABLE_PACKAGES:
+			printf("package section:\t%dkb\n", size / 1024);
+			break;
+		}
+	}
+
+}
+
+void
 razor_context_destroy(struct razor_context *ctx)
 {
 	hashtable_destroy(ctx->global_ht);
@@ -441,7 +580,7 @@ razor_context_destroy(struct razor_context *ctx)
 static int
 usage(void)
 {
-	printf("usage: razor [ import FILES | lookup <key> ]\n");
+	printf("usage: razor [ import FILES | lookup <key> | list | info ]\n");
 	exit(1);
 }
 
@@ -454,7 +593,7 @@ main(int argc, char *argv[])
 	struct razor_context *ctx;
 	struct stat statbuf;
 
-	if (argc < 3) {
+	if (argc < 2) {
 		usage();
 	} else if (strcmp(argv[1], "import") == 0) {
 		if (stat("set", &statbuf) && mkdir("set", 0777)) {
@@ -472,6 +611,8 @@ main(int argc, char *argv[])
 			}
 		}
 
+		razor_context_sort(ctx);
+
 		printf("number of buckets: %d\n",
 		       ctx->global_ht->bucket_count);
 		printf("bucket allocation: %d\n",
@@ -486,6 +627,14 @@ main(int argc, char *argv[])
 		ctx = razor_context_create_from_file(repo_filename);
 		printf("%s is %lu\n", argv[2],
 		       hashtable_lookup(ctx->global_ht, argv[2]));
+		razor_context_destroy(ctx);
+	} else if (strcmp(argv[1], "list") == 0) {
+		ctx = razor_context_create_from_file(repo_filename);
+		razor_context_list_packages(ctx);
+		razor_context_destroy(ctx);
+	} else if (strcmp(argv[1], "info") == 0) {
+		ctx = razor_context_create_from_file(repo_filename);
+		razor_context_info(ctx);
 		razor_context_destroy(ctx);
 	} else {
 		usage();
