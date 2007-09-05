@@ -95,8 +95,14 @@ struct razor_set_header {
 #define RAZOR_BUCKETS 1
 #define RAZOR_STRINGS 2
 #define RAZOR_PACKAGES 3
+#define RAZOR_PROVIDES 4
 
 struct razor_package {
+	unsigned long name;
+	unsigned long version;
+};
+
+struct razor_provides {
 	unsigned long name;
 	unsigned long version;
 };
@@ -104,7 +110,8 @@ struct razor_package {
 struct razor_set {
 	struct array buckets;
 	struct array string_pool;
-	struct array packages;
+ 	struct array packages;
+ 	struct array provides;
 	struct razor_set_header *header;
 };
 
@@ -159,6 +166,11 @@ razor_set_open(const char *filename)
 			set->packages.size = size;
 			set->packages.size = size;
 			break;
+		case RAZOR_PROVIDES:
+			set->provides.data = (void *) set->header + offset;
+			set->provides.size = size;
+			set->provides.size = size;
+			break;
 		}
 	}
 	close(fd);
@@ -191,11 +203,12 @@ razor_set_write(struct razor_set *set, const char *filename)
 {
 	char data[4096];
 	struct razor_set_header *header = (struct razor_set_header *) data;
-	int fd, pool_size, packages_size;
+	int fd, pool_size, packages_size, provides_size;
 
 	/* Align these to pages sizes */
 	pool_size = (set->string_pool.size + 4095) & ~4095;
 	packages_size = (set->packages.size + 4095) & ~4095;
+	provides_size = (set->provides.size + 4095) & ~4095;
 
 	memset(data, 0, sizeof data);
 	header->magic = RAZOR_MAGIC;
@@ -212,9 +225,13 @@ razor_set_write(struct razor_set *set, const char *filename)
 	header->sections[2].offset =
 		header->sections[1].offset + pool_size;
 
-	header->sections[3].type = 0;
+	header->sections[3].type = RAZOR_PROVIDES;
 	header->sections[3].offset =
 		header->sections[2].offset + packages_size;
+
+	header->sections[4].type = 0;
+	header->sections[4].offset =
+		header->sections[3].offset + provides_size;
 
 	fd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, 0666);
 	if (fd < 0)
@@ -224,6 +241,7 @@ razor_set_write(struct razor_set *set, const char *filename)
 	write_to_fd(fd, set->buckets.data, set->buckets.alloc);
 	write_to_fd(fd, set->string_pool.data, pool_size);
 	write_to_fd(fd, set->packages.data, packages_size);
+	write_to_fd(fd, set->provides.data, provides_size);
 
 	return 0;
 }
@@ -337,6 +355,20 @@ razor_set_add_package(struct razor_set *set,
 	return p - (struct razor_package *) set->packages.data;
 }
 
+static unsigned long
+razor_set_add_provides(struct razor_set *set,
+		       unsigned long name, unsigned long version)
+{
+	struct razor_provides *p;
+
+	p = array_add(&set->provides, sizeof *p);
+
+	p->name = name;
+	p->version = version;
+
+	return p - (struct razor_provides *) set->packages.data;
+}
+
 unsigned long
 razor_set_tokenize(struct razor_set *set, const char *string)
 {
@@ -360,6 +392,15 @@ compare_packages(const void *p1, const void *p2)
 	return strcmp(&pool[pkg1->name], &pool[pkg2->name]);
 }
 
+static int
+compare_provides(const void *p1, const void *p2)
+{
+	const struct razor_provides *prv1 = p1, *prv2 = p2;
+	char *pool = qsort_set->string_pool.data;
+
+	return strcmp(&pool[prv1->name], &pool[prv2->name]);
+}
+
 static void
 razor_set_sort(struct razor_set *set)
 {
@@ -367,6 +408,9 @@ razor_set_sort(struct razor_set *set)
 	qsort(set->packages.data,
 	      set->packages.size / sizeof(struct razor_package),
 	      sizeof(struct razor_package), compare_packages);
+	qsort(set->provides.data,
+	      set->provides.size / sizeof(struct razor_provides),
+	      sizeof(struct razor_provides), compare_provides);
 }
 
 struct parsing_context {
@@ -377,7 +421,7 @@ struct parsing_context {
 static void
 parse_package(struct parsing_context *ctx, const char **atts)
 {
-	unsigned long name, version;
+	unsigned long name = 0, version = 0;
 	int i;
 
 	for (i = 0; atts[i]; i += 2) {
@@ -399,6 +443,26 @@ parse_package(struct parsing_context *ctx, const char **atts)
 }
 
 static void
+parse_provides(struct parsing_context *ctx, const char **atts)
+{
+	unsigned long name = 0, version = 0;
+	int i;
+
+	for (i = 0; atts[i]; i += 2) {
+		if (strcmp(atts[i], "name") == 0)
+			name = razor_set_tokenize(ctx->set, atts[i + 1]);
+	}
+	
+	if (name == 0) {
+		fprintf(stderr, "invalid provides tag, "
+			"missing name attribute\n");
+		return;
+	}
+
+	ctx->pkg_id = razor_set_add_provides(ctx->set, name, version);
+}
+
+static void
 start_element(void *data, const char *name, const char **atts)
 {
 	struct parsing_context *ctx = data;
@@ -406,6 +470,8 @@ start_element(void *data, const char *name, const char **atts)
 
 	if (strcmp(name, "package") == 0)
 		parse_package(ctx, atts);
+	else if (strcmp(name, "provides") == 0)
+		parse_provides(ctx, atts);
 
 	for (i = 0; atts[i]; i += 2)
 		razor_set_tokenize(ctx->set, atts[i + 1]);
@@ -500,6 +566,18 @@ razor_set_list(struct razor_set *set)
 }
 
 void
+razor_set_list_provides(struct razor_set *set)
+{
+	struct razor_provides *p, *end;
+	char *pool;
+
+	pool = set->string_pool.data;
+	end = set->provides.data + set->provides.size;
+	for (p = set->provides.data; p < end && p->name; p++)
+		printf("%s %s\n", &pool[p->name], &pool[p->version]);
+}
+
+void
 razor_set_info(struct razor_set *set)
 {
 	unsigned int offset, size;
@@ -519,6 +597,9 @@ razor_set_info(struct razor_set *set)
 		case RAZOR_PACKAGES:
 			printf("package section:\t%dkb\n", size / 1024);
 			break;
+		case RAZOR_PROVIDES:
+			printf("provides section:\t%dkb\n", size / 1024);
+			break;
 		}
 	}
 }
@@ -526,7 +607,8 @@ razor_set_info(struct razor_set *set)
 static int
 usage(void)
 {
-	printf("usage: razor [ import FILES | lookup <key> | list | info ]\n");
+	printf("usage: razor [ import FILES | lookup <key> | "
+	       "list | list-provides | info ]\n");
 	exit(1);
 }
 
@@ -563,10 +645,15 @@ main(int argc, char *argv[])
 		 * should probably just have a size field in the
 		 * header section. */
 		razor_set_add_package(set, 0, 0);
+		razor_set_add_provides(set, 0, 0);
 
 		printf("bucket allocation: %d\n", set->buckets.alloc);
 		printf("pool size: %d\n", set->string_pool.size);
 		printf("pool allocation: %d\n", set->string_pool.alloc);
+		printf("packages: %d\n",
+		       set->packages.size / sizeof(struct razor_package));
+		printf("provides: %d\n",
+		       set->provides.size / sizeof(struct razor_provides));
 
 		razor_set_write(set, repo_filename);
 
@@ -579,6 +666,10 @@ main(int argc, char *argv[])
 	} else if (strcmp(argv[1], "list") == 0) {
 		set = razor_set_open(repo_filename);
 		razor_set_list(set);
+		razor_set_destroy(set);
+	} else if (strcmp(argv[1], "list-provides") == 0) {
+		set = razor_set_open(repo_filename);
+		razor_set_list_provides(set);
 		razor_set_destroy(set);
 	} else if (strcmp(argv[1], "info") == 0) {
 		set = razor_set_open(repo_filename);
