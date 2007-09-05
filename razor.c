@@ -10,6 +10,39 @@
 #include <expat.h>
 #include "sha1.h"
 
+struct array {
+	void *data;
+	int size, alloc;
+};
+
+static void *
+array_add(struct array *array, int size)
+{
+	int alloc;
+	void *data, *p;
+
+	if (array->alloc > 0)
+		alloc = array->alloc;
+	else
+		alloc = 1024;
+
+	while (alloc < array->size + size)
+		alloc *= 2;
+
+	if (array->alloc < alloc) {
+		data = realloc(array->data, alloc);
+		if (data == NULL)
+			return 0;
+		array->data = data;
+		array->alloc = alloc;
+	}
+
+	p = array->data + array->size;
+	array->size += size;
+
+	return p;
+}
+
 static int
 write_to_fd(int fd, void *p, size_t size)
 {
@@ -69,33 +102,21 @@ struct razor_package {
 };
 
 struct razor_set {
-	unsigned long *buckets;
-	int bucket_count, bucket_alloc;
-	char *string_pool;
-	int pool_size, pool_alloc;
+	struct array buckets;
+	struct array string_pool;
+	struct array packages;
 	struct razor_set_header *header;
-
-	struct razor_package *packages;
-	int package_count, package_alloc;
 };
 
 struct razor_set *
 razor_set_create(void)
 {
 	struct razor_set *set;
+	char *p;
 
-	set = zalloc(sizeof *set);
-	set->buckets = zalloc(4096 * sizeof *set->buckets);
-	set->bucket_count = 0;
-	set->bucket_alloc = 4096;
-
-	set->string_pool = zalloc(4096);
-	set->pool_size = 1;
-	set->pool_alloc = 4096;
-
-	set->packages = zalloc(4096 * sizeof *set->packages);
-	set->package_count = 0;
-	set->package_alloc = 4096;
+	set = zalloc(sizeof(struct razor_set));
+	p = array_add(&set->string_pool, 1);
+	*p = '\0';
 
 	return set;
 }
@@ -124,19 +145,19 @@ razor_set_open(const char *filename)
 
 		switch (set->header->sections[i].type) {
 		case RAZOR_BUCKETS:
-			set->buckets = (void *) set->header + offset;
-			set->bucket_count = size / sizeof *set->buckets;
-			set->bucket_alloc = set->bucket_count;
+			set->buckets.data = (void *) set->header + offset;
+			set->buckets.size = size;
+			set->buckets.alloc = size;
 			break;
 		case RAZOR_STRINGS:
-			set->string_pool = (void *) set->header + offset;
-			set->pool_size = size;
-			set->pool_alloc = size;
+			set->string_pool.data = (void *) set->header + offset;
+			set->string_pool.size = size;
+			set->string_pool.alloc = size;
 			break;
 		case RAZOR_PACKAGES:
-			set->packages = (void *) set->header + offset;
-			set->package_count = size / sizeof *set->packages;
-			set->package_alloc = size / sizeof *set->packages;
+			set->packages.data = (void *) set->header + offset;
+			set->packages.size = size;
+			set->packages.size = size;
 			break;
 		}
 	}
@@ -157,8 +178,9 @@ razor_set_destroy(struct razor_set *set)
 		size = set->header->sections[i].type;
 		munmap(set->header, size);
 	} else {
-		free(set->buckets);
-		free(set->string_pool);
+		free(set->buckets.data);
+		free(set->string_pool.data);
+		free(set->packages.data);
 	}
 
 	free(set);
@@ -169,12 +191,11 @@ razor_set_write(struct razor_set *set, const char *filename)
 {
 	char data[4096];
 	struct razor_set_header *header = (struct razor_set_header *) data;
-	int fd, pool_size, package_size;
+	int fd, pool_size, packages_size;
 
 	/* Align these to pages sizes */
-	pool_size = (set->pool_size + 4095) & ~4095;
-	package_size =
-		(set->package_alloc * sizeof *set->packages + 4095) & ~4095;
+	pool_size = (set->string_pool.size + 4095) & ~4095;
+	packages_size = (set->packages.size + 4095) & ~4095;
 
 	memset(data, 0, sizeof data);
 	header->magic = RAZOR_MAGIC;
@@ -184,23 +205,25 @@ razor_set_write(struct razor_set *set, const char *filename)
 	header->sections[0].offset = sizeof data;
 
 	header->sections[1].type = RAZOR_STRINGS;
-	header->sections[1].offset = header->sections[0].offset +
-		set->bucket_alloc * sizeof *set->buckets;
+	header->sections[1].offset =
+		header->sections[0].offset + set->buckets.alloc;
 
 	header->sections[2].type = RAZOR_PACKAGES;
-	header->sections[2].offset = header->sections[1].offset + pool_size;
+	header->sections[2].offset =
+		header->sections[1].offset + pool_size;
 
 	header->sections[3].type = 0;
-	header->sections[3].offset = header->sections[2].offset + package_size;
+	header->sections[3].offset =
+		header->sections[2].offset + packages_size;
 
 	fd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, 0666);
 	if (fd < 0)
 		return -1;
 
 	write_to_fd(fd, data, sizeof data);
-	write_to_fd(fd, set->buckets, set->bucket_alloc * sizeof *set->buckets);
-	write_to_fd(fd, set->string_pool, pool_size);
-	write_to_fd(fd, set->packages, package_size);
+	write_to_fd(fd, set->buckets.data, set->buckets.alloc);
+	write_to_fd(fd, set->string_pool.data, pool_size);
+	write_to_fd(fd, set->packages.data, packages_size);
 
 	return 0;
 }
@@ -220,25 +243,23 @@ hash_string(const char *key)
 unsigned long
 razor_set_lookup(struct razor_set *set, const char *key)
 {
-	unsigned int start;
-	unsigned int mask;
-	unsigned long value;
-	int i;
+	unsigned int mask, start, i;
+	unsigned long *b;
+	char *pool;
 
-	mask = set->bucket_alloc - 1;
-	start = hash_string(key) & mask;
-	i = start;
-	do {
-		value = set->buckets[i];
+	pool = set->string_pool.data;
+	mask = set->buckets.alloc - 1;
+	start = hash_string(key) * sizeof(unsigned long);
 
-		if (value == 0)
+	for (i = 0; i < set->buckets.alloc; i += sizeof *b) {
+		b = set->buckets.data + ((start + i) & mask);
+
+		if (*b == 0)
 			return 0;
 
-		if (strcmp(key, &set->string_pool[value]) == 0)
-			return value;
-
-		i = (i + 1) & mask;
-	} while (i != start);
+		if (strcmp(key, &pool[*b]) == 0)
+			return *b;
+	}
 
 	return 0;
 }
@@ -246,79 +267,58 @@ razor_set_lookup(struct razor_set *set, const char *key)
 static unsigned long
 add_to_string_pool(struct razor_set *set, const char *key)
 {
-	int len, alloc;
-	char *pool;
-	unsigned long value;
+	int len;
+	char *p;
 
 	len = strlen(key) + 1;
-	alloc = set->pool_alloc;
-	while (alloc < set->pool_size + len)
-		alloc *= 2;
-	if (set->pool_alloc < alloc) {
-		pool = realloc(set->string_pool, alloc);
-		if (pool == NULL)
-			return 0;
-		set->string_pool = pool;
-		set->pool_alloc = alloc;
-	}
+	p = array_add(&set->string_pool, len);
+	memcpy(p, key, len);
 
-	memcpy(set->string_pool + set->pool_size, key, len);
-	value = set->pool_size;
-	set->pool_size += len;
-
-	return value;
+	return p - (char *) set->string_pool.data;
 }
 
 static void
 do_insert(struct razor_set *set, unsigned long value)
 {
-	unsigned int mask;
+	unsigned int mask, start, i;
+	unsigned long *b;
 	const char *key;
-	int i, start;
 
-	key = &set->string_pool[value];
-	mask = set->bucket_alloc - 1;
-	start = hash_string(key) & mask;
-	i = start;
-	do {
-		if (set->buckets[i] == 0) {
-			set->buckets[i] = value;
+	key = (char *) set->string_pool.data + value;
+	mask = set->buckets.alloc - 1;
+	start = hash_string(key) * sizeof(unsigned long);
+
+	for (i = 0; i < set->buckets.alloc; i += sizeof *b) {
+		b = set->buckets.data + ((start + i) & mask);
+		if (*b == 0) {
+			*b = value;
 			break;
 		}
-		i = (i + 1) & mask;
-	} while (i != start);
+	}
 }
 
 unsigned long
 razor_set_insert(struct razor_set *set, const char *key)
 {
-	unsigned long value, *buckets, *old_buckets;
-	int i, alloc, old_alloc;
+	unsigned long value, *buckets, *b, *end;
+	int alloc;
 
-	alloc = set->bucket_alloc;
-	while (alloc < 4 * set->bucket_count)
-		alloc *= 2;
-
-	if (alloc != set->bucket_alloc) {
-		buckets = zalloc(alloc * sizeof *set->buckets);
-		if (buckets == NULL)
-			return 0;
-		old_buckets = set->buckets;
-		set->buckets = buckets;
-		old_alloc = set->bucket_alloc;
-		set->bucket_alloc = alloc;
-		
-		for (i = 0; i < old_alloc; i++) {
-			value = old_buckets[i];
-			if (value != 0)
+	alloc = set->buckets.alloc;
+	array_add(&set->buckets, 4 * sizeof *buckets);
+	if (alloc != set->buckets.alloc) {
+		end = set->buckets.data + alloc;
+		memset(end, 0, set->buckets.alloc - alloc);
+		for (b = set->buckets.data; b < end; b++) {
+			value = *b;
+			if (value != 0) {
+				*b = 0;
 				do_insert(set, value);
+			}
 		}
-		free(old_buckets);
 	}
 
 	value = add_to_string_pool(set, key);
 	do_insert (set, value);
-	set->bucket_count++;
 
 	return value;
 }
@@ -327,25 +327,14 @@ static unsigned long
 razor_set_add_package(struct razor_set *set,
 		      unsigned long name, unsigned long version)
 {
-	struct razor_package *packages;
-	int alloc;
+	struct razor_package *p;
 
-	/* FIXME: make 0 an illegal pkgs number. */
-	alloc = set->package_alloc;
-	while (alloc < set->package_count + 1)
-		alloc *= 2;
-	if (set->package_alloc < alloc) {
-		packages = realloc(set->packages, alloc * sizeof set->packages);
-		if (packages == NULL)
-			return 0;
-		set->packages = packages;
-		set->package_alloc = alloc;
-	}
+	p = array_add(&set->packages, sizeof *p);
 
-	set->packages[set->package_count].name = name;
-	set->packages[set->package_count].version = version;
+	p->name = name;
+	p->version = version;
 
-	return set->package_count++;
+	return p - (struct razor_package *) set->packages.data;
 }
 
 unsigned long
@@ -366,17 +355,18 @@ static int
 compare_packages(const void *p1, const void *p2)
 {
 	const struct razor_package *pkg1 = p1, *pkg2 = p2;
+	char *pool = qsort_set->string_pool.data;
 
-	return strcmp(&qsort_set->string_pool[pkg1->name],
-		      &qsort_set->string_pool[pkg2->name]);
+	return strcmp(&pool[pkg1->name], &pool[pkg2->name]);
 }
 
 static void
 razor_set_sort(struct razor_set *set)
 {
 	qsort_set = set;
-	qsort(set->packages, set->package_count, sizeof *set->packages,
-	      compare_packages);
+	qsort(set->packages.data,
+	      set->packages.size / sizeof(struct razor_package),
+	      sizeof(struct razor_package), compare_packages);
 }
 
 struct parsing_context {
@@ -500,15 +490,13 @@ razor_set_import(struct razor_set *set, const char *filename)
 void
 razor_set_list(struct razor_set *set)
 {
-	int i;
-	struct razor_package *p;
+	struct razor_package *p, *end;
+	char *pool;
 
-	p = set->packages;
-	for (i = 0; i < set->package_count && p->name; i++, p++) {
-		printf("%s %s\n",
-		       &set->string_pool[p->name],
-		       &set->string_pool[p->version]);
-	}
+	pool = set->string_pool.data;
+	end = set->packages.data + set->packages.size;
+	for (p = set->packages.data; p < end && p->name; p++)
+		printf("%s %s\n", &pool[p->name], &pool[p->version]);
 }
 
 void
@@ -571,12 +559,14 @@ main(int argc, char *argv[])
 
 		razor_set_sort(set);
 
-		printf("number of buckets: %d\n",
-		       set->bucket_count);
-		printf("bucket allocation: %d\n",
-		       set->bucket_alloc);
-		printf("pool size: %d\n", set->pool_size);
-		printf("pool allocation: %d\n", set->pool_alloc);
+		/* FIXME: We add a sentinel package here, but we
+		 * should probably just have a size field in the
+		 * header section. */
+		razor_set_add_package(set, 0, 0);
+
+		printf("bucket allocation: %d\n", set->buckets.alloc);
+		printf("pool size: %d\n", set->string_pool.size);
+		printf("pool allocation: %d\n", set->string_pool.alloc);
 
 		razor_set_write(set, repo_filename);
 
