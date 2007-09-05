@@ -33,5 +33,19 @@
   less I/O as we will expect to find the string within the block we
   look up with the hash function.
 
+- represent all files as a breadth first traversal of the tree of all
+  files.  each entry has its name (string pool index), the number of
+  immediate children, total number of children, and owning package.
+  for files both these numbers are zero.  a file is identified by its
+  index in this flattened tree.
+
+  to get the file name from an index, we search through the list.  by
+  summing up the number of children, we know when to skip a directory
+  and when to descend into one.  as we go we accumulate the path
+  elements.
+
+  hmm, dropping number of immediate children and using a sentinel drops
+  a word from every entry.
+
 - signed pkgs
 - gzip pkg xml files somehow?
