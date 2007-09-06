@@ -1,9 +1,3 @@
-- pkg manifest is list of files
-
-	/usr/bin/bash 1321321372198798
-
-  plus provides, requires and version?
-
 - keep history of installed packages/journal of package transaction,
   so we can roll back to yesterday, or see what got installed in the
   latest yum update.
@@ -48,4 +42,13 @@
   a word from every entry.
 
 - signed pkgs
-- gzip pkg xml files somehow?
+
+- gzip repository of look-aside pkg xml files somehow?
+
+- transactions, proper recovery, make sure we don't poop our package
+  database (no more rm /var/lib/rpm/__cache*).
+
+- no external dependencies, forget about bdb, sqlite.  It's *simple*
+  and we need to control the on-disk format for these tools.
+
+- 20740 requires, 2246 unique... hmm.
