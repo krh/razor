@@ -174,11 +174,6 @@ razor_set_open(const char *filename)
 		size = set->header->sections[i].size;
 
 		switch (set->header->sections[i].type) {
-		case RAZOR_BUCKETS:
-			set->buckets.data = (void *) set->header + offset;
-			set->buckets.size = size;
-			set->buckets.alloc = size;
-			break;
 		case RAZOR_STRINGS:
 			set->string_pool.data = (void *) set->header + offset;
 			set->string_pool.size = size;
@@ -222,6 +217,7 @@ razor_set_destroy(struct razor_set *set)
 			;
 		size = set->header->sections[i].type;
 		munmap(set->header, size);
+		free(set->buckets.data);
 	} else {
 		free(set->buckets.data);
 		free(set->string_pool.data);
@@ -239,65 +235,43 @@ razor_set_write(struct razor_set *set, const char *filename)
 {
 	char data[4096];
 	struct razor_set_header *header = (struct razor_set_header *) data;
-	int fd, pool_size, packages_size, requires_size, provides_size;
-	int properties_size;
-
-	/* Align these to pages sizes */
-	pool_size = (set->string_pool.size + 4095) & ~4095;
-	packages_size = (set->packages.size + 4095) & ~4095;
-	requires_size = (set->requires.size + 4095) & ~4095;
-	provides_size = (set->provides.size + 4095) & ~4095;
-	properties_size = (set->property_pool.size + 4095) & ~4095;
+	unsigned long offset;
+	int i, fd;
+	struct { int type; struct array *array; } sections[] = {
+		{ RAZOR_STRINGS, &set->string_pool },
+		{ RAZOR_PACKAGES, &set->packages },
+		{ RAZOR_REQUIRES, &set->requires },
+		{ RAZOR_PROVIDES, &set->provides },
+		{ RAZOR_PROPERTIES, &set->property_pool },
+		{ 0 }
+	};
 
 	memset(data, 0, sizeof data);
 	header->magic = RAZOR_MAGIC;
 	header->version = RAZOR_VERSION;
+	offset = sizeof data;
 
-	header->sections[0].type = RAZOR_BUCKETS;
-	header->sections[0].offset = sizeof data;
-	header->sections[0].size = set->buckets.alloc;
+	for (i = 0; sections[i].type != 0; i++) {
+		header->sections[i].type = sections[i].type;
+		header->sections[i].offset = offset;
+		header->sections[i].size = sections[i].array->size;
+		offset += (sections[i].array->size + 4095) & ~4095;
+	}
 
-	header->sections[1].type = RAZOR_STRINGS;
-	header->sections[1].offset =
-		header->sections[0].offset + set->buckets.alloc;
-	header->sections[1].size = set->string_pool.size;
-
-	header->sections[2].type = RAZOR_PACKAGES;
-	header->sections[2].offset =
-		header->sections[1].offset + pool_size;
-	header->sections[2].size = set->packages.size;
-
-	header->sections[3].type = RAZOR_REQUIRES;
-	header->sections[3].offset =
-		header->sections[2].offset + packages_size;
-	header->sections[3].size = set->requires.size;
-
-	header->sections[4].type = RAZOR_PROVIDES;
-	header->sections[4].offset =
-		header->sections[3].offset + requires_size;
-	header->sections[4].size = set->provides.size;
-
-	header->sections[5].type = RAZOR_PROPERTIES;
-	header->sections[5].offset =
-		header->sections[4].offset + provides_size;
-	header->sections[5].size = set->property_pool.size;
-
-	header->sections[6].type = 0;
-	header->sections[6].offset =
-		header->sections[5].offset + properties_size;
-	header->sections[6].size = 0;
+	header->sections[i].type = 0;
+	header->sections[i].offset = 0;
+	header->sections[i].size = 0;
 
 	fd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, 0666);
 	if (fd < 0)
 		return -1;
 
 	write_to_fd(fd, data, sizeof data);
-	write_to_fd(fd, set->buckets.data, set->buckets.alloc);
-	write_to_fd(fd, set->string_pool.data, pool_size);
-	write_to_fd(fd, set->packages.data, packages_size);
-	write_to_fd(fd, set->requires.data, requires_size);
-	write_to_fd(fd, set->provides.data, provides_size);
-	write_to_fd(fd, set->property_pool.data, properties_size);
+	for (i = 0; sections[i].type != 0; i++)
+		write_to_fd(fd, sections[i].array->data,
+			    (sections[i].array->size + 4095) & ~4095);
+
+	close(fd);
 
 	return 0;
 }
@@ -955,9 +929,6 @@ razor_set_info(struct razor_set *set)
 		size = set->header->sections[i + 1].offset - offset;
 
 		switch (set->header->sections[i].type) {
-		case RAZOR_BUCKETS:
-			printf("bucket section:\t\t%dkb\n", size / 1024);
-			break;
 		case RAZOR_STRINGS:
 			printf("string pool:\t\t%dkb\n", size / 1024);
 			break;
