@@ -866,19 +866,26 @@ razor_set_list(struct razor_set *set)
 		printf("%s %s\n", &pool[p->name], &pool[p->version]);
 }
 
+struct razor_set *bsearch_set;
+
+static int
+compare_package_name(const void *key, const void *data)
+{
+	const struct razor_package *p = data;
+	char *pool;
+
+	pool = bsearch_set->string_pool.data;
+
+	return strcmp(key, &pool[p->name]);
+}
+
 struct razor_package *
 razor_set_get_package(struct razor_set *set, const char *package)
 {
-	unsigned long name;
-	struct razor_package *p, *end;
-
-	name = razor_set_lookup(set, package);
-	end = set->packages.data + set->packages.size;
-	for (p = set->packages.data; p < end; p++)
-		if (p->name == name)
-			return p;
-
-	return NULL;
+	bsearch_set = set;
+	return bsearch(package, set->packages.data,
+		       set->packages.size / sizeof(struct razor_package),
+		       sizeof(struct razor_package), compare_package_name);
 }
 
 static void
