@@ -99,7 +99,7 @@ zalloc(size_t size)
 struct razor_set_header {
 	unsigned int magic;
 	unsigned int version;
-	struct { unsigned int type, offset; } sections[0];
+	struct { unsigned int type, offset, size; } sections[0];
 };
 
 #define RAZOR_MAGIC 0x7a7a7a7a
@@ -168,7 +168,7 @@ razor_set_open(const char *filename)
 
 	for (i = 0; i < set->header->sections[i].type; i++) {
 		offset = set->header->sections[i].offset;
-		size = set->header->sections[i + 1].offset - offset;
+		size = set->header->sections[i].size;
 
 		switch (set->header->sections[i].type) {
 		case RAZOR_BUCKETS:
@@ -252,30 +252,37 @@ razor_set_write(struct razor_set *set, const char *filename)
 
 	header->sections[0].type = RAZOR_BUCKETS;
 	header->sections[0].offset = sizeof data;
+	header->sections[0].size = set->buckets.alloc;
 
 	header->sections[1].type = RAZOR_STRINGS;
 	header->sections[1].offset =
 		header->sections[0].offset + set->buckets.alloc;
+	header->sections[1].size = set->string_pool.size;
 
 	header->sections[2].type = RAZOR_PACKAGES;
 	header->sections[2].offset =
 		header->sections[1].offset + pool_size;
+	header->sections[2].size = set->packages.size;
 
 	header->sections[3].type = RAZOR_REQUIRES;
 	header->sections[3].offset =
 		header->sections[2].offset + packages_size;
+	header->sections[3].size = set->requires.size;
 
 	header->sections[4].type = RAZOR_PROVIDES;
 	header->sections[4].offset =
 		header->sections[3].offset + requires_size;
+	header->sections[4].size = set->provides.size;
 
 	header->sections[5].type = RAZOR_PROPERTIES;
 	header->sections[5].offset =
 		header->sections[4].offset + provides_size;
+	header->sections[5].size = set->property_pool.size;
 
 	header->sections[6].type = 0;
 	header->sections[6].offset =
 		header->sections[5].offset + properties_size;
+	header->sections[6].size = 0;
 
 	fd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, 0666);
 	if (fd < 0)
@@ -700,9 +707,6 @@ sort_packages(struct import_context *ctx)
 static struct razor_set *
 razor_finish_import(struct import_context *ctx)
 {
-	struct razor_package *pkg;
-	struct razor_property *prop;
-
 	qsort_set = ctx->set;
 
 	ctx->requires_map =
@@ -716,15 +720,6 @@ razor_finish_import(struct import_context *ctx)
 	free(ctx->provides.all.data);
 	free(ctx->requires_map);
 	free(ctx->provides_map);
-
-	/* FIXME: We add sentinel package/props here, but we should
-	 * probably just have a size field in the header section. */
-	pkg = array_add(&ctx->set->packages, sizeof *pkg);
-	pkg->name = 0;
-	prop = array_add(&ctx->set->requires, sizeof *prop);
-	prop->name = 0;
-	prop = array_add(&ctx->set->provides, sizeof *prop);
-	prop->name = 0;
 		
 	fprintf(stderr, "parsed %d requires, %d unique\n",
 		ctx->requires.all.size / sizeof(struct import_property),
@@ -744,7 +739,7 @@ razor_set_list(struct razor_set *set)
 
 	pool = set->string_pool.data;
 	end = set->packages.data + set->packages.size;
-	for (p = set->packages.data; p < end && p->name; p++)
+	for (p = set->packages.data; p < end; p++)
 		printf("%s %s\n", &pool[p->name], &pool[p->version]);
 }
 
@@ -756,7 +751,7 @@ razor_set_get_package(struct razor_set *set, const char *package)
 
 	name = razor_set_lookup(set, package);
 	end = set->packages.data + set->packages.size;
-	for (p = set->packages.data; p < end && p->name; p++)
+	for (p = set->packages.data; p < end; p++)
 		if (p->name == name)
 			return p;
 
@@ -771,7 +766,7 @@ razor_set_list_all_properties(struct razor_set *set, struct array *properties)
 
 	pool = set->string_pool.data;
 	end = properties->data + properties->size;
-	for (p = properties->data; p < end && p->name; p++)
+	for (p = properties->data; p < end; p++)
 		printf("%s %s\n", &pool[p->name], &pool[p->version]);
 }
 
