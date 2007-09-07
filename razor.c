@@ -15,6 +15,18 @@ struct array {
 	int size, alloc;
 };
 
+static void
+array_init(struct array *array)
+{
+	memset(array, 0, sizeof *array);
+}
+
+static void
+array_release(struct array *array)
+{
+	free(array->data);
+}
+
 static void *
 array_add(struct array *array, int size)
 {
@@ -388,52 +400,13 @@ razor_set_insert(struct razor_set *set, const char *key)
 	return value;
 }
 
-static unsigned long
-razor_set_add_package(struct razor_set *set,
-		      unsigned long name, unsigned long version)
-{
-	struct razor_package *p;
-
-	p = array_add(&set->packages, sizeof *p);
-
-	p->name = name;
-	p->version = version;
-
-	return p - (struct razor_package *) set->packages.data;
-}
-
-static unsigned long
-razor_set_add_requires(struct razor_set *set,
-		       unsigned long name, unsigned long version)
-{
-	struct razor_property *p;
-
-	p = array_add(&set->requires, sizeof *p);
-
-	p->name = name;
-	p->version = version;
-
-	return p - (struct razor_property *) set->requires.data;
-}
-
-static unsigned long
-razor_set_add_provides(struct razor_set *set,
-		       unsigned long name, unsigned long version)
-{
-	struct razor_property *p;
-
-	p = array_add(&set->provides, sizeof *p);
-
-	p->name = name;
-	p->version = version;
-
-	return p - (struct razor_property *) set->provides.data;
-}
-
 unsigned long
 razor_set_tokenize(struct razor_set *set, const char *string)
 {
 	unsigned long token;
+
+	if (string == NULL)
+		return 0;
 
 	token = razor_set_lookup(set, string);
 	if (token != 0)
@@ -442,15 +415,15 @@ razor_set_tokenize(struct razor_set *set, const char *string)
 	return razor_set_insert(set, string);
 }
 
-struct property_context {
+struct import_property_context {
 	struct array all;
 	struct array package;
 };
 
 struct import_context {
 	struct razor_set *set;
-	struct property_context requires;
-	struct property_context provides;
+	struct import_property_context requires;
+	struct import_property_context provides;
 	unsigned long package;
 	unsigned long *requires_map;
 	unsigned long *provides_map;
@@ -465,59 +438,92 @@ struct import_property {
 };
 
 static void
-parse_package(struct import_context *ctx, const char **atts, void *data)
+import_context_add_package(struct import_context *ctx,
+			   const char *name, const char *version)
 {
-	unsigned long name = 0, version = 0;
-	int i;
+	struct razor_package *p;
 
-	for (i = 0; atts[i]; i += 2) {
-		if (strcmp(atts[i], "name") == 0)
-			name = razor_set_tokenize(ctx->set, atts[i + 1]);
-		else if (strcmp(atts[i], "version") == 0)
-			version = razor_set_tokenize(ctx->set, atts[i + 1]);
-	}
+	p = array_add(&ctx->set->packages, sizeof *p);
+	p->name = razor_set_tokenize(ctx->set, name);
+	p->version = razor_set_tokenize(ctx->set, version);
 
-	if (name == 0 || version == 0) {
-		fprintf(stderr, "invalid package tag, "
-			"missing name or version attributes\n");
-		return;
-	}
+	ctx->package = p - (struct razor_package *) ctx->set->packages.data;
+	array_init(&ctx->requires.package);
+	array_init(&ctx->provides.package);
+}
 
-	ctx->package = razor_set_add_package(ctx->set, name, version);
-	memset(&ctx->requires.package, 0, sizeof ctx->requires.package);
-	memset(&ctx->provides.package, 0, sizeof ctx->provides.package);
+void
+import_context_finish_package(struct import_context *ctx)
+{
+	struct razor_package *p;
 
-	return;
+	p = (struct razor_package *) ctx->set->packages.data + ctx->package;
+	p->requires = add_to_property_pool(ctx->set, &ctx->requires.package);
+	p->provides = add_to_property_pool(ctx->set, &ctx->provides.package);
+
+	array_release(&ctx->requires.package);
+	array_release(&ctx->provides.package);
 }
 
 static void
-parse_property(struct import_context *ctx, const char **atts, void *data)
+import_context_add_property(struct import_context *ctx,
+			    struct import_property_context *pctx,
+			    const char *name, const char *version)
 {
-	unsigned long name = 0, version = 0, *r;
 	struct import_property *p;
-	struct property_context *pctx = data;
-	int i;
-
-	for (i = 0; atts[i]; i += 2) {
-		if (strcmp(atts[i], "name") == 0)
-			name = razor_set_tokenize(ctx->set, atts[i + 1]);
-		if (strcmp(atts[i], "version") == 0)
-			version = razor_set_tokenize(ctx->set, atts[i + 1]);
-	}
-	
-	if (name == 0) {
-		fprintf(stderr, "invalid tag, missing name attribute\n");
-		return;
-	}
+	unsigned long *r;
 
 	p = array_add(&pctx->all, sizeof *p);
-	p->name = name;
-	p->version = version;
+	p->name = razor_set_tokenize(ctx->set, name);
+	p->version = razor_set_tokenize(ctx->set, version);
 	p->package = ctx->package;
 	p->index = p - (struct import_property *) pctx->all.data;
 
 	r = array_add(&pctx->package, sizeof *r);
 	*r = p->index;
+}
+
+static void
+parse_package(struct import_context *ctx, const char **atts, void *data)
+{
+	const char *name = NULL, *version = NULL;
+	int i;
+
+	for (i = 0; atts[i]; i += 2) {
+		if (strcmp(atts[i], "name") == 0)
+			name = atts[i + 1];
+		else if (strcmp(atts[i], "version") == 0)
+			version = atts[i + 1];
+	}
+
+	if (name == NULL || version == NULL) {
+		fprintf(stderr, "invalid package tag, "
+			"missing name or version attributes\n");
+		return;
+	}
+
+	import_context_add_package(ctx, name, version);
+}
+
+static void
+parse_property(struct import_context *ctx, const char **atts, void *data)
+{
+	const char *name = NULL, *version = NULL;
+	int i;
+
+	for (i = 0; atts[i]; i += 2) {
+		if (strcmp(atts[i], "name") == 0)
+			name = atts[i + 1];
+		if (strcmp(atts[i], "version") == 0)
+			version = atts[i + 1];
+	}
+	
+	if (name == NULL) {
+		fprintf(stderr, "invalid tag, missing name attribute\n");
+		return;
+	}
+
+	import_context_add_property(ctx, data, name, version);
 }
 
 static void
@@ -537,19 +543,9 @@ static void
 end_element (void *data, const char *name)
 {
 	struct import_context *ctx = data;
-	struct razor_package *package;
 
-	if (strcmp(name, "package") == 0) {
-		package = (struct razor_package *) ctx->set->packages.data +
-			ctx->package;
-		package->requires =
-			add_to_property_pool(ctx->set, &ctx->requires.package);
-		package->provides =
-			add_to_property_pool(ctx->set, &ctx->provides.package);
-		free(ctx->requires.package.data);
-		free(ctx->provides.package.data);
-		ctx->package = 0;
-	}
+	if (strcmp(name, "package") == 0)
+		import_context_finish_package(ctx);
 }
 
 static char *
@@ -572,14 +568,14 @@ sha1_to_hex(const unsigned char *sha1)
 }
 
 static void
-razor_set_prepare_import(struct razor_set *set, struct import_context *ctx)
+razor_prepare_import(struct import_context *ctx)
 {
 	memset(ctx, 0, sizeof *ctx);
-	ctx->set = set;
+	ctx->set = razor_set_create();
 }
 
 static int
-razor_set_import(struct import_context *ctx, const char *filename)
+razor_import(struct import_context *ctx, const char *filename)
 {
 	SHA_CTX sha1;
 	XML_Parser parser;
@@ -701,9 +697,12 @@ sort_packages(struct import_context *ctx)
 	      sizeof(struct razor_package), compare_packages);
 }
 
-static void
-razor_set_finish_import(struct import_context *ctx)
+static struct razor_set *
+razor_finish_import(struct import_context *ctx)
 {
+	struct razor_package *pkg;
+	struct razor_property *prop;
+
 	qsort_set = ctx->set;
 
 	ctx->requires_map =
@@ -718,14 +717,24 @@ razor_set_finish_import(struct import_context *ctx)
 	free(ctx->requires_map);
 	free(ctx->provides_map);
 
+	/* FIXME: We add sentinel package/props here, but we should
+	 * probably just have a size field in the header section. */
+	pkg = array_add(&ctx->set->packages, sizeof *pkg);
+	pkg->name = 0;
+	prop = array_add(&ctx->set->requires, sizeof *prop);
+	prop->name = 0;
+	prop = array_add(&ctx->set->provides, sizeof *prop);
+	prop->name = 0;
+		
 	fprintf(stderr, "parsed %d requires, %d unique\n",
 		ctx->requires.all.size / sizeof(struct import_property),
 		ctx->set->requires.size / sizeof(struct razor_property));
 	fprintf(stderr, "parsed %d provides, %d unique\n",
 		ctx->provides.all.size / sizeof(struct import_property),
 		ctx->set->provides.size / sizeof(struct razor_property));
-}
 
+	return ctx->set; 
+}
 
 void
 razor_set_list(struct razor_set *set)
@@ -866,26 +875,17 @@ main(int argc, char *argv[])
 			exit(-1);
 		}
 			
-		set = razor_set_create();
-
-		razor_set_prepare_import(set, &ctx);
+		razor_prepare_import(&ctx);
 
 		for (i = 2; i < argc; i++) {
-			if (razor_set_import(&ctx, argv[i]) < 0) {
+			if (razor_import(&ctx, argv[i]) < 0) {
 				fprintf(stderr, "failed to import %s\n",
 					argv[i]);
 				exit(-1);
 			}
 		}
 
-		razor_set_finish_import(&ctx);
-
-		/* FIXME: We add a sentinel package here, but we
-		 * should probably just have a size field in the
-		 * header section. */
-		razor_set_add_package(set, 0, 0);
-		razor_set_add_requires(set, 0, 0);
-		razor_set_add_provides(set, 0, 0);
+		set = razor_finish_import(&ctx);
 
 		printf("bucket allocation: %d\n", set->buckets.alloc);
 		printf("pool size: %d\n", set->string_pool.size);
