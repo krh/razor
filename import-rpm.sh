@@ -5,11 +5,19 @@ import_rpm() {
     echo "  <properties>"
 
     rpm -q --provides $p | sort -u | while read name ignore version; do
-	echo "    <provides name=\"$name\"/>"
+	if test -z $version; then
+	    echo "    <provides name=\"$name\"/>"
+	else
+	    echo "    <provides name=\"$name\" version=\"$version\"/>"
+	fi
     done
 
     rpm -q --requires $p | sort -u | while read name ignore version; do
-	echo "    <requires name=\"$name\"/>"
+	if test -z $version; then
+	    echo "    <requires name=\"$name\"/>"
+	else
+	    echo "    <requires name=\"$name\" version=\"$version\"/>"
+	fi
     done
 
     echo "  </properties>"
