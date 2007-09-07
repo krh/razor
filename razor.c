@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -6,6 +8,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <errno.h>
 
 #include <expat.h>
 #include "sha1.h"
@@ -731,6 +734,126 @@ razor_finish_import(struct import_context *ctx)
 	return ctx->set; 
 }
 
+/* Import a yum filelist as a razor package set. */
+
+enum {
+	YUM_STATE_BEGIN,
+	YUM_STATE_PACKAGE_NAME
+};
+
+struct yum_context {
+	struct import_context ctx;
+	struct import_property_context *current_property_context;
+	char *name;
+	int state;
+};
+
+static void
+yum_start_element(void *data, const char *name, const char **atts)
+{
+	struct yum_context *ctx = data;
+	const char *n, *version;
+	int i;
+
+	if (strcmp(name, "name") == 0) {
+		ctx->state = YUM_STATE_PACKAGE_NAME;
+	} else if (strcmp(name, "version") == 0) {
+		for (i = 0; atts[i]; i += 2) {
+			if (strcmp(atts[i], "ver") == 0)
+				version = atts[i + 1];
+		}
+		import_context_add_package(&ctx->ctx, ctx->name, version);
+	} else if (strcmp(name, "rpm:requires") == 0) {
+		ctx->current_property_context = &ctx->ctx.requires;
+	} else if (strcmp(name, "rpm:provides") == 0) {
+		ctx->current_property_context = &ctx->ctx.provides;
+	} else if (strcmp(name, "rpm:entry") == 0 &&
+		   ctx->current_property_context != NULL) {
+		n = NULL;
+		version = NULL;
+		for (i = 0; atts[i]; i += 2) {
+			if (strcmp(atts[i], "name") == 0)
+				n = atts[i + 1];
+			else if (strcmp(atts[i], "ver") == 0)
+				version = atts[i + 1];
+		}
+
+		if (n == NULL) {
+			fprintf(stderr, "invalid rpm:entry, "
+				"missing name or version attributes\n");
+			return;
+		}
+
+		import_context_add_property(&ctx->ctx,
+					    ctx->current_property_context,
+					    n, version);
+	}
+}
+
+static void
+yum_end_element (void *data, const char *name)
+{
+	struct yum_context *ctx = data;
+
+	if (strcmp(name, "package") == 0) {
+		free(ctx->name);
+		import_context_finish_package(&ctx->ctx);
+	} else if (strcmp(name, "name") == 0) {
+		ctx->state = 0;
+	} else if (strcmp(name, "rpm:requires") == 0) {
+		ctx->current_property_context = NULL;
+	} else if (strcmp(name, "rpm:provides") == 0) {
+		ctx->current_property_context = NULL;
+	}
+}
+
+static void
+yum_character_data (void *data, const XML_Char *s, int len)
+{
+	struct yum_context *ctx = data;
+
+	if (ctx->state == YUM_STATE_PACKAGE_NAME)
+		ctx->name = strndup(s, len);
+}
+
+static struct razor_set *
+razor_set_create_from_yum_filelist(int fd)
+{
+	struct yum_context ctx;
+	XML_Parser parser;
+	char buf[4096];
+	int len;
+
+	razor_prepare_import(&ctx.ctx);
+
+	parser = XML_ParserCreate(NULL);
+	XML_SetUserData(parser, &ctx);
+	XML_SetElementHandler(parser, yum_start_element, yum_end_element);
+	XML_SetCharacterDataHandler(parser, yum_character_data);
+
+	while (1) {
+		len = read(fd, buf, sizeof buf);
+		if (len < 0) {
+			fprintf(stderr,
+				"couldn't read input: %s\n", strerror(errno));
+			return NULL;
+		} else if (len == 0)
+			break;
+
+		if (XML_Parse(parser, buf, len, 0) == XML_STATUS_ERROR) {
+			fprintf(stderr,
+				"%s at line %d\n",
+				XML_ErrorString(XML_GetErrorCode(parser)),
+				XML_GetCurrentLineNumber(parser));
+			return NULL;
+		}
+	}
+
+	XML_ParserFree(parser);
+
+	return razor_finish_import(&ctx.ctx);
+}
+
 void
 razor_set_list(struct razor_set *set)
 {
@@ -848,11 +971,12 @@ static int
 usage(void)
 {
 	printf("usage: razor [ import FILES | lookup <key> | "
-	       "list | list-requires | list-provides | info ]\n");
+	       "list | list-requires | list-provides | eat-yum | info ]\n");
 	exit(1);
 }
 
-static const char repo_filename[] = "system.repo";
+static const char *repo_filename = "system.repo";
+static const char rawhide_repo_filename[] = "rawhide.repo";
 
 int
 main(int argc, char *argv[])
@@ -861,6 +985,11 @@ main(int argc, char *argv[])
 	struct razor_set *set;
 	struct stat statbuf;
 	struct import_context ctx;
+	char *repo;
+
+	repo = getenv("RAZOR_REPO");
+	if (repo != NULL)
+		repo_filename = repo;
 
 	if (argc < 2) {
 		usage();
@@ -915,6 +1044,12 @@ main(int argc, char *argv[])
 	} else if (strcmp(argv[1], "info") == 0) {
 		set = razor_set_open(repo_filename);
 		razor_set_info(set);
+		razor_set_destroy(set);
+	} else if (strcmp(argv[1], "eat-yum") == 0) {
+		set = razor_set_create_from_yum_filelist(STDIN_FILENO);
+		if (set == NULL)
+			return 1;
+		razor_set_write(set, rawhide_repo_filename);
 		razor_set_destroy(set);
 	} else {
 		usage();
