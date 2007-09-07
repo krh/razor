@@ -24,7 +24,7 @@ array_add(struct array *array, int size)
 	if (array->alloc > 0)
 		alloc = array->alloc;
 	else
-		alloc = 1024;
+		alloc = 16;
 
 	while (alloc < array->size + size)
 		alloc *= 2;
@@ -98,10 +98,13 @@ struct razor_set_header {
 #define RAZOR_PACKAGES 3
 #define RAZOR_REQUIRES 4
 #define RAZOR_PROVIDES 5
+#define RAZOR_PROPERTIES 6
 
 struct razor_package {
 	unsigned long name;
 	unsigned long version;
+	unsigned long requires;
+	unsigned long provides;
 };
 
 struct razor_property {
@@ -113,6 +116,7 @@ struct razor_property {
 struct razor_set {
 	struct array buckets;
 	struct array string_pool;
+	struct array property_pool;
  	struct array packages;
  	struct array requires;
  	struct array provides;
@@ -180,6 +184,11 @@ razor_set_open(const char *filename)
 			set->provides.size = size;
 			set->provides.size = size;
 			break;
+		case RAZOR_PROPERTIES:
+			set->property_pool.data = (void *) set->header + offset;
+			set->property_pool.size = size;
+			set->property_pool.size = size;
+			break;
 		}
 	}
 	close(fd);
@@ -204,6 +213,7 @@ razor_set_destroy(struct razor_set *set)
 		free(set->packages.data);
 		free(set->requires.data);
 		free(set->provides.data);
+		free(set->property_pool.data);
 	}
 
 	free(set);
@@ -215,12 +225,14 @@ razor_set_write(struct razor_set *set, const char *filename)
 	char data[4096];
 	struct razor_set_header *header = (struct razor_set_header *) data;
 	int fd, pool_size, packages_size, requires_size, provides_size;
+	int properties_size;
 
 	/* Align these to pages sizes */
 	pool_size = (set->string_pool.size + 4095) & ~4095;
 	packages_size = (set->packages.size + 4095) & ~4095;
 	requires_size = (set->requires.size + 4095) & ~4095;
 	provides_size = (set->provides.size + 4095) & ~4095;
+	properties_size = (set->property_pool.size + 4095) & ~4095;
 
 	memset(data, 0, sizeof data);
 	header->magic = RAZOR_MAGIC;
@@ -245,9 +257,13 @@ razor_set_write(struct razor_set *set, const char *filename)
 	header->sections[4].offset =
 		header->sections[3].offset + requires_size;
 
-	header->sections[5].type = 0;
+	header->sections[5].type = RAZOR_PROPERTIES;
 	header->sections[5].offset =
 		header->sections[4].offset + provides_size;
+
+	header->sections[6].type = 0;
+	header->sections[6].offset =
+		header->sections[5].offset + properties_size;
 
 	fd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, 0666);
 	if (fd < 0)
@@ -259,6 +275,7 @@ razor_set_write(struct razor_set *set, const char *filename)
 	write_to_fd(fd, set->packages.data, packages_size);
 	write_to_fd(fd, set->requires.data, requires_size);
 	write_to_fd(fd, set->provides.data, provides_size);
+	write_to_fd(fd, set->property_pool.data, properties_size);
 
 	return 0;
 }
@@ -310,6 +327,19 @@ add_to_string_pool(struct razor_set *set, const char *key)
 	memcpy(p, key, len);
 
 	return p - (char *) set->string_pool.data;
+}
+
+static unsigned long
+add_to_property_pool(struct razor_set *set, struct array *properties)
+{
+	unsigned long  *p;
+
+	p = array_add(properties, sizeof *p);
+	*p = 0;
+	p = array_add(&set->property_pool, properties->size);
+	memcpy(p, properties->data, properties->size);
+
+	return p - (unsigned long *) set->property_pool.data;
 }
 
 static void
@@ -412,11 +442,26 @@ razor_set_tokenize(struct razor_set *set, const char *string)
 	return razor_set_insert(set, string);
 }
 
+struct property_context {
+	struct array all;
+	struct array package;
+};
+
 struct import_context {
 	struct razor_set *set;
-	struct array requires;
-	struct array provides;
+	struct property_context requires;
+	struct property_context provides;
 	unsigned long package;
+	unsigned long *requires_map;
+	unsigned long *provides_map;
+};
+
+struct import_property {
+	unsigned long name;
+	unsigned long version;
+	unsigned long package;
+	unsigned long index;
+	unsigned long unique_index;
 };
 
 static void
@@ -439,6 +484,8 @@ parse_package(struct import_context *ctx, const char **atts, void *data)
 	}
 
 	ctx->package = razor_set_add_package(ctx->set, name, version);
+	memset(&ctx->requires.package, 0, sizeof ctx->requires.package);
+	memset(&ctx->provides.package, 0, sizeof ctx->provides.package);
 
 	return;
 }
@@ -446,9 +493,9 @@ parse_package(struct import_context *ctx, const char **atts, void *data)
 static void
 parse_property(struct import_context *ctx, const char **atts, void *data)
 {
-	unsigned long name = 0, version = 0;
-	struct razor_property *p;
-	struct array *array = data;
+	unsigned long name = 0, version = 0, *r;
+	struct import_property *p;
+	struct property_context *pctx = data;
 	int i;
 
 	for (i = 0; atts[i]; i += 2) {
@@ -463,10 +510,14 @@ parse_property(struct import_context *ctx, const char **atts, void *data)
 		return;
 	}
 
-	p = array_add(array, sizeof *p);
+	p = array_add(&pctx->all, sizeof *p);
 	p->name = name;
 	p->version = version;
-	p->packages = ctx->package;
+	p->package = ctx->package;
+	p->index = p - (struct import_property *) pctx->all.data;
+
+	r = array_add(&pctx->package, sizeof *r);
+	*r = p->index;
 }
 
 static void
@@ -486,9 +537,19 @@ static void
 end_element (void *data, const char *name)
 {
 	struct import_context *ctx = data;
+	struct razor_package *package;
 
-	if (strcmp(name, "package") == 0)
+	if (strcmp(name, "package") == 0) {
+		package = (struct razor_package *) ctx->set->packages.data +
+			ctx->package;
+		package->requires =
+			add_to_property_pool(ctx->set, &ctx->requires.package);
+		package->provides =
+			add_to_property_pool(ctx->set, &ctx->provides.package);
+		free(ctx->requires.package.data);
+		free(ctx->provides.package.data);
 		ctx->package = 0;
+	}
 }
 
 static char *
@@ -577,52 +638,86 @@ compare_packages(const void *p1, const void *p2)
 static int
 compare_properties(const void *p1, const void *p2)
 {
-	const struct razor_property *prop1 = p1, *prop2 = p2;
+	const struct import_property *prop1 = p1, *prop2 = p2;
 	char *pool = qsort_set->string_pool.data;
 
 	return strcmp(&pool[prop1->name], &pool[prop2->name]);
 }
 
-static void
+static unsigned long *
 uniqueify_properties(struct array *in, struct array *out)
 {
-	struct razor_property *p, *q, *end;
+	struct import_property *ip, *end;
+	struct razor_property *rp;
+	unsigned long *map;
+	int i, count;
 
-	qsort(in->data, in->size / sizeof(struct razor_property),
-	      sizeof(struct razor_property), compare_properties);
+	count = in->size / sizeof(struct import_property);
+	qsort(in->data, count,
+	      sizeof(struct import_property), compare_properties);
 
-	q = NULL;
+	rp = NULL;
 	end = in->data + in->size;
-	for (p = in->data; p < end && p->name; p++) {
-		if (q == NULL ||
-		    p->name != q->name || p->version != q->version) {
-			q = array_add(out, sizeof *q);
-			q->name = p->name;
-			q->version = p->version;
-
+	for (ip = in->data; ip < end; ip++) {
+		if (rp == NULL ||
+		    ip->name != rp->name || ip->version != rp->version) {
+			rp = array_add(out, sizeof *rp);
+			rp->name = ip->name;
+			rp->version = ip->version;
 		}
+		ip->unique_index = rp - (struct razor_property *) out->data;
 	}
+
+	map = malloc(count * sizeof (unsigned long));
+	ip = in->data;
+	for (i = 0; i < count; i++)
+		map[ip[i].index] = ip[i].unique_index;
+
+	return map;
+}
+
+static void
+sort_packages(struct import_context *ctx)
+{
+	struct razor_package *p, *end;
+	unsigned long *pool, *r;
+
+	pool = ctx->set->property_pool.data;
+	end = ctx->set->packages.data + ctx->set->packages.size;
+	for (p = ctx->set->packages.data; p < end; p++) {
+		for (r = &pool[p->requires]; *r; r++)
+			*r = ctx->requires_map[*r];
+		for (r = &pool[p->provides]; *r; r++)
+			*r = ctx->provides_map[*r];
+	}
+
+	qsort(ctx->set->packages.data,
+	      ctx->set->packages.size / sizeof(struct razor_package),
+	      sizeof(struct razor_package), compare_packages);
 }
 
 static void
 razor_set_finish_import(struct import_context *ctx)
 {
 	qsort_set = ctx->set;
-	qsort(ctx->set->packages.data,
-	      ctx->set->packages.size / sizeof(struct razor_package),
-	      sizeof(struct razor_package), compare_packages);
 
-	uniqueify_properties(&ctx->requires, &ctx->set->requires);
-	uniqueify_properties(&ctx->provides, &ctx->set->provides);
+	ctx->requires_map =
+		uniqueify_properties(&ctx->requires.all, &ctx->set->requires);
+	ctx->provides_map =
+		uniqueify_properties(&ctx->provides.all, &ctx->set->provides);
 
-	free(ctx->requires.data);
-	free(ctx->provides.data);
+	sort_packages(ctx);
+
+	free(ctx->requires.all.data);
+	free(ctx->provides.all.data);
+	free(ctx->requires_map);
+	free(ctx->provides_map);
 
 	fprintf(stderr, "parsed %d requires, %d unique\n",
-		ctx->requires.size / sizeof(struct razor_property),
+		ctx->requires.all.size / sizeof(struct import_property),
 		ctx->set->requires.size / sizeof(struct razor_property));
 	fprintf(stderr, "parsed %d provides, %d unique\n",
-		ctx->provides.size / sizeof(struct razor_property),
+		ctx->provides.all.size / sizeof(struct import_property),
 		ctx->set->provides.size / sizeof(struct razor_property));
 }
 
@@ -639,28 +734,75 @@ razor_set_list(struct razor_set *set)
 		printf("%s %s\n", &pool[p->name], &pool[p->version]);
 }
 
-void
-razor_set_list_requires(struct razor_set *set)
+struct razor_package *
+razor_set_get_package(struct razor_set *set, const char *package)
+{
+	unsigned long name;
+	struct razor_package *p, *end;
+
+	name = razor_set_lookup(set, package);
+	end = set->packages.data + set->packages.size;
+	for (p = set->packages.data; p < end && p->name; p++)
+		if (p->name == name)
+			return p;
+
+	return NULL;
+}
+
+static void
+razor_set_list_all_properties(struct razor_set *set, struct array *properties)
 {
 	struct razor_property *p, *end;
 	char *pool;
 
 	pool = set->string_pool.data;
-	end = set->requires.data + set->requires.size;
-	for (p = set->requires.data; p < end && p->name; p++)
+	end = properties->data + properties->size;
+	for (p = properties->data; p < end && p->name; p++)
 		printf("%s %s\n", &pool[p->name], &pool[p->version]);
 }
 
 void
-razor_set_list_provides(struct razor_set *set)
+razor_set_list_requires(struct razor_set *set, const char *name)
 {
-	struct razor_property *p, *end;
+	struct razor_property *p, *requires;
+	struct razor_package *package;
+	unsigned long *r;
 	char *pool;
 
-	pool = set->string_pool.data;
-	end = set->provides.data + set->provides.size;
-	for (p = set->provides.data; p < end && p->name; p++)
-		printf("%s %s\n", &pool[p->name], &pool[p->version]);
+	if (name) {
+		package = razor_set_get_package(set, name);
+		r = (unsigned long *) set->property_pool.data +
+			package->requires;
+		requires = set->requires.data;
+		pool = set->string_pool.data;
+		while (*r) {
+			p = &requires[*r++];
+			printf("%s %s\n", &pool[p->name], &pool[p->version]);
+		}
+	} else
+		razor_set_list_all_properties(set, &set->requires);
+}
+
+void
+razor_set_list_provides(struct razor_set *set, const char *name)
+{
+	struct razor_property *p, *provides;
+	struct razor_package *package;
+	unsigned long *r;
+	char *pool;
+
+	if (name) {
+		package = razor_set_get_package(set, name);
+		r = (unsigned long *) set->property_pool.data +
+			package->provides;
+		provides = set->provides.data;
+		pool = set->string_pool.data;
+		while (*r) {
+			p = &provides[*r++];
+			printf("%s %s\n", &pool[p->name], &pool[p->version]);
+		}
+	} else 
+		razor_set_list_all_properties(set, &set->provides);
 }
 
 void
@@ -764,11 +906,11 @@ main(int argc, char *argv[])
 		razor_set_destroy(set);
 	} else if (strcmp(argv[1], "list-requires") == 0) {
 		set = razor_set_open(repo_filename);
-		razor_set_list_requires(set);
+		razor_set_list_requires(set, argv[2]);
 		razor_set_destroy(set);
 	} else if (strcmp(argv[1], "list-provides") == 0) {
 		set = razor_set_open(repo_filename);
-		razor_set_list_provides(set);
+		razor_set_list_provides(set, argv[2]);
 		razor_set_destroy(set);
 	} else if (strcmp(argv[1], "info") == 0) {
 		set = razor_set_open(repo_filename);
