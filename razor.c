@@ -640,8 +640,13 @@ compare_properties(const void *p1, const void *p2)
 {
 	const struct import_property *prop1 = p1, *prop2 = p2;
 	char *pool = qsort_set->string_pool.data;
+	int result;
 
-	return strcmp(&pool[prop1->name], &pool[prop2->name]);
+	result = strcmp(&pool[prop1->name], &pool[prop2->name]);
+	if (result == 0)
+		return strcmp(&pool[prop1->version], &pool[prop2->version]);
+	else
+		return result;
 }
 
 static unsigned long *
