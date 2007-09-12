@@ -1017,7 +1017,8 @@ razor_set_list_provides(struct razor_set *set, const char *name)
 void
 razor_set_list_property_packages(struct razor_set *set,
 				 struct array *properties,
-				 const char *name)
+				 const char *name,
+				 const char *version)
 {
 	struct razor_property *property, *end;
 	struct razor_package *p, *packages;
@@ -1032,6 +1033,8 @@ razor_set_list_property_packages(struct razor_set *set,
 	pool = set->string_pool.data;
 	end = properties->data + properties->size;
 	while (property < end && strcmp(name, &pool[property->name]) == 0) {
+		if (version && strcmp(version, &pool[property->version]) != 0)
+			goto next;
 		r = (unsigned long *)
 			set->property_pool.data + property->packages;
 		while (~*r) {
@@ -1039,6 +1042,7 @@ razor_set_list_property_packages(struct razor_set *set,
 			printf("%s %s\n",
 			       &pool[p->name], &pool[p->version]);
 		}
+	next:
 		property++;
 	}
 }
@@ -1149,11 +1153,13 @@ main(int argc, char *argv[])
 		razor_set_destroy(set);
 	} else if (strcmp(argv[1], "what-requires") == 0) {
 		set = razor_set_open(repo_filename);
-		razor_set_list_property_packages(set, &set->requires, argv[2]);
+		razor_set_list_property_packages(set, &set->requires,
+						 argv[2], argv[3]);
 		razor_set_destroy(set);
 	} else if (strcmp(argv[1], "what-provides") == 0) {
 		set = razor_set_open(repo_filename);
-		razor_set_list_property_packages(set, &set->provides, argv[2]);
+		razor_set_list_property_packages(set, &set->provides,
+						 argv[2], argv[3]);
 		razor_set_destroy(set);
 	} else if (strcmp(argv[1], "info") == 0) {
 		set = razor_set_open(repo_filename);
