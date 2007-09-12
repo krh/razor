@@ -1048,6 +1048,54 @@ razor_set_list_property_packages(struct razor_set *set,
 }
 
 void
+razor_set_validate(struct razor_set *set, struct array *unsatisfied)
+{
+	struct razor_property *r, *p, *rend, *pend;
+	unsigned long *u;
+	char *pool;
+
+	r = set->requires.data;
+	p = set->provides.data;
+	rend = set->requires.data + set->requires.size;
+	pend = set->provides.data + set->provides.size;
+	pool = set->string_pool.data;
+	
+	while (r < rend) {
+		while (p < pend && strcmp(&pool[r->name], &pool[p->name]) > 0)
+			p++;
+		if (p == pend || strcmp(&pool[r->name], &pool[p->name]) != 0) {
+			u = array_add(unsatisfied, sizeof *u);
+			*u = r - (struct razor_property *) set->requires.data;
+		}
+		r++;
+	}
+}
+
+void
+razor_set_list_unsatisfied(struct razor_set *set)
+{
+	struct array unsatisfied;
+	struct razor_property *requires, *r;
+	unsigned long *u, *end;
+	char *pool;
+
+	array_init(&unsatisfied);
+	razor_set_validate(set, &unsatisfied);
+
+	end = unsatisfied.data + unsatisfied.size;
+	requires = set->requires.data;
+	pool = set->string_pool.data;
+
+	for (u = unsatisfied.data; u < end; u++) {
+		r = requires + *u;
+		printf("%s %s not satisfied\n",
+		       &pool[r->name], &pool[r->version]);
+	}
+
+	array_release(&unsatisfied);
+}
+
+void
 razor_set_info(struct razor_set *set)
 {
 	unsigned int offset, size;
@@ -1172,6 +1220,12 @@ main(int argc, char *argv[])
 		razor_set_write(set, rawhide_repo_filename);
 		razor_set_destroy(set);
 		printf("wrote %s\n", rawhide_repo_filename);
+	} else if (strcmp(argv[1], "validate") == 0) {
+		set = razor_set_open(repo_filename);
+		if (set == NULL)
+			return 1;
+		razor_set_list_unsatisfied(set);
+		razor_set_destroy(set);
 	} else {
 		usage();
 	}
