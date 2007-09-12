@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 
 #include <stdlib.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
@@ -12,6 +13,8 @@
 
 #include <expat.h>
 #include "sha1.h"
+
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 struct array {
 	void *data;
@@ -99,21 +102,26 @@ zalloc(size_t size)
 	return p;
 }
 
+struct razor_set_section {
+	unsigned int type;
+	unsigned int offset;
+	unsigned int size;
+};
+
 struct razor_set_header {
 	unsigned int magic;
 	unsigned int version;
-	struct { unsigned int type, offset, size; } sections[0];
+	struct razor_set_section sections[0];
 };
 
 #define RAZOR_MAGIC 0x7a7a7a7a
 #define RAZOR_VERSION 1
 
-#define RAZOR_BUCKETS 1
-#define RAZOR_STRINGS 2
-#define RAZOR_PACKAGES 3
-#define RAZOR_REQUIRES 4
-#define RAZOR_PROVIDES 5
-#define RAZOR_PROPERTIES 6
+#define RAZOR_PACKAGES 0
+#define RAZOR_REQUIRES 1
+#define RAZOR_PROVIDES 2
+#define RAZOR_STRING_POOL 3
+#define RAZOR_PROPERTY_POOL 4
 
 struct razor_package {
 	unsigned long name;
@@ -138,6 +146,14 @@ struct razor_set {
 	struct razor_set_header *header;
 };
 
+struct razor_set_section razor_sections[] = {
+	{ RAZOR_PACKAGES,	offsetof(struct razor_set, packages) },
+	{ RAZOR_REQUIRES,	offsetof(struct razor_set, requires) },
+	{ RAZOR_PROVIDES,	offsetof(struct razor_set, provides) },
+	{ RAZOR_STRING_POOL,	offsetof(struct razor_set, string_pool) },
+	{ RAZOR_PROPERTY_POOL,	offsetof(struct razor_set, property_pool) },
+};
+
 struct razor_set *
 razor_set_create(void)
 {
@@ -148,9 +164,10 @@ struct razor_set *
 razor_set_open(const char *filename)
 {
 	struct razor_set *set;
+	struct razor_set_section *s;
 	struct stat stat;
-	unsigned int size, offset;
-	int fd, i;
+	struct array *array;
+	int fd;
 
 	set = zalloc(sizeof *set);
 	fd = open(filename, O_RDONLY);
@@ -162,37 +179,15 @@ razor_set_open(const char *filename)
 		return NULL;
 	}
 
-	for (i = 0; i < set->header->sections[i].type; i++) {
-		offset = set->header->sections[i].offset;
-		size = set->header->sections[i].size;
-
-		switch (set->header->sections[i].type) {
-		case RAZOR_STRINGS:
-			set->string_pool.data = (void *) set->header + offset;
-			set->string_pool.size = size;
-			set->string_pool.alloc = size;
-			break;
-		case RAZOR_PACKAGES:
-			set->packages.data = (void *) set->header + offset;
-			set->packages.size = size;
-			set->packages.size = size;
-			break;
-		case RAZOR_REQUIRES:
-			set->requires.data = (void *) set->header + offset;
-			set->requires.size = size;
-			set->requires.size = size;
-			break;
-		case RAZOR_PROVIDES:
-			set->provides.data = (void *) set->header + offset;
-			set->provides.size = size;
-			set->provides.size = size;
-			break;
-		case RAZOR_PROPERTIES:
-			set->property_pool.data = (void *) set->header + offset;
-			set->property_pool.size = size;
-			set->property_pool.size = size;
-			break;
-		}
+	for (s = set->header->sections; ~s->type; s++) {
+		if (s->type >= ARRAY_SIZE(razor_sections))
+			continue;
+		if (s->type != razor_sections[s->type].type)
+			continue;
+		array = (void *) set + razor_sections[s->type].offset;
+		array->data = (void *) set->header + s->offset;
+		array->size = s->size;
+		array->alloc = s->size;
 	}
 	close(fd);
 
@@ -203,6 +198,7 @@ void
 razor_set_destroy(struct razor_set *set)
 {
 	unsigned int size;
+	struct array *a;
 	int i;
 
 	if (set->header) {
@@ -212,12 +208,11 @@ razor_set_destroy(struct razor_set *set)
 		munmap(set->header, size);
 		free(set->buckets.data);
 	} else {
+		for (i = 0; i < ARRAY_SIZE(razor_sections); i++) {
+			a = (void *) set + razor_sections[i].offset;
+			free(a->data);
+		}
 		free(set->buckets.data);
-		free(set->string_pool.data);
-		free(set->packages.data);
-		free(set->requires.data);
-		free(set->provides.data);
-		free(set->property_pool.data);
 	}
 
 	free(set);
@@ -228,30 +223,26 @@ razor_set_write(struct razor_set *set, const char *filename)
 {
 	char data[4096];
 	struct razor_set_header *header = (struct razor_set_header *) data;
+	struct array *a;
 	unsigned long offset;
 	int i, fd;
-	struct { int type; struct array *array; } sections[] = {
-		{ RAZOR_STRINGS, &set->string_pool },
-		{ RAZOR_PACKAGES, &set->packages },
-		{ RAZOR_REQUIRES, &set->requires },
-		{ RAZOR_PROVIDES, &set->provides },
-		{ RAZOR_PROPERTIES, &set->property_pool },
-		{ 0 }
-	};
 
 	memset(data, 0, sizeof data);
 	header->magic = RAZOR_MAGIC;
 	header->version = RAZOR_VERSION;
 	offset = sizeof data;
 
-	for (i = 0; sections[i].type != 0; i++) {
-		header->sections[i].type = sections[i].type;
+	for (i = 0; i < ARRAY_SIZE(razor_sections); i++) {
+		if (razor_sections[i].type != i)
+			continue;
+		a = (void *) set + razor_sections[i].offset;
+		header->sections[i].type = i;
 		header->sections[i].offset = offset;
-		header->sections[i].size = sections[i].array->size;
-		offset += (sections[i].array->size + 4095) & ~4095;
+		header->sections[i].size = a->size;
+		offset += (a->size + 4095) & ~4095;
 	}
 
-	header->sections[i].type = 0;
+	header->sections[i].type = ~0;
 	header->sections[i].offset = 0;
 	header->sections[i].size = 0;
 
@@ -260,9 +251,12 @@ razor_set_write(struct razor_set *set, const char *filename)
 		return -1;
 
 	write_to_fd(fd, data, sizeof data);
-	for (i = 0; sections[i].type != 0; i++)
-		write_to_fd(fd, sections[i].array->data,
-			    (sections[i].array->size + 4095) & ~4095);
+	for (i = 0; i < ARRAY_SIZE(razor_sections); i++) {
+		if (razor_sections[i].type != i)
+			continue;
+		a = (void *) set + razor_sections[i].offset;
+		write_to_fd(fd, a->data, (a->size + 4095) & ~4095);
+	}
 
 	close(fd);
 
@@ -1060,9 +1054,6 @@ razor_set_info(struct razor_set *set)
 		size = set->header->sections[i].size;
 
 		switch (set->header->sections[i].type) {
-		case RAZOR_STRINGS:
-			printf("string pool:\t\t%dkb\n", size / 1024);
-			break;
 		case RAZOR_PACKAGES:
 			printf("package section:\t%dkb\n", size / 1024);
 			break;
@@ -1072,7 +1063,10 @@ razor_set_info(struct razor_set *set)
 		case RAZOR_PROVIDES:
 			printf("provides section:\t%dkb\n", size / 1024);
 			break;
-		case RAZOR_PROPERTIES:
+		case RAZOR_STRING_POOL:
+			printf("string pool:\t\t%dkb\n", size / 1024);
+			break;
+		case RAZOR_PROPERTY_POOL:
 			printf("properties section:\t%dkb\n", size / 1024);
 			break;
 		}
