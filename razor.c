@@ -855,6 +855,7 @@ yum_start_element(void *data, const char *name, const char **atts)
 	if (strcmp(name, "name") == 0) {
 		ctx->state = YUM_STATE_PACKAGE_NAME;
 	} else if (strcmp(name, "version") == 0) {
+		version = NULL;
 		for (i = 0; atts[i]; i += 2) {
 			if (strcmp(atts[i], "ver") == 0)
 				version = atts[i + 1];
