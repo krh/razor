@@ -660,7 +660,10 @@ compare_packages(const void *p1, const void *p2, void *data)
 	struct razor_set *set = data;
 	char *pool = set->string_pool.data;
 
-	return strcmp(&pool[pkg1->name], &pool[pkg2->name]);
+	if (pkg1->name == pkg2->name)
+		return 0;
+	else
+		return strcmp(&pool[pkg1->name], &pool[pkg2->name]);
 }
 
 static int
@@ -669,13 +672,11 @@ compare_properties(const void *p1, const void *p2, void *data)
 	const struct import_property *prop1 = p1, *prop2 = p2;
 	struct razor_set *set = data;
 	char *pool = set->string_pool.data;
-	int result;
 
-	result = strcmp(&pool[prop1->name], &pool[prop2->name]);
-	if (result == 0)
+	if (prop1->name == prop2->name)
 		return strcmp(&pool[prop1->version], &pool[prop2->version]);
 	else
-		return result;
+		return strcmp(&pool[prop1->name], &pool[prop2->name]);
 }
 
 static unsigned long *
