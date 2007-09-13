@@ -601,22 +601,74 @@ razor_import(struct import_context *ctx, const char *filename)
 	return 0;
 }
 
-static struct razor_set *qsort_set;
+typedef int (*compare_with_data_func_t)(const void *p1,
+					const void *p,
+					void *data);
+
+static void
+qsort_swap(void *p1, void *p2, size_t size)
+{
+	char buffer[size];
+
+	memcpy(buffer, p1, size);
+	memcpy(p1, p2, size);
+	memcpy(p2, buffer, size);
+}
+
+void
+qsort_with_data(void *base, size_t nelem, size_t size,
+		compare_with_data_func_t compare, void *data)
+{
+	void *p, *start, *end, *pivot;
+	int left, right, result;
+
+	p = base;
+	start = base;
+	end = base + nelem * size;
+	pivot = base + (random() % nelem) * size;
+	
+	while (p < end) {
+		result = compare(p, pivot, data);
+		if (result < 0) {
+			qsort_swap(p, start, size);
+			if (start == pivot)
+				pivot = p;
+			start += size;
+			p += size;
+		} else if (result == 0) {
+			p += size;
+		} else {
+ 			end -= size;
+			qsort_swap(p, end, size);
+			if (end == pivot)
+				pivot = p;
+		}
+	}
+
+	left = (start - base) / size;
+	right = (base + nelem * size - end) / size;
+	if (left > 1)
+		qsort_with_data(base, left, size, compare, data);
+	if (right > 1)
+		qsort_with_data(end, right, size, compare, data);
+}
 
 static int
-compare_packages(const void *p1, const void *p2)
+compare_packages(const void *p1, const void *p2, void *data)
 {
 	const struct import_package *pkg1 = p1, *pkg2 = p2;
-	char *pool = qsort_set->string_pool.data;
+	struct razor_set *set = data;
+	char *pool = set->string_pool.data;
 
 	return strcmp(&pool[pkg1->name], &pool[pkg2->name]);
 }
 
 static int
-compare_properties(const void *p1, const void *p2)
+compare_properties(const void *p1, const void *p2, void *data)
 {
 	const struct import_property *prop1 = p1, *prop2 = p2;
-	char *pool = qsort_set->string_pool.data;
+	struct razor_set *set = data;
+	char *pool = set->string_pool.data;
 	int result;
 
 	result = strcmp(&pool[prop1->name], &pool[prop2->name]);
@@ -637,8 +689,11 @@ uniqueify_properties(struct razor_set *set,
 	int i, count, unique;
 
 	count = in->size / sizeof(struct import_property);
-	qsort(in->data, count,
-	      sizeof(struct import_property), compare_properties);
+	qsort_with_data(in->data,
+			count,
+			sizeof(struct import_property),
+			compare_properties,
+			set);
 
 	rp = NULL;
 	end = in->data + in->size;
@@ -731,8 +786,6 @@ razor_finish_import(struct import_context *ctx)
 	struct razor_package *rp;
 	int i, count;
 
-	qsort_set = ctx->set;
-
 	ctx->requires_map =
 		uniqueify_properties(ctx->set, 
 				     &ctx->requires.all,
@@ -745,8 +798,11 @@ razor_finish_import(struct import_context *ctx)
 	remap_package_links(ctx);
 
 	count = ctx->packages.size / sizeof(struct import_package);
-	qsort(ctx->packages.data, count,
-	      sizeof(struct import_package), compare_packages);
+	qsort_with_data(ctx->packages.data,
+			count,
+			sizeof(struct import_package),
+			compare_packages,
+			ctx->set);
 
 	ip = ctx->packages.data;
 	for (i = 0; i < count; i++, ip++, rp++) {
