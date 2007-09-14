@@ -387,7 +387,7 @@ razor_set_tokenize(struct razor_set *set, const char *string)
 }
 
 struct import_property_context {
-	struct array all;
+	struct array *all;
 	struct array package;
 };
 
@@ -395,38 +395,20 @@ struct import_context {
 	struct razor_set *set;
 	struct import_property_context requires;
 	struct import_property_context provides;
-	struct array packages;
-	struct import_package *package;
+	struct razor_package *package;
 	unsigned long *requires_map;
 	unsigned long *provides_map;
-};
-
-struct import_package {
-	unsigned long name;
-	unsigned long version;
-	unsigned long requires;
-	unsigned long provides;
-	unsigned long index;
-};
-
-struct import_property {
-	unsigned long name;
-	unsigned long version;
-	unsigned long package;
-	unsigned long index;
-	unsigned long unique_index;
 };
 
 static void
 import_context_add_package(struct import_context *ctx,
 			   const char *name, const char *version)
 {
-	struct import_package *p;
+	struct razor_package *p;
 
-	p = array_add(&ctx->packages, sizeof *p);
+	p = array_add(&ctx->set->packages, sizeof *p);
 	p->name = razor_set_tokenize(ctx->set, name);
 	p->version = razor_set_tokenize(ctx->set, version);
-	p->index = p - (struct import_package *) ctx->packages.data;
 
 	ctx->package = p;
 	array_init(&ctx->requires.package);
@@ -436,7 +418,7 @@ import_context_add_package(struct import_context *ctx,
 void
 import_context_finish_package(struct import_context *ctx)
 {
-	struct import_package *p;
+	struct razor_package *p;
 
 	p = ctx->package;
 	p->requires = add_to_property_pool(ctx->set, &ctx->requires.package);
@@ -451,17 +433,17 @@ import_context_add_property(struct import_context *ctx,
 			    struct import_property_context *pctx,
 			    const char *name, const char *version)
 {
-	struct import_property *p;
+	struct razor_property *p;
 	unsigned long *r;
 
-	p = array_add(&pctx->all, sizeof *p);
+	p = array_add(pctx->all, sizeof *p);
 	p->name = razor_set_tokenize(ctx->set, name);
 	p->version = razor_set_tokenize(ctx->set, version);
-	p->package = ctx->package->index;
-	p->index = p - (struct import_property *) pctx->all.data;
+	p->packages = ctx->package -
+		(struct razor_package *) ctx->set->packages.data;
 
 	r = array_add(&pctx->package, sizeof *r);
-	*r = p->index;
+	*r = p - (struct razor_property *) pctx->all->data;
 }
 
 static void
@@ -553,6 +535,8 @@ razor_prepare_import(struct import_context *ctx)
 {
 	memset(ctx, 0, sizeof *ctx);
 	ctx->set = razor_set_create();
+	ctx->requires.all = &ctx->set->requires;
+	ctx->provides.all = &ctx->set->provides;
 }
 
 static int
@@ -605,6 +589,12 @@ typedef int (*compare_with_data_func_t)(const void *p1,
 					const void *p,
 					void *data);
 
+struct qsort_context {
+	size_t size;
+	compare_with_data_func_t compare;
+	void *data;
+};
+
 static void
 qsort_swap(void *p1, void *p2, size_t size)
 {
@@ -615,31 +605,45 @@ qsort_swap(void *p1, void *p2, size_t size)
 	memcpy(p2, buffer, size);
 }
 
-void
-qsort_with_data(void *base, size_t nelem, size_t size,
-		compare_with_data_func_t compare, void *data)
+static void
+__qsort_with_data(void *base, size_t nelem, unsigned long *map,
+		  struct qsort_context *ctx)
 {
 	void *p, *start, *end, *pivot;
+	unsigned long *mp, *mstart, *mend, tmp;
 	int left, right, result;
+	size_t size = ctx->size;
 
 	p = base;
 	start = base;
 	end = base + nelem * size;
+	mp = map;
+	mstart = map;
+	mend = map + nelem;
 	pivot = base + (random() % nelem) * size;
-	
+
 	while (p < end) {
-		result = compare(p, pivot, data);
+		result = ctx->compare(p, pivot, ctx->data);
 		if (result < 0) {
 			qsort_swap(p, start, size);
+			tmp = *mp;
+			*mp = *mstart;
+			*mstart = tmp;
 			if (start == pivot)
 				pivot = p;
 			start += size;
+			mstart++;
 			p += size;
 		} else if (result == 0) {
 			p += size;
+			mp++;
 		} else {
  			end -= size;
+			mend--;
 			qsort_swap(p, end, size);
+			tmp = *mp;
+			*mp = *mstart;
+			*mstart = tmp;
 			if (end == pivot)
 				pivot = p;
 		}
@@ -648,15 +652,36 @@ qsort_with_data(void *base, size_t nelem, size_t size,
 	left = (start - base) / size;
 	right = (base + nelem * size - end) / size;
 	if (left > 1)
-		qsort_with_data(base, left, size, compare, data);
+		__qsort_with_data(base, left, map, ctx);
 	if (right > 1)
-		qsort_with_data(end, right, size, compare, data);
+		__qsort_with_data(end, right, mend, ctx);
+}
+
+unsigned long *
+qsort_with_data(void *base, size_t nelem, size_t size,
+		compare_with_data_func_t compare, void *data)
+{
+	struct qsort_context ctx;
+	unsigned long *map;
+	int i;
+
+	ctx.size = size;
+	ctx.compare = compare;
+	ctx.data = data;
+
+	map = malloc(nelem * sizeof (unsigned long));
+	for (i = 0; i < nelem; i++)
+		map[i] = i;
+
+	__qsort_with_data(base, nelem, map, &ctx);
+
+	return map;
 }
 
 static int
 compare_packages(const void *p1, const void *p2, void *data)
 {
-	const struct import_package *pkg1 = p1, *pkg2 = p2;
+	const struct razor_package *pkg1 = p1, *pkg2 = p2;
 	struct razor_set *set = data;
 	char *pool = set->string_pool.data;
 
@@ -669,7 +694,7 @@ compare_packages(const void *p1, const void *p2, void *data)
 static int
 compare_properties(const void *p1, const void *p2, void *data)
 {
-	const struct import_property *prop1 = p1, *prop2 = p2;
+	const struct razor_property *prop1 = p1, *prop2 = p2;
 	struct razor_set *set = data;
 	char *pool = set->string_pool.data;
 
@@ -680,64 +705,59 @@ compare_properties(const void *p1, const void *p2, void *data)
 }
 
 static unsigned long *
-uniqueify_properties(struct razor_set *set,
-		     struct array *in, struct array *out)
+uniqueify_properties(struct razor_set *set, struct array *properties)
 {
-	struct import_property *ip, *end;
-	struct razor_property *rp, *rp_end;
+	struct razor_property *rp, *up, *rp_end;
 	struct array *pkgs, *p;
-	unsigned long *map, *r;
+	unsigned long *map, *rmap, *r;
 	int i, count, unique;
 
-	count = in->size / sizeof(struct import_property);
-	qsort_with_data(in->data,
-			count,
-			sizeof(struct import_property),
-			compare_properties,
-			set);
+	count = properties->size / sizeof(struct razor_property);
+	map = qsort_with_data(properties->data,
+			      count,
+			      sizeof(struct razor_property),
+			      compare_properties,
+			      set);
 
-	rp = NULL;
-	end = in->data + in->size;
-	for (ip = in->data; ip < end; ip++) {
-		if (rp == NULL ||
-		    ip->name != rp->name || ip->version != rp->version) {
-			rp = array_add(out, sizeof *rp);
-			rp->name = ip->name;
-			rp->version = ip->version;
+	rp_end = properties->data + properties->size;
+	rmap = malloc(count * sizeof *map);
+	pkgs = zalloc(count * sizeof *pkgs);
+	for (rp = properties->data, up = rp, i = 0; rp < rp_end; rp++, i++) {
+		if (rp->name != up->name || rp->version != up->version) {
+			up++;
+			up->name = rp->name;
+			up->version = rp->version;
 		}
-		ip->unique_index = rp - (struct razor_property *) out->data;
+
+		unique = up - (struct razor_property *) properties->data;
+		rmap[map[i]] = unique;
+		r = array_add(&pkgs[unique], sizeof *r);
+		*r = rp->packages;
 	}
+	free(map);
 
-	map = malloc(count * sizeof (unsigned long));
-	ip = in->data;
-	for (i = 0; i < count; i++)
-		map[ip[i].index] = ip[i].unique_index;
-
-	unique = out->size / sizeof(*rp);
-	pkgs = zalloc(unique * sizeof *pkgs);
-	for (ip = in->data; ip < end; ip++) {
-		r = array_add(&pkgs[ip->unique_index], sizeof *r);
-		*r = ip->package;
-	}
-
-	rp_end = out->data + out->size;
-	for (rp = out->data, p = pkgs; rp < rp_end; rp++, p++)
+	up++;
+	properties->size = (void *) up - properties->data;
+	rp_end = up;
+	for (rp = properties->data, p = pkgs; rp < rp_end; rp++, p++) {
 		rp->packages = add_to_property_pool(set, p);
+		array_release(p);
+	}
 
 	free(pkgs);
 
-	return map;
+	return rmap;
 }
 
 static void
 remap_package_links(struct import_context *ctx)
 {
-	struct import_package *p, *end;
+	struct razor_package *p, *end;
 	unsigned long *pool, *r;
 
 	pool = ctx->set->property_pool.data;
-	end = ctx->packages.data + ctx->packages.size;
-	for (p = ctx->packages.data; p < end; p++) {
+	end = ctx->set->packages.data + ctx->set->packages.size;
+	for (p = ctx->set->packages.data; p < end; p++) {
 		for (r = &pool[p->requires]; ~*r; r++)
 			*r = ctx->requires_map[*r];
 		for (r = &pool[p->provides]; ~*r; r++)
@@ -746,19 +766,19 @@ remap_package_links(struct import_context *ctx)
 }
 
 static void
-remap_property_links(struct import_context *ctx)
+remap_property_links(struct import_context *ctx, unsigned long *map)
 {
 	struct razor_property *p, *end;
-	struct import_package *ip;
-	unsigned long *map, *pool, *r;
+	struct razor_package *rp;
+	unsigned long *pool, *r, *rmap;
 	int i, count;
 
 	pool = ctx->set->property_pool.data;
-	count = ctx->packages.size / sizeof(struct import_package);
-	map = malloc(count * sizeof *map);
-	ip = ctx->packages.data;
+	count = ctx->set->packages.size / sizeof(struct razor_package);
+	rmap = malloc(count * sizeof *map);
+	rp = ctx->set->packages.data;
 	for (i = 0; i < count; i++)
-		map[ip[i].index] = i;
+		rmap[map[i]] = i;
 
 	/* FIXME: This will break if we implement package list sharing
 	 * for all properties, since we'll remap those lists more than
@@ -770,63 +790,36 @@ remap_property_links(struct import_context *ctx)
 	end = ctx->set->requires.data + ctx->set->requires.size;
 	for (p = ctx->set->requires.data; p < end; p++)
 		for (r = &pool[p->packages]; ~*r; r++)
-			*r = map[*r];
+			*r = rmap[*r];
 
 	end = ctx->set->provides.data + ctx->set->provides.size;
 	for (p = ctx->set->provides.data; p < end; p++)
 		for (r = &pool[p->packages]; ~*r; r++)
-			*r = map[*r];
+			*r = rmap[*r];
 
-	free(map);
+	free(rmap);
 }
 
 static struct razor_set *
 razor_finish_import(struct import_context *ctx)
 {
-	struct import_package *ip;
-	struct razor_package *rp;
-	int i, count;
+	unsigned long *map;
+	int count;
 
-	ctx->requires_map =
-		uniqueify_properties(ctx->set, 
-				     &ctx->requires.all,
-				     &ctx->set->requires);
-	ctx->provides_map =
-		uniqueify_properties(ctx->set,
-				     &ctx->provides.all,
-				     &ctx->set->provides);
-
+	ctx->requires_map = uniqueify_properties(ctx->set, ctx->requires.all);
+	ctx->provides_map = uniqueify_properties(ctx->set, ctx->provides.all);
 	remap_package_links(ctx);
-
-	count = ctx->packages.size / sizeof(struct import_package);
-	qsort_with_data(ctx->packages.data,
-			count,
-			sizeof(struct import_package),
-			compare_packages,
-			ctx->set);
-
-	ip = ctx->packages.data;
-	for (i = 0; i < count; i++, ip++, rp++) {
-		rp = array_add(&ctx->set->packages, sizeof *rp);
-		rp->name = ip->name;
-		rp->version = ip->version;
-		rp->requires = ip->requires;
-		rp->provides = ip->provides;
-	}
-
-	remap_property_links(ctx);
-
-	free(ctx->requires.all.data);
-	free(ctx->provides.all.data);
 	free(ctx->requires_map);
 	free(ctx->provides_map);
-		
-	fprintf(stderr, "parsed %d requires, %d unique\n",
-		ctx->requires.all.size / sizeof(struct import_property),
-		ctx->set->requires.size / sizeof(struct razor_property));
-	fprintf(stderr, "parsed %d provides, %d unique\n",
-		ctx->provides.all.size / sizeof(struct import_property),
-		ctx->set->provides.size / sizeof(struct razor_property));
+
+	count = ctx->set->packages.size / sizeof(struct razor_package);
+	map = qsort_with_data(ctx->set->packages.data,
+			      count,
+			      sizeof(struct razor_package),
+			      compare_packages,
+			      ctx->set);
+	remap_property_links(ctx, map);
+	free(map);
 
 	return ctx->set; 
 }
