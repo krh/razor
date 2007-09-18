@@ -1,7 +1,7 @@
 CFLAGS = -Wall -g -O2
 LDLIBS = -lexpat -g
 
-razor : razor.o sha1.o
+razor : razor.o import.o sha1.o
 
 import : razor primary.xml.gz
 	zcat primary.xml.gz | ./razor eat-yum

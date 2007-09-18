@@ -11,15 +11,7 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#include <expat.h>
-#include "sha1.h"
-
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
-
-struct array {
-	void *data;
-	int size, alloc;
-};
+#include "razor.h"
 
 static void
 array_init(struct array *array)
@@ -77,20 +69,6 @@ write_to_fd(int fd, void *p, size_t size)
 	return 0;
 }
 
-static int
-write_to_file(const char *filename, void *p, size_t size)
-{
-	int fd, err;
-
-	fd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, 0666);
-	if (fd < 0)
-		return -1;
-	err = write_to_fd(fd, p, size);
-	close(fd);
-
-	return err;
-}
-
 static void *
 zalloc(size_t size)
 {
@@ -101,50 +79,6 @@ zalloc(size_t size)
 
 	return p;
 }
-
-struct razor_set_section {
-	unsigned int type;
-	unsigned int offset;
-	unsigned int size;
-};
-
-struct razor_set_header {
-	unsigned int magic;
-	unsigned int version;
-	struct razor_set_section sections[0];
-};
-
-#define RAZOR_MAGIC 0x7a7a7a7a
-#define RAZOR_VERSION 1
-
-#define RAZOR_PACKAGES 0
-#define RAZOR_REQUIRES 1
-#define RAZOR_PROVIDES 2
-#define RAZOR_STRING_POOL 3
-#define RAZOR_PROPERTY_POOL 4
-
-struct razor_package {
-	unsigned long name;
-	unsigned long version;
-	unsigned long requires;
-	unsigned long provides;
-};
-
-struct razor_property {
-	unsigned long name;
-	unsigned long version;
-	unsigned long packages;
-};
-
-struct razor_set {
-	struct array buckets;
-	struct array string_pool;
-	struct array property_pool;
- 	struct array packages;
- 	struct array requires;
- 	struct array provides;
-	struct razor_set_header *header;
-};
 
 struct razor_set_section razor_sections[] = {
 	{ RAZOR_PACKAGES,	offsetof(struct razor_set, packages) },
@@ -386,21 +320,7 @@ razor_set_tokenize(struct razor_set *set, const char *string)
 	return razor_set_insert(set, string);
 }
 
-struct import_property_context {
-	struct array *all;
-	struct array package;
-};
-
-struct import_context {
-	struct razor_set *set;
-	struct import_property_context requires;
-	struct import_property_context provides;
-	struct razor_package *package;
-	unsigned long *requires_map;
-	unsigned long *provides_map;
-};
-
-static void
+void
 import_context_add_package(struct import_context *ctx,
 			   const char *name, const char *version)
 {
@@ -428,7 +348,7 @@ import_context_finish_package(struct import_context *ctx)
 	array_release(&ctx->provides.package);
 }
 
-static void
+void
 import_context_add_property(struct import_context *ctx,
 			    struct import_property_context *pctx,
 			    const char *name, const char *version)
@@ -446,143 +366,13 @@ import_context_add_property(struct import_context *ctx,
 	*r = p - (struct razor_property *) pctx->all->data;
 }
 
-static void
-parse_package(struct import_context *ctx, const char **atts, void *data)
-{
-	const char *name = NULL, *version = NULL;
-	int i;
-
-	for (i = 0; atts[i]; i += 2) {
-		if (strcmp(atts[i], "name") == 0)
-			name = atts[i + 1];
-		else if (strcmp(atts[i], "version") == 0)
-			version = atts[i + 1];
-	}
-
-	if (name == NULL || version == NULL) {
-		fprintf(stderr, "invalid package tag, "
-			"missing name or version attributes\n");
-		return;
-	}
-
-	import_context_add_package(ctx, name, version);
-}
-
-static void
-parse_property(struct import_context *ctx, const char **atts, void *data)
-{
-	const char *name = NULL, *version = NULL;
-	int i;
-
-	for (i = 0; atts[i]; i += 2) {
-		if (strcmp(atts[i], "name") == 0)
-			name = atts[i + 1];
-		if (strcmp(atts[i], "version") == 0)
-			version = atts[i + 1];
-	}
-	
-	if (name == NULL) {
-		fprintf(stderr, "invalid tag, missing name attribute\n");
-		return;
-	}
-
-	import_context_add_property(ctx, data, name, version);
-}
-
-static void
-start_element(void *data, const char *name, const char **atts)
-{
-	struct import_context *ctx = data;
-
-	if (strcmp(name, "package") == 0)
-		parse_package(ctx, atts, NULL);
-	else if (strcmp(name, "requires") == 0)
-		parse_property(ctx, atts, &ctx->requires);
-	else if (strcmp(name, "provides") == 0)
-		parse_property(ctx, atts, &ctx->provides);
-}
-
-static void
-end_element (void *data, const char *name)
-{
-	struct import_context *ctx = data;
-
-	if (strcmp(name, "package") == 0)
-		import_context_finish_package(ctx);
-}
-
-static char *
-sha1_to_hex(const unsigned char *sha1)
-{
-	static int bufno;
-	static char hexbuffer[4][50];
-	static const char hex[] = "0123456789abcdef";
-	char *buffer = hexbuffer[3 & ++bufno], *buf = buffer;
-	int i;
-
-	for (i = 0; i < 20; i++) {
-		unsigned int val = *sha1++;
-		*buf++ = hex[val >> 4];
-		*buf++ = hex[val & 0xf];
-	}
-	*buf = '\0';
-
-	return buffer;
-}
-
-static void
+void
 razor_prepare_import(struct import_context *ctx)
 {
 	memset(ctx, 0, sizeof *ctx);
 	ctx->set = razor_set_create();
 	ctx->requires.all = &ctx->set->requires;
 	ctx->provides.all = &ctx->set->provides;
-}
-
-static int
-razor_import(struct import_context *ctx, const char *filename)
-{
-	SHA_CTX sha1;
-	XML_Parser parser;
-	int fd;
-	void *p;
-	struct stat stat;
-	char buf[128];
-	unsigned char hash[20];
-
-	fd = open(filename, O_RDONLY);
-	if (fstat(fd, &stat) < 0)
-		return -1;
-	p = mmap(NULL, stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-	if (p == MAP_FAILED)
-		return -1;
-
-	parser = XML_ParserCreate(NULL);
-	XML_SetUserData(parser, ctx);
-	XML_SetElementHandler(parser, start_element, end_element);
-	if (XML_Parse(parser, p, stat.st_size, 1) == XML_STATUS_ERROR) {
-		fprintf(stderr,
-			"%s at line %d, %s\n",
-			XML_ErrorString(XML_GetErrorCode(parser)),
-			XML_GetCurrentLineNumber(parser),
-			filename);
-		return 1;
-	}
-
-	XML_ParserFree(parser);
-
-	SHA1_Init(&sha1);
-	SHA1_Update(&sha1, p, stat.st_size);
-	SHA1_Final(hash, &sha1);
-
-	close(fd);
-
-	snprintf(buf, sizeof buf, "set/%s", sha1_to_hex(hash));
-	if (write_to_file(buf, p, stat.st_size) < 0)
-		return -1;
-	munmap(p, stat.st_size);
-
-	return 0;
 }
 
 typedef int (*compare_with_data_func_t)(const void *p1,
@@ -800,7 +590,7 @@ remap_property_links(struct import_context *ctx, unsigned long *map)
 	free(rmap);
 }
 
-static struct razor_set *
+struct razor_set *
 razor_finish_import(struct import_context *ctx)
 {
 	unsigned long *map;
@@ -822,127 +612,6 @@ razor_finish_import(struct import_context *ctx)
 	free(map);
 
 	return ctx->set; 
-}
-
-/* Import a yum filelist as a razor package set. */
-
-enum {
-	YUM_STATE_BEGIN,
-	YUM_STATE_PACKAGE_NAME
-};
-
-struct yum_context {
-	struct import_context ctx;
-	struct import_property_context *current_property_context;
-	char *name;
-	int state;
-};
-
-static void
-yum_start_element(void *data, const char *name, const char **atts)
-{
-	struct yum_context *ctx = data;
-	const char *n, *version;
-	int i;
-
-	if (strcmp(name, "name") == 0) {
-		ctx->state = YUM_STATE_PACKAGE_NAME;
-	} else if (strcmp(name, "version") == 0) {
-		version = NULL;
-		for (i = 0; atts[i]; i += 2) {
-			if (strcmp(atts[i], "ver") == 0)
-				version = atts[i + 1];
-		}
-		import_context_add_package(&ctx->ctx, ctx->name, version);
-	} else if (strcmp(name, "rpm:requires") == 0) {
-		ctx->current_property_context = &ctx->ctx.requires;
-	} else if (strcmp(name, "rpm:provides") == 0) {
-		ctx->current_property_context = &ctx->ctx.provides;
-	} else if (strcmp(name, "rpm:entry") == 0 &&
-		   ctx->current_property_context != NULL) {
-		n = NULL;
-		version = NULL;
-		for (i = 0; atts[i]; i += 2) {
-			if (strcmp(atts[i], "name") == 0)
-				n = atts[i + 1];
-			else if (strcmp(atts[i], "ver") == 0)
-				version = atts[i + 1];
-		}
-
-		if (n == NULL) {
-			fprintf(stderr, "invalid rpm:entry, "
-				"missing name or version attributes\n");
-			return;
-		}
-
-		import_context_add_property(&ctx->ctx,
-					    ctx->current_property_context,
-					    n, version);
-	}
-}
-
-static void
-yum_end_element (void *data, const char *name)
-{
-	struct yum_context *ctx = data;
-
-	if (strcmp(name, "package") == 0) {
-		free(ctx->name);
-		import_context_finish_package(&ctx->ctx);
-	} else if (strcmp(name, "name") == 0) {
-		ctx->state = 0;
-	} else if (strcmp(name, "rpm:requires") == 0) {
-		ctx->current_property_context = NULL;
-	} else if (strcmp(name, "rpm:provides") == 0) {
-		ctx->current_property_context = NULL;
-	}
-}
-
-static void
-yum_character_data (void *data, const XML_Char *s, int len)
-{
-	struct yum_context *ctx = data;
-
-	if (ctx->state == YUM_STATE_PACKAGE_NAME)
-		ctx->name = strndup(s, len);
-}
-
-static struct razor_set *
-razor_set_create_from_yum_filelist(int fd)
-{
-	struct yum_context ctx;
-	XML_Parser parser;
-	char buf[4096];
-	int len;
-
-	razor_prepare_import(&ctx.ctx);
-
-	parser = XML_ParserCreate(NULL);
-	XML_SetUserData(parser, &ctx);
-	XML_SetElementHandler(parser, yum_start_element, yum_end_element);
-	XML_SetCharacterDataHandler(parser, yum_character_data);
-
-	while (1) {
-		len = read(fd, buf, sizeof buf);
-		if (len < 0) {
-			fprintf(stderr,
-				"couldn't read input: %s\n", strerror(errno));
-			return NULL;
-		} else if (len == 0)
-			break;
-
-		if (XML_Parse(parser, buf, len, 0) == XML_STATUS_ERROR) {
-			fprintf(stderr,
-				"%s at line %d\n",
-				XML_ErrorString(XML_GetErrorCode(parser)),
-				XML_GetCurrentLineNumber(parser));
-			return NULL;
-		}
-	}
-
-	XML_ParserFree(parser);
-
-	return razor_finish_import(&ctx.ctx);
 }
 
 void
@@ -1188,12 +857,10 @@ static const char *repo_filename = "system.repo";
 static const char rawhide_repo_filename[] = "rawhide.repo";
 
 int
-main(int argc, char *argv[])
+main(int argc, const char *argv[])
 {
-	int i;
 	struct razor_set *set;
 	struct stat statbuf;
-	struct import_context ctx;
 	char *repo;
 
 	repo = getenv("RAZOR_REPO");
@@ -1208,17 +875,7 @@ main(int argc, char *argv[])
 			exit(-1);
 		}
 			
-		razor_prepare_import(&ctx);
-
-		for (i = 2; i < argc; i++) {
-			if (razor_import(&ctx, argv[i]) < 0) {
-				fprintf(stderr, "failed to import %s\n",
-					argv[i]);
-				exit(-1);
-			}
-		}
-
-		set = razor_finish_import(&ctx);
+		set = razor_import_rzr_files(argc - 2, argv + 2);
 
 		printf("bucket allocation: %d\n", set->buckets.alloc);
 		printf("pool size: %d\n", set->string_pool.size);
