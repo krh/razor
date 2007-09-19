@@ -424,6 +424,7 @@ __qsort_with_data(void *base, size_t nelem, unsigned long *map,
 			start += size;
 			mstart++;
 			p += size;
+			mp++;
 		} else if (result == 0) {
 			p += size;
 			mp++;
@@ -432,8 +433,8 @@ __qsort_with_data(void *base, size_t nelem, unsigned long *map,
 			mend--;
 			qsort_swap(p, end, size);
 			tmp = *mp;
-			*mp = *mstart;
-			*mstart = tmp;
+			*mp = *mend;
+			*mend = tmp;
 			if (end == pivot)
 				pivot = p;
 		}
