@@ -928,6 +928,13 @@ main(int argc, const char *argv[])
 		razor_set_write(set, rawhide_repo_filename);
 		razor_set_destroy(set);
 		printf("wrote %s\n", rawhide_repo_filename);
+	} else if (strcmp(argv[1], "import-rpmdb") == 0) {
+		set = razor_set_create_from_rpmdb();
+		if (set == NULL)
+			return 1;
+		razor_set_write(set, repo_filename);
+		razor_set_destroy(set);
+		printf("wrote %s\n", repo_filename);
 	} else if (strcmp(argv[1], "validate") == 0) {
 		set = razor_set_open(repo_filename);
 		if (set == NULL)

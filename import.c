@@ -9,6 +9,8 @@
 #include <errno.h>
 
 #include <expat.h>
+#include <rpm/rpmlib.h>
+#include <rpm/rpmdb.h>
 #include "sha1.h"
 #include "razor.h"
 
@@ -256,4 +258,63 @@ razor_set_create_from_yum_filelist(int fd)
 	XML_ParserFree(parser);
 
 	return razor_finish_import(&ctx.ctx);
+}
+
+struct razor_set *
+razor_set_create_from_rpmdb(void)
+{
+	struct import_context ctx;
+	rpmdbMatchIterator iter;
+	Header h;
+	int_32 type, count, i;
+	char *name, *version, *release;
+	char **properties, **property_versions;
+	rpmdb db;
+
+	rpmReadConfigFiles(NULL, NULL);
+
+	if (rpmdbOpen("", &db, O_RDONLY, 0644) != 0) {
+		fprintf(stderr, "cannot open rpm database\n");
+		exit(1);
+	}
+
+	razor_prepare_import(&ctx);
+
+	iter = rpmdbInitIterator(db, 0, NULL, 0);
+	while (h = rpmdbNextIterator(iter), h != NULL) {
+		headerGetEntry(h, RPMTAG_NAME, &type,
+			       (void **) &name, &count);
+		headerGetEntry(h, RPMTAG_VERSION, &type,
+			       (void **) &version, &count);
+		headerGetEntry(h, RPMTAG_RELEASE, &type,
+			       (void **) &release, &count);
+		import_context_add_package(&ctx, name, version);
+
+
+		headerGetEntry(h, RPMTAG_REQUIRES, &type,
+			       (void **) &properties, &count);
+		headerGetEntry(h, RPMTAG_REQUIREVERSION, &type,
+			       (void **) &property_versions, &count);
+		for (i = 0; i < count; i++)
+			import_context_add_property(&ctx,
+						    &ctx.requires,
+						    properties[i],
+						    property_versions[i]);
+
+		headerGetEntry(h, RPMTAG_PROVIDES, &type,
+			       (void **) &properties, &count);
+		headerGetEntry(h, RPMTAG_PROVIDEVERSION, &type,
+			       (void **) &property_versions, &count);
+		for (i = 0; i < count; i++)
+			import_context_add_property(&ctx,
+						    &ctx.provides,
+						    properties[i],
+						    property_versions[i]);
+
+		import_context_finish_package(&ctx);
+	}
+
+	rpmdbClose(db);
+
+	return razor_finish_import(&ctx);
 }

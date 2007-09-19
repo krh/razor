@@ -79,5 +79,6 @@ struct razor_set *razor_finish_import(struct import_context *ctx);
 
 struct razor_set *razor_import_rzr_files(int count, const char **files);
 struct razor_set *razor_set_create_from_yum_filelist(int fd);
+struct razor_set *razor_set_create_from_rpmdb(void);
 
 #endif /* _RAZOR_H_ */
