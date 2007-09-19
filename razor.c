@@ -908,6 +908,100 @@ razor_set_list_unsatisfied(struct razor_set *set)
 	array_release(&unsatisfied);
 }
 
+static void
+add_package(struct razor_importer *importer,
+	    struct razor_package *package, struct razor_set *set)
+{
+	char *pool;
+	unsigned long *r;
+	struct razor_property *p, *properties;
+
+	pool = set->string_pool.data;
+	razor_importer_begin_package(importer,
+				     &pool[package->name],
+				     &pool[package->version]);
+
+	r = (unsigned long *) set->property_pool.data + package->requires;
+	properties = set->requires.data;
+	while (~*r) {
+		p = &properties[*r++];
+		razor_importer_add_requires(importer,
+					    &pool[p->name], &pool[p->version]);
+	}
+
+	r = (unsigned long *) set->property_pool.data + package->provides;
+	properties = set->provides.data;
+	while (~*r) {
+		p = &properties[*r++];
+		razor_importer_add_provides(importer,
+					    &pool[p->name], &pool[p->version]);
+	}
+
+	razor_importer_finish_package(importer);
+}
+
+/* Add packages from 'upstream' to 'set'.  The packages to add are
+ * specified by the 'packages' array, which is a sorted list of
+ * package indexes.  Returns a newly allocated package set.  Does not
+ * enforce validity of the resulting package set. */
+
+struct razor_set *
+razor_set_add(struct razor_set *set, struct razor_set *upstream,
+	      struct array *packages)
+{
+	struct razor_importer *importer;
+	struct razor_package *upstream_packages, *p, *s, *send;
+	char *spool, *upool;
+	unsigned long *u, *uend;
+	int cmp;
+
+	importer = razor_importer_new();
+	upstream_packages = upstream->packages.data;
+	u = packages->data;
+	uend = packages->data + packages->size;
+	upool = upstream->string_pool.data;
+	s = set->packages.data;
+	send = set->packages.data + set->packages.size;
+	spool = set->string_pool.data;
+
+	while (s < send) {
+		p = upstream_packages + *u;
+		cmp = strcmp(&spool[s->name], &upool[p->name]);
+		if (cmp < 0 || u == uend) {
+			add_package(importer, s, set);
+			s++;
+		} else if (cmp == 0) {
+			add_package(importer, p, upstream);
+			s++;
+			u++;
+		} else {
+			add_package(importer, p, upstream);
+			u++;
+		}
+	}
+
+	return razor_importer_finish(importer);
+}
+
+struct razor_set *
+razor_set_update(struct razor_set *set, struct razor_set *upstream,
+		 int count, const char **packages)
+{
+	struct razor_package *p;
+	struct array list;
+	unsigned long *r;
+	int i;
+
+	array_init(&list);
+	for (i = 0; i < count; i++) {
+		p = razor_set_get_package(upstream, packages[i]);
+		r = array_add(&list, sizeof *r);
+		*r = p - (struct razor_package *) upstream->packages.data;
+	}
+
+	return razor_set_add(set, upstream, &list);
+}
+
 void
 razor_set_info(struct razor_set *set)
 {
@@ -952,7 +1046,7 @@ static const char rawhide_repo_filename[] = "rawhide.repo";
 int
 main(int argc, const char *argv[])
 {
-	struct razor_set *set;
+	struct razor_set *set, *upstream, *new;
 	struct stat statbuf;
 	char *repo;
 
@@ -1028,6 +1122,16 @@ main(int argc, const char *argv[])
 			return 1;
 		razor_set_list_unsatisfied(set);
 		razor_set_destroy(set);
+	} else if (strcmp(argv[1], "update") == 0) {
+		set = razor_set_open(repo_filename);
+		upstream = razor_set_open(rawhide_repo_filename);
+		if (set == NULL || upstream == NULL)
+			return 1;
+		new = razor_set_update(set, upstream, argc - 2, argv + 2);
+		razor_set_write(new, "system-updated.repo");
+		razor_set_destroy(new);
+		razor_set_destroy(set);
+		razor_set_destroy(upstream);
 	} else {
 		usage();
 	}
