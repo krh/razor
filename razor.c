@@ -562,7 +562,7 @@ compare_packages(const void *p1, const void *p2, void *data)
 	char *pool = set->string_pool.data;
 
 	if (pkg1->name == pkg2->name)
-		return 0;
+		return strcmp(&pool[pkg1->version], &pool[pkg2->version]);
 	else
 		return strcmp(&pool[pkg1->name], &pool[pkg2->name]);
 }
