@@ -55,7 +55,6 @@ struct razor_property {
 };
 
 struct razor_set {
-	struct array buckets;
 	struct array string_pool;
 	struct array property_pool;
  	struct array packages;
@@ -71,6 +70,7 @@ struct import_property_context {
 
 struct razor_importer {
 	struct razor_set *set;
+	struct array buckets;
 	struct import_property_context requires;
 	struct import_property_context provides;
 	struct razor_package *package;
@@ -205,13 +205,11 @@ razor_set_destroy(struct razor_set *set)
 			;
 		size = set->header->sections[i].type;
 		munmap(set->header, size);
-		free(set->buckets.data);
 	} else {
 		for (i = 0; i < ARRAY_SIZE(razor_sections); i++) {
 			a = (void *) set + razor_sections[i].offset;
 			free(a->data);
 		}
-		free(set->buckets.data);
 	}
 
 	free(set);
@@ -274,19 +272,19 @@ hash_string(const char *key)
 	return hash;
 }
 
-unsigned long
-razor_set_lookup(struct razor_set *set, const char *key)
+static unsigned long
+razor_importer_lookup(struct razor_importer *importer, const char *key)
 {
 	unsigned int mask, start, i;
 	unsigned long *b;
 	char *pool;
 
-	pool = set->string_pool.data;
-	mask = set->buckets.alloc - 1;
+	pool = importer->set->string_pool.data;
+	mask = importer->buckets.alloc - 1;
 	start = hash_string(key) * sizeof(unsigned long);
 
-	for (i = 0; i < set->buckets.alloc; i += sizeof *b) {
-		b = set->buckets.data + ((start + i) & mask);
+	for (i = 0; i < importer->buckets.alloc; i += sizeof *b) {
+		b = importer->buckets.data + ((start + i) & mask);
 
 		if (*b == 0)
 			return 0;
@@ -325,18 +323,18 @@ add_to_property_pool(struct razor_set *set, struct array *properties)
 }
 
 static void
-do_insert(struct razor_set *set, unsigned long value)
+do_insert(struct razor_importer *importer, unsigned long value)
 {
 	unsigned int mask, start, i;
 	unsigned long *b;
 	const char *key;
 
-	key = (char *) set->string_pool.data + value;
-	mask = set->buckets.alloc - 1;
+	key = (char *) importer->set->string_pool.data + value;
+	mask = importer->buckets.alloc - 1;
 	start = hash_string(key) * sizeof(unsigned long);
 
-	for (i = 0; i < set->buckets.alloc; i += sizeof *b) {
-		b = set->buckets.data + ((start + i) & mask);
+	for (i = 0; i < importer->buckets.alloc; i += sizeof *b) {
+		b = importer->buckets.data + ((start + i) & mask);
 		if (*b == 0) {
 			*b = value;
 			break;
@@ -344,45 +342,45 @@ do_insert(struct razor_set *set, unsigned long value)
 	}
 }
 
-unsigned long
-razor_set_insert(struct razor_set *set, const char *key)
+static unsigned long
+razor_importer_insert(struct razor_importer *importer, const char *key)
 {
 	unsigned long value, *buckets, *b, *end;
 	int alloc;
 
-	alloc = set->buckets.alloc;
-	array_add(&set->buckets, 4 * sizeof *buckets);
-	if (alloc != set->buckets.alloc) {
-		end = set->buckets.data + alloc;
-		memset(end, 0, set->buckets.alloc - alloc);
-		for (b = set->buckets.data; b < end; b++) {
+	alloc = importer->buckets.alloc;
+	array_add(&importer->buckets, 4 * sizeof *buckets);
+	if (alloc != importer->buckets.alloc) {
+		end = importer->buckets.data + alloc;
+		memset(end, 0, importer->buckets.alloc - alloc);
+		for (b = importer->buckets.data; b < end; b++) {
 			value = *b;
 			if (value != 0) {
 				*b = 0;
-				do_insert(set, value);
+				do_insert(importer, value);
 			}
 		}
 	}
 
-	value = add_to_string_pool(set, key);
-	do_insert (set, value);
+	value = add_to_string_pool(importer->set, key);
+	do_insert (importer, value);
 
 	return value;
 }
 
 static unsigned long
-razor_set_tokenize(struct razor_set *set, const char *string)
+razor_importer_tokenize(struct razor_importer *importer, const char *string)
 {
 	unsigned long token;
 
 	if (string == NULL)
-		return razor_set_tokenize(set, "");
+		return razor_importer_tokenize(importer, "");
 
-	token = razor_set_lookup(set, string);
+	token = razor_importer_lookup(importer, string);
 	if (token != 0)
 		return token;
 
-	return razor_set_insert(set, string);
+	return razor_importer_insert(importer, string);
 }
 
 void
@@ -392,8 +390,8 @@ razor_importer_begin_package(struct razor_importer *importer,
 	struct razor_package *p;
 
 	p = array_add(&importer->set->packages, sizeof *p);
-	p->name = razor_set_tokenize(importer->set, name);
-	p->version = razor_set_tokenize(importer->set, version);
+	p->name = razor_importer_tokenize(importer, name);
+	p->version = razor_importer_tokenize(importer, version);
 
 	importer->package = p;
 	array_init(&importer->requires.package);
@@ -424,8 +422,8 @@ razor_importer_add_property(struct razor_importer *importer,
 	unsigned long *r;
 
 	p = array_add(pctx->all, sizeof *p);
-	p->name = razor_set_tokenize(importer->set, name);
-	p->version = razor_set_tokenize(importer->set, version);
+	p->name = razor_importer_tokenize(importer, name);
+	p->version = razor_importer_tokenize(importer, version);
 	p->packages = importer->package -
 		(struct razor_package *) importer->set->packages.data;
 
@@ -703,6 +701,7 @@ razor_importer_finish(struct razor_importer *importer)
 	free(map);
 
 	set = importer->set;
+	array_release(&importer->buckets);
 	free(importer);
 
 	return set;
@@ -971,7 +970,6 @@ main(int argc, const char *argv[])
 			
 		set = razor_import_rzr_files(argc - 2, argv + 2);
 
-		printf("bucket allocation: %d\n", set->buckets.alloc);
 		printf("pool size: %d\n", set->string_pool.size);
 		printf("pool allocation: %d\n", set->string_pool.alloc);
 		printf("packages: %d\n",
@@ -983,11 +981,6 @@ main(int argc, const char *argv[])
 
 		razor_set_write(set, repo_filename);
 
-		razor_set_destroy(set);
-	} else if (strcmp(argv[1], "lookup") == 0) {
-		set = razor_set_open(repo_filename);
-		printf("%s is %lu\n", argv[2],
-		       razor_set_lookup(set, argv[2]));
 		razor_set_destroy(set);
 	} else if (strcmp(argv[1], "list") == 0) {
 		set = razor_set_open(repo_filename);
