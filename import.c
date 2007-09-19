@@ -279,6 +279,12 @@ razor_set_create_from_yum_filelist(int fd)
 	return razor_importer_finish(ctx.importer);
 }
 
+union rpm_entry {
+	void *p;
+	char *string;
+	char **list;
+};
+
 struct razor_set *
 razor_set_create_from_rpmdb(void)
 {
@@ -286,8 +292,7 @@ razor_set_create_from_rpmdb(void)
 	rpmdbMatchIterator iter;
 	Header h;
 	int_32 type, count, i;
-	char *name, *version, *release;
-	char **properties, **property_versions;
+	union rpm_entry name, version, release, properties, property_versions;
 	rpmdb db;
 
 	rpmReadConfigFiles(NULL, NULL);
@@ -301,31 +306,29 @@ razor_set_create_from_rpmdb(void)
 
 	iter = rpmdbInitIterator(db, 0, NULL, 0);
 	while (h = rpmdbNextIterator(iter), h != NULL) {
-		headerGetEntry(h, RPMTAG_NAME, &type,
-			       (void **) &name, &count);
-		headerGetEntry(h, RPMTAG_VERSION, &type,
-			       (void **) &version, &count);
-		headerGetEntry(h, RPMTAG_RELEASE, &type,
-			       (void **) &release, &count);
-		razor_importer_begin_package(importer, name, version);
+		headerGetEntry(h, RPMTAG_NAME, &type, &name.p, &count);
+		headerGetEntry(h, RPMTAG_VERSION, &type,&version.p, &count);
+		headerGetEntry(h, RPMTAG_RELEASE, &type, &release.p, &count);
+		razor_importer_begin_package(importer,
+					     name.string, version.string);
 
 		headerGetEntry(h, RPMTAG_REQUIRES, &type,
-			       (void **) &properties, &count);
+			       &properties.p, &count);
 		headerGetEntry(h, RPMTAG_REQUIREVERSION, &type,
-			       (void **) &property_versions, &count);
+			       &property_versions.p, &count);
 		for (i = 0; i < count; i++)
 			razor_importer_add_requires(importer,
-						    properties[i],
-						    property_versions[i]);
+						    properties.list[i],
+						    property_versions.list[i]);
 
 		headerGetEntry(h, RPMTAG_PROVIDES, &type,
-			       (void **) &properties, &count);
+			       &properties.p, &count);
 		headerGetEntry(h, RPMTAG_PROVIDEVERSION, &type,
-			       (void **) &property_versions, &count);
+			       &property_versions.p, &count);
 		for (i = 0; i < count; i++)
 			razor_importer_add_provides(importer,
-						    properties[i],
-						    property_versions[i]);
+						    properties.list[i],
+						    property_versions.list[i]);
 
 		razor_importer_finish_package(importer);
 	}
