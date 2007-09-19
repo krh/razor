@@ -15,7 +15,7 @@
 #include "razor.h"
 
 static void
-parse_package(struct import_context *ctx, const char **atts, void *data)
+parse_package(struct razor_importer *importer, const char **atts, void *data)
 {
 	const char *name = NULL, *version = NULL;
 	int i;
@@ -33,11 +33,15 @@ parse_package(struct import_context *ctx, const char **atts, void *data)
 		return;
 	}
 
-	import_context_add_package(ctx, name, version);
+	razor_importer_begin_package(importer, name, version);
 }
 
+enum {
+	RZR_REQUIRES, RZR_PROVIDES
+};
+
 static void
-parse_property(struct import_context *ctx, const char **atts, void *data)
+parse_property(struct razor_importer *importer, const char **atts, void *data)
 {
 	const char *name = NULL, *version = NULL;
 	int i;
@@ -54,33 +58,40 @@ parse_property(struct import_context *ctx, const char **atts, void *data)
 		return;
 	}
 
-	import_context_add_property(ctx, data, name, version);
+	switch ((int) data) {
+	case RZR_REQUIRES:
+		razor_importer_add_requires(importer, name, version);
+		break;
+	case RZR_PROVIDES:
+		razor_importer_add_provides(importer, name, version);
+		break;
+	}
 }
 
 static void
 start_element(void *data, const char *name, const char **atts)
 {
-	struct import_context *ctx = data;
+	struct razor_importer *importer = data;
 
 	if (strcmp(name, "package") == 0)
-		parse_package(ctx, atts, NULL);
+		parse_package(importer, atts, NULL);
 	else if (strcmp(name, "requires") == 0)
-		parse_property(ctx, atts, &ctx->requires);
+		parse_property(importer, atts, (void *) RZR_REQUIRES);
 	else if (strcmp(name, "provides") == 0)
-		parse_property(ctx, atts, &ctx->provides);
+		parse_property(importer, atts, (void*) RZR_PROVIDES);
 }
 
 static void
 end_element (void *data, const char *name)
 {
-	struct import_context *ctx = data;
+	struct razor_importer *importer = data;
 
 	if (strcmp(name, "package") == 0)
-		import_context_finish_package(ctx);
+		razor_importer_finish_package(importer);
 }
 
 static int
-import_rzr_file(struct import_context *ctx, const char *filename)
+import_rzr_file(struct razor_importer *importer, const char *filename)
 {
 	SHA_CTX sha1;
 	XML_Parser parser;
@@ -97,7 +108,7 @@ import_rzr_file(struct import_context *ctx, const char *filename)
 		return -1;
 
 	parser = XML_ParserCreate(NULL);
-	XML_SetUserData(parser, ctx);
+	XML_SetUserData(parser, importer);
 	XML_SetElementHandler(parser, start_element, end_element);
 	if (XML_Parse(parser, p, stat.st_size, 1) == XML_STATUS_ERROR) {
 		fprintf(stderr,
@@ -124,30 +135,32 @@ import_rzr_file(struct import_context *ctx, const char *filename)
 struct razor_set *
 razor_import_rzr_files(int count, const char *files[])
 {
-	struct import_context ctx;
+	struct razor_importer *importer;
 	int i;
 
-	razor_prepare_import(&ctx);
+	importer = razor_importer_new();
 
 	for (i = 0; i < count; i++) {
-		if (import_rzr_file(&ctx, files[i]) < 0) {
+		if (import_rzr_file(importer, files[i]) < 0) {
 			fprintf(stderr, "failed to import %s\n", files[i]);
 			exit(-1);
 		}
 	}
 
-	return razor_finish_import(&ctx);
+	return razor_importer_finish(importer);
 }
 
 /* Import a yum filelist as a razor package set. */
 
 enum {
 	YUM_STATE_BEGIN,
-	YUM_STATE_PACKAGE_NAME
+	YUM_STATE_PACKAGE_NAME,
+	YUM_STATE_REQUIRES,
+	YUM_STATE_PROVIDES
 };
 
 struct yum_context {
-	struct import_context ctx;
+	struct razor_importer *importer;
 	struct import_property_context *current_property_context;
 	char *name;
 	int state;
@@ -168,13 +181,13 @@ yum_start_element(void *data, const char *name, const char **atts)
 			if (strcmp(atts[i], "ver") == 0)
 				version = atts[i + 1];
 		}
-		import_context_add_package(&ctx->ctx, ctx->name, version);
+		razor_importer_begin_package(ctx->importer, ctx->name, version);
 	} else if (strcmp(name, "rpm:requires") == 0) {
-		ctx->current_property_context = &ctx->ctx.requires;
+		ctx->state = YUM_STATE_REQUIRES;
 	} else if (strcmp(name, "rpm:provides") == 0) {
-		ctx->current_property_context = &ctx->ctx.provides;
+		ctx->state = YUM_STATE_PROVIDES;
 	} else if (strcmp(name, "rpm:entry") == 0 &&
-		   ctx->current_property_context != NULL) {
+		   ctx->state != YUM_STATE_BEGIN) {
 		n = NULL;
 		version = NULL;
 		for (i = 0; atts[i]; i += 2) {
@@ -190,9 +203,15 @@ yum_start_element(void *data, const char *name, const char **atts)
 			return;
 		}
 
-		import_context_add_property(&ctx->ctx,
-					    ctx->current_property_context,
-					    n, version);
+		switch (ctx->state) {
+		case YUM_STATE_REQUIRES:
+			razor_importer_add_requires(ctx->importer, n, version);
+			break;
+		case YUM_STATE_PROVIDES:
+			razor_importer_add_provides(ctx->importer, n, version);
+			break;
+		}
+
 	}
 }
 
@@ -203,13 +222,13 @@ yum_end_element (void *data, const char *name)
 
 	if (strcmp(name, "package") == 0) {
 		free(ctx->name);
-		import_context_finish_package(&ctx->ctx);
+		razor_importer_finish_package(ctx->importer);
 	} else if (strcmp(name, "name") == 0) {
-		ctx->state = 0;
+		ctx->state = YUM_STATE_BEGIN;
 	} else if (strcmp(name, "rpm:requires") == 0) {
-		ctx->current_property_context = NULL;
+		ctx->state = YUM_STATE_BEGIN;
 	} else if (strcmp(name, "rpm:provides") == 0) {
-		ctx->current_property_context = NULL;
+		ctx->state = YUM_STATE_BEGIN;
 	}
 }
 
@@ -230,7 +249,7 @@ razor_set_create_from_yum_filelist(int fd)
 	char buf[4096];
 	int len;
 
-	razor_prepare_import(&ctx.ctx);
+	ctx.importer = razor_importer_new();	
 
 	parser = XML_ParserCreate(NULL);
 	XML_SetUserData(parser, &ctx);
@@ -257,13 +276,13 @@ razor_set_create_from_yum_filelist(int fd)
 
 	XML_ParserFree(parser);
 
-	return razor_finish_import(&ctx.ctx);
+	return razor_importer_finish(ctx.importer);
 }
 
 struct razor_set *
 razor_set_create_from_rpmdb(void)
 {
-	struct import_context ctx;
+	struct razor_importer *importer;
 	rpmdbMatchIterator iter;
 	Header h;
 	int_32 type, count, i;
@@ -278,7 +297,7 @@ razor_set_create_from_rpmdb(void)
 		exit(1);
 	}
 
-	razor_prepare_import(&ctx);
+	importer = razor_importer_new();
 
 	iter = rpmdbInitIterator(db, 0, NULL, 0);
 	while (h = rpmdbNextIterator(iter), h != NULL) {
@@ -288,16 +307,14 @@ razor_set_create_from_rpmdb(void)
 			       (void **) &version, &count);
 		headerGetEntry(h, RPMTAG_RELEASE, &type,
 			       (void **) &release, &count);
-		import_context_add_package(&ctx, name, version);
-
+		razor_importer_begin_package(importer, name, version);
 
 		headerGetEntry(h, RPMTAG_REQUIRES, &type,
 			       (void **) &properties, &count);
 		headerGetEntry(h, RPMTAG_REQUIREVERSION, &type,
 			       (void **) &property_versions, &count);
 		for (i = 0; i < count; i++)
-			import_context_add_property(&ctx,
-						    &ctx.requires,
+			razor_importer_add_requires(importer,
 						    properties[i],
 						    property_versions[i]);
 
@@ -306,15 +323,14 @@ razor_set_create_from_rpmdb(void)
 		headerGetEntry(h, RPMTAG_PROVIDEVERSION, &type,
 			       (void **) &property_versions, &count);
 		for (i = 0; i < count; i++)
-			import_context_add_property(&ctx,
-						    &ctx.provides,
+			razor_importer_add_provides(importer,
 						    properties[i],
 						    property_versions[i]);
 
-		import_context_finish_package(&ctx);
+		razor_importer_finish_package(importer);
 	}
 
 	rpmdbClose(db);
 
-	return razor_finish_import(&ctx);
+	return razor_importer_finish(importer);
 }

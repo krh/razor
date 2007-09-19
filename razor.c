@@ -13,6 +13,71 @@
 
 #include "razor.h"
 
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+
+struct array {
+	void *data;
+	int size, alloc;
+};
+
+struct razor_set_section {
+	unsigned int type;
+	unsigned int offset;
+	unsigned int size;
+};
+
+struct razor_set_header {
+	unsigned int magic;
+	unsigned int version;
+	struct razor_set_section sections[0];
+};
+
+#define RAZOR_MAGIC 0x7a7a7a7a
+#define RAZOR_VERSION 1
+
+#define RAZOR_PACKAGES 0
+#define RAZOR_REQUIRES 1
+#define RAZOR_PROVIDES 2
+#define RAZOR_STRING_POOL 3
+#define RAZOR_PROPERTY_POOL 4
+
+struct razor_package {
+	unsigned long name;
+	unsigned long version;
+	unsigned long requires;
+	unsigned long provides;
+};
+
+struct razor_property {
+	unsigned long name;
+	unsigned long version;
+	unsigned long packages;
+};
+
+struct razor_set {
+	struct array buckets;
+	struct array string_pool;
+	struct array property_pool;
+ 	struct array packages;
+ 	struct array requires;
+ 	struct array provides;
+	struct razor_set_header *header;
+};
+
+struct import_property_context {
+	struct array *all;
+	struct array package;
+};
+
+struct razor_importer {
+	struct razor_set *set;
+	struct import_property_context requires;
+	struct import_property_context provides;
+	struct razor_package *package;
+	unsigned long *requires_map;
+	unsigned long *provides_map;
+};
+
 static void
 array_init(struct array *array)
 {
@@ -305,7 +370,7 @@ razor_set_insert(struct razor_set *set, const char *key)
 	return value;
 }
 
-unsigned long
+static unsigned long
 razor_set_tokenize(struct razor_set *set, const char *string)
 {
 	unsigned long token;
@@ -321,35 +386,37 @@ razor_set_tokenize(struct razor_set *set, const char *string)
 }
 
 void
-import_context_add_package(struct import_context *ctx,
-			   const char *name, const char *version)
+razor_importer_begin_package(struct razor_importer *importer,
+			     const char *name, const char *version)
 {
 	struct razor_package *p;
 
-	p = array_add(&ctx->set->packages, sizeof *p);
-	p->name = razor_set_tokenize(ctx->set, name);
-	p->version = razor_set_tokenize(ctx->set, version);
+	p = array_add(&importer->set->packages, sizeof *p);
+	p->name = razor_set_tokenize(importer->set, name);
+	p->version = razor_set_tokenize(importer->set, version);
 
-	ctx->package = p;
-	array_init(&ctx->requires.package);
-	array_init(&ctx->provides.package);
+	importer->package = p;
+	array_init(&importer->requires.package);
+	array_init(&importer->provides.package);
 }
 
 void
-import_context_finish_package(struct import_context *ctx)
+razor_importer_finish_package(struct razor_importer *importer)
 {
 	struct razor_package *p;
 
-	p = ctx->package;
-	p->requires = add_to_property_pool(ctx->set, &ctx->requires.package);
-	p->provides = add_to_property_pool(ctx->set, &ctx->provides.package);
+	p = importer->package;
+	p->requires = add_to_property_pool(importer->set,
+					   &importer->requires.package);
+	p->provides = add_to_property_pool(importer->set,
+					   &importer->provides.package);
 
-	array_release(&ctx->requires.package);
-	array_release(&ctx->provides.package);
+	array_release(&importer->requires.package);
+	array_release(&importer->provides.package);
 }
 
-void
-import_context_add_property(struct import_context *ctx,
+static void
+razor_importer_add_property(struct razor_importer *importer,
 			    struct import_property_context *pctx,
 			    const char *name, const char *version)
 {
@@ -357,22 +424,42 @@ import_context_add_property(struct import_context *ctx,
 	unsigned long *r;
 
 	p = array_add(pctx->all, sizeof *p);
-	p->name = razor_set_tokenize(ctx->set, name);
-	p->version = razor_set_tokenize(ctx->set, version);
-	p->packages = ctx->package -
-		(struct razor_package *) ctx->set->packages.data;
+	p->name = razor_set_tokenize(importer->set, name);
+	p->version = razor_set_tokenize(importer->set, version);
+	p->packages = importer->package -
+		(struct razor_package *) importer->set->packages.data;
 
 	r = array_add(&pctx->package, sizeof *r);
 	*r = p - (struct razor_property *) pctx->all->data;
 }
 
 void
-razor_prepare_import(struct import_context *ctx)
+razor_importer_add_requires(struct razor_importer *importer,
+			    const char *name, const char *version)
 {
-	memset(ctx, 0, sizeof *ctx);
-	ctx->set = razor_set_create();
-	ctx->requires.all = &ctx->set->requires;
-	ctx->provides.all = &ctx->set->provides;
+	razor_importer_add_property(importer,
+				    &importer->requires, name, version);
+}
+
+void
+razor_importer_add_provides(struct razor_importer *importer,
+			    const char *name, const char *version)
+{
+	razor_importer_add_property(importer,
+				    &importer->provides, name, version);
+}
+
+struct razor_importer *
+razor_importer_new(void)
+{
+	struct razor_importer *importer;
+
+	importer = zalloc(sizeof *importer);
+	importer->set = razor_set_create();
+	importer->requires.all = &importer->set->requires;
+	importer->provides.all = &importer->set->provides;
+
+	return importer;
 }
 
 typedef int (*compare_with_data_func_t)(const void *p1,
@@ -541,33 +628,33 @@ uniqueify_properties(struct razor_set *set, struct array *properties)
 }
 
 static void
-remap_package_links(struct import_context *ctx)
+remap_package_links(struct razor_importer *importer)
 {
 	struct razor_package *p, *end;
 	unsigned long *pool, *r;
 
-	pool = ctx->set->property_pool.data;
-	end = ctx->set->packages.data + ctx->set->packages.size;
-	for (p = ctx->set->packages.data; p < end; p++) {
+	pool = importer->set->property_pool.data;
+	end = importer->set->packages.data + importer->set->packages.size;
+	for (p = importer->set->packages.data; p < end; p++) {
 		for (r = &pool[p->requires]; ~*r; r++)
-			*r = ctx->requires_map[*r];
+			*r = importer->requires_map[*r];
 		for (r = &pool[p->provides]; ~*r; r++)
-			*r = ctx->provides_map[*r];
+			*r = importer->provides_map[*r];
 	}
 }
 
 static void
-remap_property_links(struct import_context *ctx, unsigned long *map)
+remap_property_links(struct razor_importer *importer, unsigned long *map)
 {
 	struct razor_property *p, *end;
 	struct razor_package *rp;
 	unsigned long *pool, *r, *rmap;
 	int i, count;
 
-	pool = ctx->set->property_pool.data;
-	count = ctx->set->packages.size / sizeof(struct razor_package);
+	pool = importer->set->property_pool.data;
+	count = importer->set->packages.size / sizeof(struct razor_package);
 	rmap = malloc(count * sizeof *map);
-	rp = ctx->set->packages.data;
+	rp = importer->set->packages.data;
 	for (i = 0; i < count; i++)
 		rmap[map[i]] = i;
 
@@ -578,13 +665,13 @@ remap_property_links(struct import_context *ctx, unsigned long *map)
 	 * a flat pool.  Right now, as property lists and package
 	 * lists are mixed, we can't do that. */
 
-	end = ctx->set->requires.data + ctx->set->requires.size;
-	for (p = ctx->set->requires.data; p < end; p++)
+	end = importer->set->requires.data + importer->set->requires.size;
+	for (p = importer->set->requires.data; p < end; p++)
 		for (r = &pool[p->packages]; ~*r; r++)
 			*r = rmap[*r];
 
-	end = ctx->set->provides.data + ctx->set->provides.size;
-	for (p = ctx->set->provides.data; p < end; p++)
+	end = importer->set->provides.data + importer->set->provides.size;
+	for (p = importer->set->provides.data; p < end; p++)
 		for (r = &pool[p->packages]; ~*r; r++)
 			*r = rmap[*r];
 
@@ -592,27 +679,33 @@ remap_property_links(struct import_context *ctx, unsigned long *map)
 }
 
 struct razor_set *
-razor_finish_import(struct import_context *ctx)
+razor_importer_finish(struct razor_importer *importer)
 {
+	struct razor_set *set;
 	unsigned long *map;
 	int count;
 
-	ctx->requires_map = uniqueify_properties(ctx->set, ctx->requires.all);
-	ctx->provides_map = uniqueify_properties(ctx->set, ctx->provides.all);
-	remap_package_links(ctx);
-	free(ctx->requires_map);
-	free(ctx->provides_map);
+	importer->requires_map = uniqueify_properties(importer->set,
+						      importer->requires.all);
+	importer->provides_map = uniqueify_properties(importer->set,
+						      importer->provides.all);
+	remap_package_links(importer);
+	free(importer->requires_map);
+	free(importer->provides_map);
 
-	count = ctx->set->packages.size / sizeof(struct razor_package);
-	map = qsort_with_data(ctx->set->packages.data,
+	count = importer->set->packages.size / sizeof(struct razor_package);
+	map = qsort_with_data(importer->set->packages.data,
 			      count,
 			      sizeof(struct razor_package),
 			      compare_packages,
-			      ctx->set);
-	remap_property_links(ctx, map);
+			      importer->set);
+	remap_property_links(importer, map);
 	free(map);
 
-	return ctx->set; 
+	set = importer->set;
+	free(importer);
+
+	return set;
 }
 
 void
