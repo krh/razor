@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <ctype.h>
 
 #include "razor.h"
 
@@ -555,6 +556,44 @@ qsort_with_data(void *base, size_t nelem, size_t size,
 }
 
 static int
+versioncmp(const char *s1, const char *s2)
+{
+	const char *p1, *p2;
+	long n1, n2;
+	int res;
+
+	n1 = strtol(s1, (char **) &p1, 0);
+	n2 = strtol(s2, (char **) &p2, 0);
+
+	/* Epoch; if one but not the other has an epoch set, default
+	 * the epoch-less version to 0. */
+	res = (*p1 == ':') - (*p2 == ':');
+	if (res < 0) {
+		n1 = 0;
+		p1 = s1;
+		p2++;
+	} else if (res > 0) {
+		p1++;
+		n2 = 0;
+		p2 = s2;
+	}
+
+	if (n1 != n2)
+		return n1 - n2;
+	while (*p1 && *p2) {
+		if (*p1 != *p2)
+			return *p1 - *p2;
+		p1++;
+		p2++;
+		if (isdigit(*p1) && isdigit(*p2))
+			return versioncmp(p1, p2);
+	}
+
+	return *p1 - *p2;
+}
+
+
+static int
 compare_packages(const void *p1, const void *p2, void *data)
 {
 	const struct razor_package *pkg1 = p1, *pkg2 = p2;
@@ -562,7 +601,7 @@ compare_packages(const void *p1, const void *p2, void *data)
 	char *pool = set->string_pool.data;
 
 	if (pkg1->name == pkg2->name)
-		return strcmp(&pool[pkg1->version], &pool[pkg2->version]);
+		return versioncmp(&pool[pkg1->version], &pool[pkg2->version]);
 	else
 		return strcmp(&pool[pkg1->name], &pool[pkg2->name]);
 }
@@ -575,7 +614,7 @@ compare_properties(const void *p1, const void *p2, void *data)
 	char *pool = set->string_pool.data;
 
 	if (prop1->name == prop2->name)
-		return strcmp(&pool[prop1->version], &pool[prop2->version]);
+		return versioncmp(&pool[prop1->version], &pool[prop2->version]);
 	else
 		return strcmp(&pool[prop1->name], &pool[prop2->name]);
 }
@@ -846,7 +885,7 @@ razor_set_list_property_packages(struct razor_set *set,
 	pool = set->string_pool.data;
 	end = properties->data + properties->size;
 	while (property < end && strcmp(name, &pool[property->name]) == 0) {
-		if (version && strcmp(version, &pool[property->version]) != 0)
+		if (version && versioncmp(version, &pool[property->version]) != 0)
 			goto next;
 		r = (unsigned long *)
 			set->property_pool.data + property->packages;
@@ -867,20 +906,26 @@ razor_set_validate(struct razor_set *set, struct array *unsatisfied)
 	unsigned long *u;
 	char *pool;
 
-	r = set->requires.data;
 	p = set->provides.data;
 	rend = set->requires.data + set->requires.size;
 	pend = set->provides.data + set->provides.size;
 	pool = set->string_pool.data;
 	
-	while (r < rend) {
+	for (r = set->requires.data; r < rend; r++) {
 		while (p < pend && strcmp(&pool[r->name], &pool[p->name]) > 0)
 			p++;
-		if (p == pend || strcmp(&pool[r->name], &pool[p->name]) != 0) {
+		/* If there is more than one version of a provides,
+		 * seek to the end for the highest version. */
+		while (p + 1 < pend && p->name == (p + 1)->name)
+			p++;
+		if (p == pend || strcmp(&pool[r->name], &pool[p->name]) != 0 ||
+		    versioncmp(&pool[r->version], &pool[p->version]) > 0) {
+			/* FIXME: We ignore file requires for now. */
+			if (pool[r->name] == '/')
+				continue;
 			u = array_add(unsatisfied, sizeof *u);
 			*u = r - (struct razor_property *) set->requires.data;
 		}
-		r++;
 	}
 }
 
