@@ -990,6 +990,18 @@ add_package(struct razor_importer *importer,
  * package indexes.  Returns a newly allocated package set.  Does not
  * enforce validity of the resulting package set. */
 
+/* FIXME: We can do this in a linear sweep instead of using an
+ * importer and the sorting that incurs: build the new package list
+ * sorted, build up a map from package index in old set to package
+ * index in new set for both sets. ~0 means 'not in new set'.  build
+ * new string pool as we go, probably just re-use that part of the
+ * importer.  as we build the package list, fill out a bitvector of
+ * the properties that are referenced by the pacakges in the new
+ * set. then do a parallel loop through the properties and emit them
+ * to the new set and build a map from indices in the old set to
+ * indices in the new set. then loop through the packages again and
+ * emit the property lists. */
+
 struct razor_set *
 razor_set_add(struct razor_set *set, struct razor_set *upstream,
 	      struct array *packages)
