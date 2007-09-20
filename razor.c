@@ -1090,6 +1090,46 @@ razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
 	}	
 }
 
+static void
+find_packages(struct razor_set *set,
+	      int count, const char **packages, struct array *list)
+{
+	struct razor_package *p;
+	unsigned long *r;
+	int i;
+
+	/* FIXME: Sort the packages. */
+	for (i = 0; i < count; i++) {
+		p = razor_set_get_package(set, packages[i]);
+		r = array_add(list, sizeof *r);
+		*r = p - (struct razor_package *) set->packages.data;
+	}
+}
+
+static void
+find_all_packages(struct razor_set *set,
+		  struct razor_set *upstream, struct array *list)
+{
+	struct razor_package *p, *u, *pend, *uend;
+	unsigned long *r;
+	char *pool, *upool;
+
+	pend = set->packages.data + set->packages.size;
+	pool = set->string_pool.data;
+	u = upstream->packages.data;
+	uend = upstream->packages.data + upstream->packages.size;
+	upool = upstream->string_pool.data;
+
+	for (p = set->packages.data; p < pend; p++) {
+		while (u < uend && strcmp(&pool[p->name], &upool[u->name]) > 0)
+			u++;
+		if (strcmp(&pool[p->name], &upool[u->name]) == 0) {
+			r = array_add(list, sizeof *r);
+			*r = u - (struct razor_package *) upstream->packages.data;
+		}
+	}
+}
+
 struct razor_set *
 razor_set_update(struct razor_set *set, struct razor_set *upstream,
 		 int count, const char **packages)
@@ -1098,15 +1138,14 @@ razor_set_update(struct razor_set *set, struct razor_set *upstream,
 	struct razor_package *p, *upackages;
 	struct array list, unsatisfied;
 	char *pool;
-	unsigned long *r, *u, *end;
-	int i;
+	unsigned long *u, *end;
+	int total = 0;
 
 	array_init(&list);
-	for (i = 0; i < count; i++) {
-		p = razor_set_get_package(upstream, packages[i]);
-		r = array_add(&list, sizeof *r);
-		*r = p - (struct razor_package *) upstream->packages.data;
-	}
+	if (count > 0)
+		find_packages(upstream, count, packages, &list);
+	else
+		find_all_packages(set, upstream, &list);
 
 	end = list.data + list.size;
 	upackages = upstream->packages.data;
@@ -1116,6 +1155,7 @@ razor_set_update(struct razor_set *set, struct razor_set *upstream,
 		printf("package %s-%s set to be updated\n",
 		       &pool[p->name], &pool[p->version]);
 	}
+	total += list.size / sizeof *u;
 
 	while (list.size > 0) {
 		printf(" -- satisfying new requires\n");
@@ -1139,9 +1179,12 @@ razor_set_update(struct razor_set *set, struct razor_set *upstream,
 			printf("package %s-%s set to be updated\n",
 			       &pool[p->name], &pool[p->version]);
 		}
+		total += list.size / sizeof *u;
 	}
 
 	array_release(&list);
+
+	printf("total of %d packages set to be updated\n", total);
 
 	return set;
 }
