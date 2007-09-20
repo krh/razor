@@ -914,10 +914,17 @@ razor_set_validate(struct razor_set *set, struct array *unsatisfied)
 	for (r = set->requires.data; r < rend; r++) {
 		while (p < pend && strcmp(&pool[r->name], &pool[p->name]) > 0)
 			p++;
+
 		/* If there is more than one version of a provides,
 		 * seek to the end for the highest version. */
 		while (p + 1 < pend && p->name == (p + 1)->name)
 			p++;
+
+		/* FIXME: We need to track property flags (<, <=, =
+		 * etc) to properly determine if a requires is
+		 * satisfied.  The current code doesn't track that the
+		 * requires a = 1 isn't satisfied by a = 2 provides. */
+
 		if (p == pend || strcmp(&pool[r->name], &pool[p->name]) != 0 ||
 		    versioncmp(&pool[r->version], &pool[p->version]) > 0) {
 			/* FIXME: We ignore file requires for now. */
@@ -1023,8 +1030,9 @@ razor_set_add(struct razor_set *set, struct razor_set *upstream,
 
 	while (s < send) {
 		p = upstream_packages + *u;
-		cmp = strcmp(&spool[s->name], &upool[p->name]);
-		if (cmp < 0 || u == uend) {
+		if (u < uend)
+			cmp = strcmp(&spool[s->name], &upool[p->name]);
+		if (u >= uend || cmp < 0) {
 			add_package(importer, s, set);
 			s++;
 		} else if (cmp == 0) {
@@ -1040,13 +1048,57 @@ razor_set_add(struct razor_set *set, struct razor_set *upstream,
 	return razor_importer_finish(importer);
 }
 
+void
+razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
+		  struct razor_set *upstream, struct array *list)
+{
+	struct razor_property *requires, *r;
+	struct razor_property *p, *pend;
+	unsigned long *u, *end, *pkg, *property_pool;
+	char *pool, *upool;
+
+	end = unsatisfied->data + unsatisfied->size;
+	requires = set->requires.data;
+	pool = set->string_pool.data;
+
+	p = upstream->provides.data;
+	pend = upstream->provides.data + upstream->provides.size;
+	upool = upstream->string_pool.data;
+	property_pool = upstream->property_pool.data;
+
+	for (u = unsatisfied->data; u < end; u++) {
+		r = requires + *u;
+
+		while (p < pend && strcmp(&pool[r->name], &upool[p->name]) > 0)
+			p++;
+		/* If there is more than one version of a provides,
+		 * seek to the end for the highest version. */
+		while (p + 1 < pend && p->name == (p + 1)->name)
+			p++;
+
+		if (p == pend ||
+		    strcmp(&pool[r->name], &upool[p->name]) != 0 ||
+		    versioncmp(&pool[r->version], &upool[p->version]) > 0) {
+			/* Do we need to track unsatisfiable requires
+			 * as we go, or should we just do a
+			 * razor_set_validate() at the end? */
+		} else {
+			pkg = array_add(list, sizeof *pkg);
+			/* We just pull in the first package that provides */
+			*pkg = property_pool[p->packages];
+		}
+	}	
+}
+
 struct razor_set *
 razor_set_update(struct razor_set *set, struct razor_set *upstream,
 		 int count, const char **packages)
 {
-	struct razor_package *p;
-	struct array list;
-	unsigned long *r;
+	struct razor_set *new;
+	struct razor_package *p, *upackages;
+	struct array list, unsatisfied;
+	char *pool;
+	unsigned long *r, *u, *end;
 	int i;
 
 	array_init(&list);
@@ -1056,7 +1108,42 @@ razor_set_update(struct razor_set *set, struct razor_set *upstream,
 		*r = p - (struct razor_package *) upstream->packages.data;
 	}
 
-	return razor_set_add(set, upstream, &list);
+	end = list.data + list.size;
+	upackages = upstream->packages.data;
+	pool = upstream->string_pool.data;
+	for (u = list.data; u < end; u++) {
+		p = upackages + *u;
+		printf("package %s-%s set to be updated\n",
+		       &pool[p->name], &pool[p->version]);
+	}
+
+	while (list.size > 0) {
+		printf(" -- satisfying new requires\n");
+
+		new = razor_set_add(set, upstream, &list);
+		array_release(&list);
+		razor_set_destroy(set);
+		set = new;
+
+		array_init(&unsatisfied);
+		razor_set_validate(new, &unsatisfied);
+		array_init(&list);
+		razor_set_satisfy(new, &unsatisfied, upstream, &list);
+		array_release(&unsatisfied);
+
+		end = list.data + list.size;
+		upackages = upstream->packages.data;
+		pool = upstream->string_pool.data;
+		for (u = list.data; u < end; u++) {
+			p = upackages + *u;
+			printf("package %s-%s set to be updated\n",
+			       &pool[p->name], &pool[p->version]);
+		}
+	}
+
+	array_release(&list);
+
+	return set;
 }
 
 void
@@ -1103,7 +1190,7 @@ static const char rawhide_repo_filename[] = "rawhide.repo";
 int
 main(int argc, const char *argv[])
 {
-	struct razor_set *set, *upstream, *new;
+	struct razor_set *set, *upstream;
 	struct stat statbuf;
 	char *repo;
 
@@ -1184,11 +1271,11 @@ main(int argc, const char *argv[])
 		upstream = razor_set_open(rawhide_repo_filename);
 		if (set == NULL || upstream == NULL)
 			return 1;
-		new = razor_set_update(set, upstream, argc - 2, argv + 2);
-		razor_set_write(new, "system-updated.repo");
-		razor_set_destroy(new);
+		set = razor_set_update(set, upstream, argc - 2, argv + 2);
+		razor_set_write(set, "system-updated.repo");
 		razor_set_destroy(set);
 		razor_set_destroy(upstream);
+		printf("wrote system-updated.repo\n");
 	} else {
 		usage();
 	}
