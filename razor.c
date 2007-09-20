@@ -40,7 +40,9 @@ struct razor_set_header {
 #define RAZOR_REQUIRES 1
 #define RAZOR_PROVIDES 2
 #define RAZOR_STRING_POOL 3
-#define RAZOR_PROPERTY_POOL 4
+#define RAZOR_PACKAGE_POOL 4
+#define RAZOR_REQUIRES_POOL 5
+#define RAZOR_PROVIDES_POOL 6
 
 struct razor_package {
 	unsigned long name;
@@ -57,10 +59,12 @@ struct razor_property {
 
 struct razor_set {
 	struct array string_pool;
-	struct array property_pool;
  	struct array packages;
+	struct array package_pool;
  	struct array requires;
  	struct array provides;
+ 	struct array requires_pool;
+ 	struct array provides_pool;
 	struct razor_set_header *header;
 };
 
@@ -151,7 +155,9 @@ struct razor_set_section razor_sections[] = {
 	{ RAZOR_REQUIRES,	offsetof(struct razor_set, requires) },
 	{ RAZOR_PROVIDES,	offsetof(struct razor_set, provides) },
 	{ RAZOR_STRING_POOL,	offsetof(struct razor_set, string_pool) },
-	{ RAZOR_PROPERTY_POOL,	offsetof(struct razor_set, property_pool) },
+	{ RAZOR_PACKAGE_POOL,	offsetof(struct razor_set, package_pool) },
+	{ RAZOR_REQUIRES_POOL,	offsetof(struct razor_set, requires_pool) },
+	{ RAZOR_PROVIDES_POOL,	offsetof(struct razor_set, provides_pool) },
 };
 
 struct razor_set *
@@ -311,16 +317,16 @@ add_to_string_pool(struct razor_set *set, const char *key)
 }
 
 static unsigned long
-add_to_property_pool(struct razor_set *set, struct array *properties)
+add_to_property_pool(struct array *pool, struct array *properties)
 {
 	unsigned long  *p;
 
 	p = array_add(properties, sizeof *p);
 	*p = ~0ul;
-	p = array_add(&set->property_pool, properties->size);
+	p = array_add(pool, properties->size);
 	memcpy(p, properties->data, properties->size);
 
-	return p - (unsigned long *) set->property_pool.data;
+	return p - (unsigned long *) pool->data;
 }
 
 static void
@@ -405,9 +411,9 @@ razor_importer_finish_package(struct razor_importer *importer)
 	struct razor_package *p;
 
 	p = importer->package;
-	p->requires = add_to_property_pool(importer->set,
+	p->requires = add_to_property_pool(&importer->set->requires_pool,
 					   &importer->requires.package);
-	p->provides = add_to_property_pool(importer->set,
+	p->provides = add_to_property_pool(&importer->set->provides_pool,
 					   &importer->provides.package);
 
 	array_release(&importer->requires.package);
@@ -655,7 +661,7 @@ uniqueify_properties(struct razor_set *set, struct array *properties)
 	properties->size = (void *) up - properties->data;
 	rp_end = up;
 	for (rp = properties->data, p = pkgs; rp < rp_end; rp++, p++) {
-		rp->packages = add_to_property_pool(set, p);
+		rp->packages = add_to_property_pool(&set->package_pool, p);
 		array_release(p);
 	}
 
@@ -665,70 +671,30 @@ uniqueify_properties(struct razor_set *set, struct array *properties)
 }
 
 static void
-remap_package_links(struct razor_importer *importer)
+remap_links(struct array *links, unsigned long *map)
 {
-	struct razor_package *p, *end;
-	unsigned long *pool, *r;
+	unsigned long *p, *end;
 
-	pool = importer->set->property_pool.data;
-	end = importer->set->packages.data + importer->set->packages.size;
-	for (p = importer->set->packages.data; p < end; p++) {
-		for (r = &pool[p->requires]; ~*r; r++)
-			*r = importer->requires_map[*r];
-		for (r = &pool[p->provides]; ~*r; r++)
-			*r = importer->provides_map[*r];
-	}
-}
-
-static void
-remap_property_links(struct razor_importer *importer, unsigned long *map)
-{
-	struct razor_property *p, *end;
-	struct razor_package *rp;
-	unsigned long *pool, *r, *rmap;
-	int i, count;
-
-	pool = importer->set->property_pool.data;
-	count = importer->set->packages.size / sizeof(struct razor_package);
-	rmap = malloc(count * sizeof *map);
-	rp = importer->set->packages.data;
-	for (i = 0; i < count; i++)
-		rmap[map[i]] = i;
-
-	/* FIXME: This will break if we implement package list sharing
-	 * for all properties, since we'll remap those lists more than
-	 * once. We should just have a separate pool for property
-	 * lists and a separate pool for package lists and remap it as
-	 * a flat pool.  Right now, as property lists and package
-	 * lists are mixed, we can't do that. */
-
-	end = importer->set->requires.data + importer->set->requires.size;
-	for (p = importer->set->requires.data; p < end; p++)
-		for (r = &pool[p->packages]; ~*r; r++)
-			*r = rmap[*r];
-
-	end = importer->set->provides.data + importer->set->provides.size;
-	for (p = importer->set->provides.data; p < end; p++)
-		for (r = &pool[p->packages]; ~*r; r++)
-			*r = rmap[*r];
-
-	free(rmap);
+	end = links->data + links->size;
+	for (p = links->data; p < end; p++)
+		if (*p != ~0)
+			*p = map[*p];
 }
 
 struct razor_set *
 razor_importer_finish(struct razor_importer *importer)
 {
 	struct razor_set *set;
-	unsigned long *map;
-	int count;
+	unsigned long *map, *rmap;
+	int i, count;
 
-	importer->requires_map = uniqueify_properties(importer->set,
-						      importer->requires.all);
-	importer->provides_map = uniqueify_properties(importer->set,
-						      importer->provides.all);
-	remap_package_links(importer);
-	free(importer->requires_map);
-	free(importer->provides_map);
+	map = uniqueify_properties(importer->set, &importer->set->requires);
+	remap_links(&importer->set->requires_pool, map);
+	free(map);
+
+	map = uniqueify_properties(importer->set, &importer->set->provides);
+	remap_links(&importer->set->provides_pool, map);
+	free(map);
 
 	count = importer->set->packages.size / sizeof(struct razor_package);
 	map = qsort_with_data(importer->set->packages.data,
@@ -736,8 +702,14 @@ razor_importer_finish(struct razor_importer *importer)
 			      sizeof(struct razor_package),
 			      compare_packages,
 			      importer->set);
-	remap_property_links(importer, map);
+
+	rmap = malloc(count * sizeof *rmap);
+	for (i = 0; i < count; i++)
+		rmap[map[i]] = i;
+
+	remap_links(&importer->set->package_pool, rmap);
 	free(map);
+	free(rmap);
 
 	set = importer->set;
 	array_release(&importer->buckets);
@@ -832,7 +804,7 @@ razor_set_list_requires(struct razor_set *set, const char *name)
 
 	if (name) {
 		package = razor_set_get_package(set, name);
-		r = (unsigned long *) set->property_pool.data +
+		r = (unsigned long *) set->requires_pool.data +
 			package->requires;
 		requires = set->requires.data;
 		pool = set->string_pool.data;
@@ -854,7 +826,7 @@ razor_set_list_provides(struct razor_set *set, const char *name)
 
 	if (name) {
 		package = razor_set_get_package(set, name);
-		r = (unsigned long *) set->property_pool.data +
+		r = (unsigned long *) set->provides_pool.data +
 			package->provides;
 		provides = set->provides.data;
 		pool = set->string_pool.data;
@@ -888,7 +860,7 @@ razor_set_list_property_packages(struct razor_set *set,
 		if (version && versioncmp(version, &pool[property->version]) != 0)
 			goto next;
 		r = (unsigned long *)
-			set->property_pool.data + property->packages;
+			set->package_pool.data + property->packages;
 		while (~*r) {
 			p = &packages[*r++];
 			printf("%s %s\n",
@@ -973,7 +945,7 @@ add_package(struct razor_importer *importer,
 				     &pool[package->name],
 				     &pool[package->version]);
 
-	r = (unsigned long *) set->property_pool.data + package->requires;
+	r = (unsigned long *) set->requires_pool.data + package->requires;
 	properties = set->requires.data;
 	while (~*r) {
 		p = &properties[*r++];
@@ -981,7 +953,7 @@ add_package(struct razor_importer *importer,
 					    &pool[p->name], &pool[p->version]);
 	}
 
-	r = (unsigned long *) set->property_pool.data + package->provides;
+	r = (unsigned long *) set->provides_pool.data + package->provides;
 	properties = set->provides.data;
 	while (~*r) {
 		p = &properties[*r++];
@@ -1054,7 +1026,7 @@ razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
 {
 	struct razor_property *requires, *r;
 	struct razor_property *p, *pend;
-	unsigned long *u, *end, *pkg, *property_pool;
+	unsigned long *u, *end, *pkg, *package_pool;
 	char *pool, *upool;
 
 	end = unsatisfied->data + unsatisfied->size;
@@ -1064,7 +1036,7 @@ razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
 	p = upstream->provides.data;
 	pend = upstream->provides.data + upstream->provides.size;
 	upool = upstream->string_pool.data;
-	property_pool = upstream->property_pool.data;
+	package_pool = upstream->package_pool.data;
 
 	for (u = unsatisfied->data; u < end; u++) {
 		r = requires + *u;
@@ -1085,7 +1057,7 @@ razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
 		} else {
 			pkg = array_add(list, sizeof *pkg);
 			/* We just pull in the first package that provides */
-			*pkg = property_pool[p->packages];
+			*pkg = package_pool[p->packages];
 		}
 	}	
 }
@@ -1211,9 +1183,6 @@ razor_set_info(struct razor_set *set)
 			break;
 		case RAZOR_STRING_POOL:
 			printf("string pool:\t\t%dkb\n", size / 1024);
-			break;
-		case RAZOR_PROPERTY_POOL:
-			printf("properties section:\t%dkb\n", size / 1024);
 			break;
 		}
 	}
