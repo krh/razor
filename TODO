@@ -51,16 +51,19 @@
 - no external dependencies, forget about bdb, sqlite.  It's *simple*
   and we need to control the on-disk format for these tools.
 
-- 20740 requires, 2246 unique... hmm.
-
 - diff from one package set to another answers: "what changed in
   rawhide between since yesterday?"
 
 - rewrite qsort and bsearch that doesn't require global context var
   and can output a map describing the permutaion.
 
-- move package lists out of the property pool, remap properties and
-  packages in the two pools by just iterating through the pools.
-
 - use hash table for package and property lists so we only store
   unique lists (like for string pool).
+
+- use existing, running system as repo; eg
+
+	razor update razor://other-box.local evince
+
+  to pull eg the latest evince and dependencies from another box.  We
+  should be able to regenerate a rzr pkg from the system so we can
+  reuse the signature from the originating repo.
