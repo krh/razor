@@ -79,8 +79,6 @@ struct razor_importer {
 	struct import_property_context requires;
 	struct import_property_context provides;
 	struct razor_package *package;
-	unsigned long *requires_map;
-	unsigned long *provides_map;
 };
 
 static void
@@ -932,92 +930,318 @@ razor_set_list_unsatisfied(struct razor_set *set)
 	array_release(&unsatisfied);
 }
 
+#define UPSTREAM_SOURCE 0x80000000ul
+#define INDEX_MASK 0x00fffffful
+
+struct source {
+	struct razor_set *set;
+	unsigned long *requires_map;
+	unsigned long *provides_map;
+};
+
+static void
+prepare_source(struct source *source, struct razor_set *set)
+{
+	int count;
+	size_t size;
+
+	source->set = set;
+
+	count = set->requires.size / sizeof (struct razor_property);
+	size = count * sizeof *source->requires_map;
+	source->requires_map = zalloc(size);
+
+	count = set->provides.size / sizeof (struct razor_property);
+	size = count * sizeof *source->provides_map;
+	source->provides_map = zalloc(size);
+}
+
 static void
 add_package(struct razor_importer *importer,
-	    struct razor_package *package, struct razor_set *set)
+	    struct razor_package *package, struct source *source,
+	    unsigned long flags)
 {
 	char *pool;
 	unsigned long *r;
-	struct razor_property *p, *properties;
+	struct razor_package *p;
 
-	pool = set->string_pool.data;
-	razor_importer_begin_package(importer,
-				     &pool[package->name],
-				     &pool[package->version]);
+	pool = source->set->string_pool.data;
+	p = array_add(&importer->set->packages, sizeof *p);
+	p->name = razor_importer_tokenize(importer, &pool[package->name]);
+	p->name |= flags;
+	p->version = razor_importer_tokenize(importer,
+					     &pool[package->version]);
+	p->requires = package->requires;
+	p->provides = package->provides;
 
-	r = (unsigned long *) set->requires_pool.data + package->requires;
-	properties = set->requires.data;
-	while (~*r) {
-		p = &properties[*r++];
-		razor_importer_add_requires(importer,
-					    &pool[p->name], &pool[p->version]);
-	}
+	r = (unsigned long *)
+		source->set->requires_pool.data + package->requires;
+	while (*r != ~0)
+		source->requires_map[*r++] = 1;
 
-	r = (unsigned long *) set->provides_pool.data + package->provides;
-	properties = set->provides.data;
-	while (~*r) {
-		p = &properties[*r++];
-		razor_importer_add_provides(importer,
-					    &pool[p->name], &pool[p->version]);
-	}
-
-	razor_importer_finish_package(importer);
+	r = (unsigned long *)
+		source->set->provides_pool.data + package->provides;
+	while (*r != ~0)
+		source->provides_map[*r++] = 1;
 }
 
-/* Add packages from 'upstream' to 'set'.  The packages to add are
- * specified by the 'packages' array, which is a sorted list of
- * package indexes.  Returns a newly allocated package set.  Does not
- * enforce validity of the resulting package set. */
 
-/* FIXME: We can do this in a linear sweep instead of using an
- * importer and the sorting that incurs: build the new package list
- * sorted, build up a map from package index in old set to package
- * index in new set for both sets. ~0 means 'not in new set'.  build
- * new string pool as we go, probably just re-use that part of the
- * importer.  as we build the package list, fill out a bitvector of
- * the properties that are referenced by the pacakges in the new
- * set. then do a parallel loop through the properties and emit them
- * to the new set and build a map from indices in the old set to
- * indices in the new set. then loop through the packages again and
- * emit the property lists. */
-
-struct razor_set *
-razor_set_add(struct razor_set *set, struct razor_set *upstream,
-	      struct array *packages)
+/* Build the new package list sorted by merging the two package lists.
+ * Build new string pool as we go. (for now we just re-use that part of
+ * the importer). */
+static void
+merge_packages(struct razor_importer *importer,
+	       struct source *source1, struct source *source2,
+	       struct array *packages)
 {
-	struct razor_importer *importer;
 	struct razor_package *upstream_packages, *p, *s, *send;
 	char *spool, *upool;
 	unsigned long *u, *uend;
 	int cmp;
 
-	importer = razor_importer_new();
-	upstream_packages = upstream->packages.data;
+	upstream_packages = source2->set->packages.data;
+
 	u = packages->data;
 	uend = packages->data + packages->size;
-	upool = upstream->string_pool.data;
-	s = set->packages.data;
-	send = set->packages.data + set->packages.size;
-	spool = set->string_pool.data;
+	upool = source2->set->string_pool.data;
+
+	s = source1->set->packages.data;
+	send = source1->set->packages.data + source1->set->packages.size;
+	spool = source1->set->string_pool.data;
 
 	while (s < send) {
 		p = upstream_packages + *u;
+
 		if (u < uend)
 			cmp = strcmp(&spool[s->name], &upool[p->name]);
 		if (u >= uend || cmp < 0) {
-			add_package(importer, s, set);
+			add_package(importer, s, source1, 0);
 			s++;
 		} else if (cmp == 0) {
-			add_package(importer, p, upstream);
+			add_package(importer, p, source2, UPSTREAM_SOURCE);
 			s++;
 			u++;
 		} else {
-			add_package(importer, p, upstream);
+			add_package(importer, p, source2, UPSTREAM_SOURCE);
 			u++;
 		}
 	}
+}
 
-	return razor_importer_finish(importer);
+static unsigned long
+add_property(struct razor_importer *importer, struct array *properties,
+	     const char *name, const char *version)
+{
+	struct razor_property *p;
+
+	p = array_add(properties, sizeof *p);
+	p->name = razor_importer_tokenize(importer, name);
+	p->version = razor_importer_tokenize(importer, version);
+
+	return p - (struct razor_property *) properties->data;
+}
+
+static void
+merge_properties(struct array *properties,
+		 struct razor_importer *importer,
+		 struct razor_set *set1,
+		 struct array *properties1,
+		 unsigned long *map1,
+		 struct razor_set *set2,
+		 struct array *properties2,
+		 unsigned long *map2)
+{
+	struct razor_property *p1, *p2;
+	int i, j, cmp, count1, count2;
+	char *pool1, *pool2;
+
+	i = 0;
+	j = 0;
+	pool1 = set1->string_pool.data;
+	pool2 = set2->string_pool.data;
+
+	count1 = properties1->size / sizeof *p1;
+	count2 = properties2->size / sizeof *p2;
+	while (i < count1 || j < count2) {
+		if (i < count1 && map1[i] == 0) {
+			i++;
+			continue;
+		}
+		if (j < count2 && map2[j] == 0) {
+			j++;
+			continue;
+		}
+		p1 = (struct razor_property *) properties1->data + i;
+		p2 = (struct razor_property *) properties2->data + j;
+		if (i < count1 && j < count2)
+			cmp = strcmp(&pool1[p1->name], &pool2[p2->name]);
+		else if (i < count1)
+			cmp = -1;
+		else
+			cmp = 1;
+		if (cmp == 0)
+			cmp = versioncmp(&pool1[p1->version],
+					 &pool2[p2->version]);
+		if (cmp < 0) {
+			map1[i++] = add_property(importer,
+						 properties,
+						 &pool1[p1->name],
+						 &pool1[p1->version]);
+		} else if (cmp > 0) {
+			map2[j++] = add_property(importer,
+						 properties,
+						 &pool2[p2->name],
+						 &pool2[p2->version]);
+		} else  {
+			map1[i++] = map2[j++] = add_property(importer,
+							     properties,
+							     &pool1[p1->name],
+							     &pool1[p1->version]);
+		}
+	}
+}
+
+static unsigned long
+emit_properties(struct array *source_pool, unsigned long index,
+		unsigned long *map, struct array *pool)
+{
+	unsigned long r, *p, *q;
+
+	r = pool->size / sizeof *q;
+	p = (unsigned long *) source_pool->data + index;
+	while (*p != ~0) {
+		q = array_add(pool, sizeof *q);
+		*q = map[*p++];
+	}
+
+	q = array_add(pool, sizeof *q);
+	*q = ~0;
+
+	return r;
+}
+	
+/* Rebuild property->packages maps.  We can't just remap these, as a
+ * property may have lost or gained a number of packages.  Allocate an
+ * array per property and loop through the packages and add them to
+ * the arrays for their properties. */
+static void
+rebuild_package_lists(struct razor_set *set)
+{
+	int requires_count, provides_count;
+	struct array *requires_pkgs, *provides_pkgs, *a;
+	struct razor_package *pkg, *pkg_end;
+	struct razor_property *prop, *prop_end;
+	unsigned long *r, *q, *rpool, *ppool;
+
+	requires_count = set->requires.size / sizeof (struct razor_property);
+	provides_count = set->provides.size / sizeof (struct razor_property);
+	requires_pkgs = zalloc(requires_count * sizeof *requires_pkgs);
+	provides_pkgs = zalloc(provides_count * sizeof *provides_pkgs);
+	pkg_end = set->packages.data + set->packages.size;
+	rpool = set->requires_pool.data;
+	ppool = set->provides_pool.data;
+
+	for (pkg = set->packages.data; pkg < pkg_end; pkg++) {
+		for (r = &rpool[pkg->requires]; *r != ~0; r++) {
+			q = array_add(&requires_pkgs[*r], sizeof *q);
+			*q = pkg - (struct razor_package *) set->packages.data;
+		}
+		for (r = &ppool[pkg->provides]; *r != ~0; r++) {
+			q = array_add(&provides_pkgs[*r], sizeof *q);
+			*q = pkg - (struct razor_package *) set->packages.data;
+		}
+	}
+
+	prop_end = set->requires.data + set->requires.size;
+	a = requires_pkgs;
+	for (prop = set->requires.data; prop < prop_end; prop++, a++) {
+		prop->packages = add_to_property_pool(&set->requires_pool, a);
+		array_release(a);
+	}
+	free(requires_pkgs);
+
+	prop_end = set->provides.data + set->provides.size;
+	a = provides_pkgs;
+	for (prop = set->provides.data; prop < prop_end; prop++, a++) {
+		prop->packages = add_to_property_pool(&set->provides_pool, a);
+		array_release(a);
+	}
+	free(provides_pkgs);
+}
+
+/* Add packages from 'upstream' to 'set'.  The packages to add are
+ * specified by the 'packages' array, which is a sorted list of
+ * package indexes.  Returns a newly allocated package set.  Does not
+ * enforce validity of the resulting package set.
+ *
+ * This looks more complicated than it is.  An easy way to merge two
+ * package sets would be to just use a razor_importer, but that
+ * requires resorting, and is thus O(n log n).  We can do this in a
+ * linear sweep, but it gets a little more complicated.
+ */
+struct razor_set *
+razor_set_add(struct razor_set *set, struct razor_set *upstream,
+	      struct array *packages)
+{
+	struct razor_set *result;
+	struct razor_importer *importer;
+	struct razor_package *p, *pend;
+	struct source source, upstream_source;
+
+	importer = razor_importer_new();
+
+	prepare_source(&upstream_source, upstream);
+	prepare_source(&source, set);
+
+	merge_packages(importer, &source, &upstream_source, packages);
+
+	/* As we built the package list, we filled out a bitvector of
+	 * the properties that are referenced by the packages in the
+	 * new set.  Now we do a parallel loop through the properties
+	 * and emit those marked in the bit vector to the new set.  In
+	 * the process, we update the bit vector to actually map from
+	 * indices in the old property list to indices in the new
+	 * property list for both sets. */
+
+	merge_properties(&importer->set->requires, importer,
+			 set, &set->requires, source.requires_map,
+			 upstream, &upstream->requires,
+			 upstream_source.requires_map);
+	merge_properties(&importer->set->provides, importer,
+			 set, &set->provides, source.provides_map,
+			 upstream, &upstream->provides,
+			 upstream_source.provides_map);
+
+	/* Now we loop through the packages again and emit the
+	 * property lists, remapped to point to the new properties. */
+
+	pend = importer->set->packages.data + importer->set->packages.size;
+	for (p = importer->set->packages.data; p < pend; p++) {
+		struct source *src;
+
+		if (p->name & UPSTREAM_SOURCE)
+			src = &upstream_source;
+		else
+			src = &source;
+
+		p->requires = emit_properties(&src->set->requires_pool,
+					      p->requires,
+					      src->requires_map,
+					      &importer->set->requires_pool);
+		p->provides = emit_properties(&src->set->provides_pool,
+					      p->provides,
+					      src->provides_map,
+					      &importer->set->provides_pool);
+		p->name &= INDEX_MASK;
+	}
+
+	rebuild_package_lists(importer->set);
+
+	result = importer->set;
+	array_release(&importer->buckets);
+	free(importer);
+
+	return result;
 }
 
 void
@@ -1278,6 +1502,19 @@ main(int argc, const char *argv[])
 			return 1;
 		razor_set_list_unsatisfied(set);
 		razor_set_destroy(set);
+	} else if (strcmp(argv[1], "add") == 0) {
+		struct array list;
+
+		set = razor_set_open(repo_filename);
+		upstream = razor_set_open(rawhide_repo_filename);
+		if (set == NULL || upstream == NULL)
+			return 1;
+		array_init(&list);
+		find_packages(upstream, argc - 2, argv + 2, &list);
+		set = razor_set_add(set, upstream, &list);
+		razor_set_write(set, "system-updated.repo");
+		razor_set_destroy(set);
+		printf("wrote system-updated.repo\n");
 	} else if (strcmp(argv[1], "update") == 0) {
 		set = razor_set_open(repo_filename);
 		upstream = razor_set_open(rawhide_repo_filename);

@@ -67,3 +67,8 @@
   to pull eg the latest evince and dependencies from another box.  We
   should be able to regenerate a rzr pkg from the system so we can
   reuse the signature from the originating repo.
+
+- Ok, maybe the fastest package set merge method in the end is to use
+  the razor_importer, but use a hash table for the properties.  This
+  way we can assign them unique IDs immediately (like tokenizing
+  strings).
