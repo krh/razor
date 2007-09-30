@@ -283,6 +283,7 @@ union rpm_entry {
 	void *p;
 	char *string;
 	char **list;
+	unsigned int *flags;
 };
 
 struct razor_set *
@@ -292,7 +293,8 @@ razor_set_create_from_rpmdb(void)
 	rpmdbMatchIterator iter;
 	Header h;
 	int_32 type, count, i;
-	union rpm_entry name, version, release, properties, property_versions;
+	union rpm_entry name, version, release;
+	union rpm_entry property_names, property_versions, property_flags;
 	rpmdb db;
 
 	rpmReadConfigFiles(NULL, NULL);
@@ -307,27 +309,29 @@ razor_set_create_from_rpmdb(void)
 	iter = rpmdbInitIterator(db, 0, NULL, 0);
 	while (h = rpmdbNextIterator(iter), h != NULL) {
 		headerGetEntry(h, RPMTAG_NAME, &type, &name.p, &count);
-		headerGetEntry(h, RPMTAG_VERSION, &type,&version.p, &count);
+		headerGetEntry(h, RPMTAG_VERSION, &type, &version.p, &count);
 		headerGetEntry(h, RPMTAG_RELEASE, &type, &release.p, &count);
 		razor_importer_begin_package(importer,
 					     name.string, version.string);
 
-		headerGetEntry(h, RPMTAG_REQUIRES, &type,
-			       &properties.p, &count);
+		headerGetEntry(h, RPMTAG_REQUIRENAME, &type,
+			       &property_names.p, &count);
 		headerGetEntry(h, RPMTAG_REQUIREVERSION, &type,
 			       &property_versions.p, &count);
+		headerGetEntry(h, RPMTAG_REQUIREFLAGS, &type,
+			       &property_flags.p, &count);
 		for (i = 0; i < count; i++)
 			razor_importer_add_requires(importer,
-						    properties.list[i],
+						    property_names.list[i],
 						    property_versions.list[i]);
 
-		headerGetEntry(h, RPMTAG_PROVIDES, &type,
-			       &properties.p, &count);
+		headerGetEntry(h, RPMTAG_PROVIDENAME, &type,
+			       &property_names.p, &count);
 		headerGetEntry(h, RPMTAG_PROVIDEVERSION, &type,
 			       &property_versions.p, &count);
 		for (i = 0; i < count; i++)
 			razor_importer_add_provides(importer,
-						    properties.list[i],
+						    property_names.list[i],
 						    property_versions.list[i]);
 
 		razor_importer_finish_package(importer);
