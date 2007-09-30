@@ -14,8 +14,6 @@
 
 #include "razor.h"
 
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
-
 struct array {
 	void *data;
 	int size, alloc;
@@ -220,7 +218,7 @@ razor_set_destroy(struct razor_set *set)
 	free(set);
 }
 
-static int
+int
 razor_set_write(struct razor_set *set, const char *filename)
 {
 	char data[4096];
@@ -836,7 +834,7 @@ razor_set_list_provides(struct razor_set *set, const char *name)
 		razor_set_list_all_properties(set, &set->provides);
 }
 
-void
+static void
 razor_set_list_property_packages(struct razor_set *set,
 				 struct array *properties,
 				 const char *name,
@@ -870,6 +868,22 @@ razor_set_list_property_packages(struct razor_set *set,
 }
 
 void
+razor_set_list_requires_packages(struct razor_set *set,
+				 const char *name,
+				 const char *version)
+{
+	razor_set_list_property_packages(set, &set->requires, name, version);
+}
+
+void
+razor_set_list_provides_packages(struct razor_set *set,
+				 const char *name,
+				 const char *version)
+{
+	razor_set_list_property_packages(set, &set->provides, name, version);
+}
+
+static void
 razor_set_validate(struct razor_set *set, struct array *unsatisfied)
 {
 	struct razor_property *r, *p, *rend, *pend;
@@ -1331,7 +1345,7 @@ razor_set_update(struct razor_set *set, struct razor_set *upstream,
 		 int count, const char **packages)
 {
 	struct razor_set *new;
-	struct razor_package *p, *upackages;
+	struct razor_package *upackages;
 	struct array list, unsatisfied;
 	char *pool;
 	unsigned long *u, *end;
@@ -1346,16 +1360,9 @@ razor_set_update(struct razor_set *set, struct razor_set *upstream,
 	end = list.data + list.size;
 	upackages = upstream->packages.data;
 	pool = upstream->string_pool.data;
-	for (u = list.data; u < end; u++) {
-		p = upackages + *u;
-		printf("package %s-%s set to be updated\n",
-		       &pool[p->name], &pool[p->version]);
-	}
 	total += list.size / sizeof *u;
 
 	while (list.size > 0) {
-		printf(" -- satisfying new requires\n");
-
 		new = razor_set_add(set, upstream, &list);
 		array_release(&list);
 		razor_set_destroy(set);
@@ -1370,164 +1377,11 @@ razor_set_update(struct razor_set *set, struct razor_set *upstream,
 		end = list.data + list.size;
 		upackages = upstream->packages.data;
 		pool = upstream->string_pool.data;
-		for (u = list.data; u < end; u++) {
-			p = upackages + *u;
-			printf("package %s-%s set to be updated\n",
-			       &pool[p->name], &pool[p->version]);
-		}
 		total += list.size / sizeof *u;
 	}
 
 	array_release(&list);
 
-	printf("total of %d packages set to be updated\n", total);
-
 	return set;
 }
 
-void
-razor_set_info(struct razor_set *set)
-{
-	unsigned int offset, size;
-	int i;
-
-	for (i = 0; i < set->header->sections[i].type; i++) {
-		offset = set->header->sections[i].offset;
-		size = set->header->sections[i].size;
-
-		switch (set->header->sections[i].type) {
-		case RAZOR_PACKAGES:
-			printf("package section:\t%dkb\n", size / 1024);
-			break;
-		case RAZOR_REQUIRES:
-			printf("requires section:\t%dkb\n", size / 1024);
-			break;
-		case RAZOR_PROVIDES:
-			printf("provides section:\t%dkb\n", size / 1024);
-			break;
-		case RAZOR_STRING_POOL:
-			printf("string pool:\t\t%dkb\n", size / 1024);
-			break;
-		}
-	}
-}
-
-static int
-usage(void)
-{
-	printf("usage: razor [ import FILES | lookup <key> | "
-	       "list | list-requires | list-provides | eat-yum | info ]\n");
-	exit(1);
-}
-
-static const char *repo_filename = "system.repo";
-static const char rawhide_repo_filename[] = "rawhide.repo";
-
-int
-main(int argc, const char *argv[])
-{
-	struct razor_set *set, *upstream;
-	struct stat statbuf;
-	char *repo;
-
-	repo = getenv("RAZOR_REPO");
-	if (repo != NULL)
-		repo_filename = repo;
-
-	if (argc < 2) {
-		usage();
-	} else if (strcmp(argv[1], "import") == 0) {
-		if (stat("set", &statbuf) && mkdir("set", 0777)) {
-			fprintf(stderr, "could not create directory 'set'\n");
-			exit(-1);
-		}
-			
-		set = razor_import_rzr_files(argc - 2, argv + 2);
-
-		printf("pool size: %d\n", set->string_pool.size);
-		printf("pool allocation: %d\n", set->string_pool.alloc);
-		printf("packages: %d\n",
-		       set->packages.size / sizeof(struct razor_package));
-		printf("requires: %d\n",
-		       set->requires.size / sizeof(struct razor_property));
-		printf("provides: %d\n",
-		       set->provides.size / sizeof(struct razor_property));
-
-		razor_set_write(set, repo_filename);
-
-		razor_set_destroy(set);
-	} else if (strcmp(argv[1], "list") == 0) {
-		set = razor_set_open(repo_filename);
-		razor_set_list(set);
-		razor_set_destroy(set);
-	} else if (strcmp(argv[1], "list-requires") == 0) {
-		set = razor_set_open(repo_filename);
-		razor_set_list_requires(set, argv[2]);
-		razor_set_destroy(set);
-	} else if (strcmp(argv[1], "list-provides") == 0) {
-		set = razor_set_open(repo_filename);
-		razor_set_list_provides(set, argv[2]);
-		razor_set_destroy(set);
-	} else if (strcmp(argv[1], "what-requires") == 0) {
-		set = razor_set_open(repo_filename);
-		razor_set_list_property_packages(set, &set->requires,
-						 argv[2], argv[3]);
-		razor_set_destroy(set);
-	} else if (strcmp(argv[1], "what-provides") == 0) {
-		set = razor_set_open(repo_filename);
-		razor_set_list_property_packages(set, &set->provides,
-						 argv[2], argv[3]);
-		razor_set_destroy(set);
-	} else if (strcmp(argv[1], "info") == 0) {
-		set = razor_set_open(repo_filename);
-		razor_set_info(set);
-		razor_set_destroy(set);
-	} else if (strcmp(argv[1], "eat-yum") == 0) {
-		set = razor_set_create_from_yum_filelist(STDIN_FILENO);
-		if (set == NULL)
-			return 1;
-		razor_set_write(set, rawhide_repo_filename);
-		razor_set_destroy(set);
-		printf("wrote %s\n", rawhide_repo_filename);
-	} else if (strcmp(argv[1], "import-rpmdb") == 0) {
-		set = razor_set_create_from_rpmdb();
-		if (set == NULL)
-			return 1;
-		razor_set_write(set, repo_filename);
-		razor_set_destroy(set);
-		printf("wrote %s\n", repo_filename);
-	} else if (strcmp(argv[1], "validate") == 0) {
-		set = razor_set_open(repo_filename);
-		if (set == NULL)
-			return 1;
-		razor_set_list_unsatisfied(set);
-		razor_set_destroy(set);
-	} else if (strcmp(argv[1], "add") == 0) {
-		struct array list;
-
-		set = razor_set_open(repo_filename);
-		upstream = razor_set_open(rawhide_repo_filename);
-		if (set == NULL || upstream == NULL)
-			return 1;
-		array_init(&list);
-		find_packages(upstream, argc - 2, argv + 2, &list);
-		set = razor_set_add(set, upstream, &list);
-		razor_set_write(set, "system-updated.repo");
-		razor_set_destroy(set);
-		printf("wrote system-updated.repo\n");
-	} else if (strcmp(argv[1], "update") == 0) {
-		set = razor_set_open(repo_filename);
-		upstream = razor_set_open(rawhide_repo_filename);
-		if (set == NULL || upstream == NULL)
-			return 1;
-		set = razor_set_update(set, upstream, argc - 2, argv + 2);
-		razor_set_write(set, "system-updated.repo");
-		razor_set_destroy(set);
-		razor_set_destroy(upstream);
-		printf("wrote system-updated.repo\n");
-	} else {
-		usage();
-	}
-
-	return 0;
-}

@@ -1,6 +1,29 @@
 #ifndef _RAZOR_H_
 #define _RAZOR_H_
 
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+
+struct razor_set;
+
+struct razor_set *razor_set_open(const char *filename);
+void razor_set_destroy(struct razor_set *set);
+int razor_set_write(struct razor_set *set, const char *filename);
+
+void razor_set_list(struct razor_set *set);
+void razor_set_list_requires(struct razor_set *set, const char *name);
+void razor_set_list_provides(struct razor_set *set, const char *name);
+void razor_set_list_requires_packages(struct razor_set *set,
+				      const char *name,
+				      const char *version);
+void razor_set_list_provides_packages(struct razor_set *set,
+				      const char *name,
+				      const char *version);
+
+void razor_set_list_unsatisfied(struct razor_set *set);
+struct razor_set *razor_set_update(struct razor_set *set,
+				   struct razor_set *upstream,
+				   int count, const char **packages);
+
 struct razor_importer;
 
 struct razor_importer *razor_importer_new(void);
