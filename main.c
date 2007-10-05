@@ -7,7 +7,8 @@
 #include "razor.h"
 
 static const char *repo_filename = "system.repo";
-static const char rawhide_repo_filename[] = "rawhide.repo";
+static const char *rawhide_repo_filename = "rawhide.repo";
+static const char *updated_repo_filename = "system-updated.repo";
 
 static int
 command_list(int argc, const char *argv[])
@@ -123,10 +124,38 @@ command_update(int argc, const char *argv[])
 	if (set == NULL || upstream == NULL)
 		return 1;
 	set = razor_set_update(set, upstream, argc - 2, argv + 2);
-	razor_set_write(set, "system-updated.repo");
+	razor_set_write(set, updated_repo_filename);
 	razor_set_destroy(set);
 	razor_set_destroy(upstream);
 	printf("wrote system-updated.repo\n");
+
+	return 0;
+}
+
+static void
+print_diff(const char *name,
+	   const char *old_version, const char *new_version, void *data)
+{
+	if (old_version)
+		printf("removing %s %s\n", name, old_version);
+	else
+		printf("install %s %s\n", name, new_version);
+}
+
+static int
+command_diff(int argc, const char *argv[])
+{
+	struct razor_set *set, *updated;
+
+	set = razor_set_open(repo_filename);
+	updated = razor_set_open(updated_repo_filename);
+	if (set == NULL || updated == NULL)
+		return 1;
+
+	razor_set_diff(set, updated, print_diff, NULL);	
+
+	razor_set_destroy(set);
+	razor_set_destroy(updated);
 
 	return 0;
 }
@@ -144,7 +173,8 @@ static struct {
 	{ "import-yum", "import yum filelist.xml on stdin", command_import_yum },
 	{ "import-rpmdb", "import the system rpm database", command_import_rpmdb },
 	{ "validate", "validate a package set", command_validate },
-	{ "update", "update all or specified packages", command_update }
+	{ "update", "update all or specified packages", command_update },
+	{ "diff", "show diff between two package sets", command_diff }
 };
 
 static int

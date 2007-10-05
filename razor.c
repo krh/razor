@@ -1385,3 +1385,48 @@ razor_set_update(struct razor_set *set, struct razor_set *upstream,
 	return set;
 }
 
+/* The diff order matters.  We should sort the packages so that a
+ * REMOVE of a package comes before the INSTALL, and so that all
+ * requires for a package have been installed before the package.
+ **/
+
+void
+razor_set_diff(struct razor_set *set, struct razor_set *upstream,
+	       razor_package_callback_t callback, void *data)
+{
+	struct razor_package *p, *pend, *u, *uend;
+	char *ppool, *upool;
+	int res = 0;
+
+	p = set->packages.data;
+	pend = set->packages.data + set->packages.size;
+	ppool = set->string_pool.data;
+
+	u = upstream->packages.data;
+	uend = upstream->packages.data + upstream->packages.size;
+	upool = upstream->string_pool.data;
+
+	while (p < pend || u < uend) {
+		if (p < pend && u < uend) {
+			res = strcmp(&ppool[p->name], &upool[u->name]);
+			if (res == 0)
+				res = versioncmp(&ppool[p->version],
+						 &upool[u->version]);
+		}
+
+		if (u == uend || res < 0) {
+			callback(&ppool[p->name], &ppool[p->version],
+				 NULL, data);
+			p++;
+			continue;
+		} else if (p == pend || res > 0) {
+			callback(&upool[u->name], NULL, &upool[u->version],
+				 data);
+			u++;
+			continue;
+		} else {
+			p++;
+			u++;
+		}
+	}
+}

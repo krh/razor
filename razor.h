@@ -24,6 +24,18 @@ struct razor_set *razor_set_update(struct razor_set *set,
 				   struct razor_set *upstream,
 				   int count, const char **packages);
 
+typedef void (*razor_package_callback_t)(const char *name,
+					 const char *old_version,
+					 const char *new_version,
+					 void *data);
+void
+razor_set_diff(struct razor_set *set, struct razor_set *upstream,
+	       razor_package_callback_t callback, void *data);
+
+
+/* Importer interface; for building a razor set from external sources,
+ * like yum, rpmdb or razor package files. */
+
 struct razor_importer;
 
 struct razor_importer *razor_importer_new(void);
