@@ -123,7 +123,7 @@ command_update(int argc, const char *argv[])
 	upstream = razor_set_open(rawhide_repo_filename);
 	if (set == NULL || upstream == NULL)
 		return 1;
-	set = razor_set_update(set, upstream, argc - 2, argv + 2);
+	set = razor_set_update(set, upstream, argc, argv);
 	razor_set_write(set, updated_repo_filename);
 	razor_set_destroy(set);
 	razor_set_destroy(upstream);
