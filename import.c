@@ -112,7 +112,7 @@ import_rzr_file(struct razor_importer *importer, const char *filename)
 	XML_SetElementHandler(parser, start_element, end_element);
 	if (XML_Parse(parser, p, stat.st_size, 1) == XML_STATUS_ERROR) {
 		fprintf(stderr,
-			"%s at line %d, %s\n",
+			"%s at line %ld, %s\n",
 			XML_ErrorString(XML_GetErrorCode(parser)),
 			XML_GetCurrentLineNumber(parser),
 			filename);
@@ -156,7 +156,8 @@ enum {
 	YUM_STATE_BEGIN,
 	YUM_STATE_PACKAGE_NAME,
 	YUM_STATE_REQUIRES,
-	YUM_STATE_PROVIDES
+	YUM_STATE_PROVIDES,
+	YUM_STATE_FILE
 };
 
 struct yum_context {
@@ -211,7 +212,8 @@ yum_start_element(void *data, const char *name, const char **atts)
 			razor_importer_add_provides(ctx->importer, n, version);
 			break;
 		}
-
+	} else if (strcmp(name, "file") == 0) {
+		ctx->state = YUM_STATE_FILE;
 	}
 }
 
@@ -220,15 +222,10 @@ yum_end_element (void *data, const char *name)
 {
 	struct yum_context *ctx = data;
 
+	ctx->state = YUM_STATE_BEGIN;
 	if (strcmp(name, "package") == 0) {
 		free(ctx->name);
 		razor_importer_finish_package(ctx->importer);
-	} else if (strcmp(name, "name") == 0) {
-		ctx->state = YUM_STATE_BEGIN;
-	} else if (strcmp(name, "rpm:requires") == 0) {
-		ctx->state = YUM_STATE_BEGIN;
-	} else if (strcmp(name, "rpm:provides") == 0) {
-		ctx->state = YUM_STATE_BEGIN;
 	}
 }
 
@@ -236,9 +233,14 @@ static void
 yum_character_data (void *data, const XML_Char *s, int len)
 {
 	struct yum_context *ctx = data;
+	char filename[PATH_MAX];
 
 	if (ctx->state == YUM_STATE_PACKAGE_NAME)
 		ctx->name = strndup(s, len);
+	else if (ctx->state == YUM_STATE_FILE) {
+		snprintf(filename, sizeof filename, "%.*s", len, s);
+		razor_importer_add_file(ctx->importer, filename);
+	}
 }
 
 struct razor_set *
@@ -267,7 +269,7 @@ razor_set_create_from_yum_filelist(int fd)
 
 		if (XML_Parse(parser, buf, len, 0) == XML_STATUS_ERROR) {
 			fprintf(stderr,
-				"%s at line %d\n",
+				"%s at line %ld\n",
 				XML_ErrorString(XML_GetErrorCode(parser)),
 				XML_GetCurrentLineNumber(parser));
 			return NULL;
@@ -295,6 +297,8 @@ razor_set_create_from_rpmdb(void)
 	int_32 type, count, i;
 	union rpm_entry name, version, release;
 	union rpm_entry property_names, property_versions, property_flags;
+	union rpm_entry basenames, dirnames, dirindexes;
+	char filename[PATH_MAX];
 	rpmdb db;
 
 	rpmReadConfigFiles(NULL, NULL);
@@ -333,6 +337,19 @@ razor_set_create_from_rpmdb(void)
 			razor_importer_add_provides(importer,
 						    property_names.list[i],
 						    property_versions.list[i]);
+
+		headerGetEntry(h, RPMTAG_BASENAMES, &type,
+			       &basenames.p, &count);
+		headerGetEntry(h, RPMTAG_DIRNAMES, &type,
+			       &dirnames.p, &count);
+		headerGetEntry(h, RPMTAG_DIRINDEXES, &type,
+			       &dirindexes.p, &count);
+		for (i = 0; i < count; i++) {
+			snprintf(filename, sizeof filename, "%s%s",
+				 dirnames.list[dirindexes.flags[i]],
+				 basenames.list[i]);
+			razor_importer_add_file(importer, filename);
+		}
 
 		razor_importer_finish_package(importer);
 	}
