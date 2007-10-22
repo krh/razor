@@ -163,7 +163,7 @@ enum {
 struct yum_context {
 	struct razor_importer *importer;
 	struct import_property_context *current_property_context;
-	char *name;
+	char name[256], buffer[512], *p;
 	int state;
 };
 
@@ -176,6 +176,7 @@ yum_start_element(void *data, const char *name, const char **atts)
 
 	if (strcmp(name, "name") == 0) {
 		ctx->state = YUM_STATE_PACKAGE_NAME;
+		ctx->p = ctx->name;
 	} else if (strcmp(name, "version") == 0) {
 		version = NULL;
 		for (i = 0; atts[i]; i += 2) {
@@ -214,6 +215,7 @@ yum_start_element(void *data, const char *name, const char **atts)
 		}
 	} else if (strcmp(name, "file") == 0) {
 		ctx->state = YUM_STATE_FILE;
+		ctx->p = ctx->buffer;
 	}
 }
 
@@ -223,23 +225,24 @@ yum_end_element (void *data, const char *name)
 	struct yum_context *ctx = data;
 
 	ctx->state = YUM_STATE_BEGIN;
-	if (strcmp(name, "package") == 0) {
-		free(ctx->name);
+	if (strcmp(name, "package") == 0)
 		razor_importer_finish_package(ctx->importer);
-	}
+	else if (strcmp(name, "file") == 0)
+		razor_importer_add_file(ctx->importer, ctx->buffer);
 }
 
 static void
 yum_character_data (void *data, const XML_Char *s, int len)
 {
 	struct yum_context *ctx = data;
-	char filename[PATH_MAX];
 
-	if (ctx->state == YUM_STATE_PACKAGE_NAME)
-		ctx->name = strndup(s, len);
-	else if (ctx->state == YUM_STATE_FILE) {
-		snprintf(filename, sizeof filename, "%.*s", len, s);
-		razor_importer_add_file(ctx->importer, filename);
+	switch (ctx->state) {
+	case YUM_STATE_PACKAGE_NAME:
+	case YUM_STATE_FILE:
+		memcpy(ctx->p, s, len);
+		ctx->p += len;
+		*ctx->p = '\0';
+		break;
 	}
 }
 

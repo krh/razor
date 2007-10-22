@@ -41,6 +41,7 @@ struct razor_set_header {
 #define RAZOR_PACKAGE_POOL 4
 #define RAZOR_REQUIRES_POOL 5
 #define RAZOR_PROVIDES_POOL 6
+#define RAZOR_FILE_TREE 7
 
 struct razor_package {
 	unsigned long name;
@@ -55,6 +56,12 @@ struct razor_property {
 	unsigned long packages;
 };
 
+struct razor_entry {
+	unsigned long name;
+	unsigned long count;
+	unsigned long start;
+};
+
 struct razor_set {
 	struct array string_pool;
  	struct array packages;
@@ -63,6 +70,7 @@ struct razor_set {
  	struct array provides;
  	struct array requires_pool;
  	struct array provides_pool;
+ 	struct array file_tree;
 	struct razor_set_header *header;
 };
 
@@ -77,6 +85,7 @@ struct razor_importer {
 	struct import_property_context requires;
 	struct import_property_context provides;
 	struct razor_package *package;
+	struct array files;
 };
 
 static void
@@ -154,6 +163,7 @@ struct razor_set_section razor_sections[] = {
 	{ RAZOR_PACKAGE_POOL,	offsetof(struct razor_set, package_pool) },
 	{ RAZOR_REQUIRES_POOL,	offsetof(struct razor_set, requires_pool) },
 	{ RAZOR_PROVIDES_POOL,	offsetof(struct razor_set, provides_pool) },
+	{ RAZOR_FILE_TREE,	offsetof(struct razor_set, file_tree) },
 };
 
 struct razor_set *
@@ -453,6 +463,10 @@ razor_importer_add_provides(struct razor_importer *importer,
 void
 razor_importer_add_file(struct razor_importer *importer, const char *name)
 {
+	char **p;
+
+	p = array_add(&importer->files, sizeof *p);
+	*p = strdup(name);
 }
 
 struct razor_importer *
@@ -682,6 +696,147 @@ remap_links(struct array *links, unsigned long *map)
 			*p = map[*p];
 }
 
+static int
+compare_filenames(const void *p1, const void *p2, void *data)
+{
+	char *f1 = *(char **) p1;
+	char *f2 = *(char **) p2;
+
+	return strcmp(f1, f2);
+}
+
+struct directory {
+	unsigned long name, count;
+	struct array files;
+	struct directory *last;
+};
+
+static void
+count_entries(struct directory *d)
+{
+	struct directory *p, *end;
+
+	p = d->files.data;
+	end = d->files.data + d->files.size;
+	d->count = 0;
+	while (p < end) {
+		count_entries(p);
+		d->count += p->count + 1;
+		p++;
+	}		
+}
+
+static void
+serialize_files(struct directory *d, struct array *array)
+{
+	struct directory *p, *end;
+	struct razor_entry *e;
+	unsigned long s;
+
+	p = d->files.data;
+	end = d->files.data + d->files.size;
+	s = array->size / sizeof *e + d->files.size / sizeof *p;
+	while (p < end) {
+		e = array_add(array, sizeof *e);
+		e->name = p->name;
+		e->count = p->files.size / sizeof *p;
+		e->start = s;
+		s += p->count;
+		p++;
+	}		
+
+	p = d->files.data;
+	end = d->files.data + d->files.size;
+	while (p < end) {
+		serialize_files(p, array);
+		p++;
+	}
+}
+
+static void
+build_file_tree(struct razor_importer *importer)
+{
+	int count, i, length;
+	char **filenames, *f, *end;
+	unsigned long name;
+	char dirname[256];
+	struct directory *d, root;
+	struct razor_entry *e;
+
+	count = importer->files.size / sizeof (char *);
+	qsort_with_data(importer->files.data,
+			count,
+			sizeof (char *),
+			compare_filenames,
+			NULL);
+
+	root.name = razor_importer_tokenize(importer, "");
+	array_init(&root.files);
+	root.last = NULL;
+
+	filenames = importer->files.data;
+	for (i = 0; i < count; i++) {
+		f = filenames[i];
+		if (*f != '/')
+			continue;
+
+		d = &root;
+		while (*f) {
+			end = strchr(f + 1, '/');
+			if (end == NULL)
+				end = f + strlen(f);
+			length = end - (f + 1);
+			memcpy(dirname, f + 1, length);
+			dirname[length] ='\0';
+			name = razor_importer_tokenize(importer, dirname);
+			if (d->last == NULL || d->last->name != name) {
+				d->last = array_add(&d->files, sizeof *d);
+				d->last->name = name;
+				d->last->last = NULL;
+				array_init(&d->last->files);
+			}
+			d = d->last;				
+			f = end;
+		}
+
+		free(filenames[i]);
+	}
+
+	count_entries(&root);
+	array_init(&importer->set->file_tree);
+
+	e = array_add(&importer->set->file_tree, sizeof *e);
+	e->name = root.name;
+	e->count = root.files.size / sizeof *d;
+	e->start = 1;
+
+	serialize_files(&root, &importer->set->file_tree);
+
+	array_release(&importer->files);
+}
+
+static void
+list_dir(struct razor_set *set, struct razor_entry *e, int indent)
+{
+	struct razor_entry *c;
+	char *pool = set->string_pool.data;
+	int i;
+
+	for (i = 0; i < indent; i++)
+		putchar(' ');
+	printf("%s\n", pool + e->name);
+	for (i = 0; i < e->count; i++) {
+		c = (struct razor_entry *) set->file_tree.data + e->start + i;
+		list_dir(set, c, indent + 2);
+	}
+}
+
+void
+razor_set_list_files(struct razor_set *set)
+{
+	list_dir(set, set->file_tree.data, 2);
+}
+
 struct razor_set *
 razor_importer_finish(struct razor_importer *importer)
 {
@@ -711,6 +866,8 @@ razor_importer_finish(struct razor_importer *importer)
 	remap_links(&importer->set->package_pool, rmap);
 	free(map);
 	free(rmap);
+
+	build_file_tree(importer);
 
 	set = importer->set;
 	array_release(&importer->buckets);
