@@ -54,7 +54,7 @@ command_list_files(int argc, const char *argv[])
 	set = razor_set_open(repo_filename);
 	if (set == NULL)
 		return 1;
-	razor_set_list_files(set);
+	razor_set_list_files(set, argv[0]);
 	razor_set_destroy(set);
 
 	return 0;

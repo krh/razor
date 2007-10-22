@@ -815,6 +815,31 @@ build_file_tree(struct razor_importer *importer)
 	array_release(&importer->files);
 }
 
+static struct razor_entry *
+find_entry(struct razor_set *set, struct razor_entry *dir, const char *name)
+{
+	struct razor_entry *e, *end;
+	char *pool = set->string_pool.data;
+	char *p, *n;
+
+	if (name == NULL)
+		return dir;
+
+	p = strchr(name + 1, '/');
+	e = (struct razor_entry *) set->file_tree.data + dir->start;
+	end = e + dir->count;
+
+	while (e < end) {
+		n = pool + e->name;
+		if ((p != NULL && strncmp(n, name + 1, p - (name + 1)) == 0) ||
+		    (p == NULL && strcmp(n, name + 1) == 0))
+			return find_entry(set, e, p);
+		e++;
+	}
+
+	return NULL;
+}
+
 static void
 list_dir(struct razor_set *set, struct razor_entry *e, int indent)
 {
@@ -832,9 +857,14 @@ list_dir(struct razor_set *set, struct razor_entry *e, int indent)
 }
 
 void
-razor_set_list_files(struct razor_set *set)
+razor_set_list_files(struct razor_set *set, const char *prefix)
 {
-	list_dir(set, set->file_tree.data, 2);
+	struct razor_entry *e;
+
+	e = find_entry(set, set->file_tree.data, prefix);
+	if (e == NULL)
+		return;
+	list_dir(set, e, 2);
 }
 
 struct razor_set *
