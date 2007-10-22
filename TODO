@@ -48,9 +48,6 @@
 - transactions, proper recovery, make sure we don't poop our package
   database (no more rm /var/lib/rpm/__cache*).
 
-- no external dependencies, forget about bdb, sqlite.  It's *simple*
-  and we need to control the on-disk format for these tools.
-
 - diff from one package set to another answers: "what changed in
   rawhide between since yesterday?"
 
@@ -72,3 +69,12 @@
   the razor_importer, but use a hash table for the properties.  This
   way we can assign them unique IDs immediately (like tokenizing
   strings).
+
+- bash completion for 'razor install gtk2-<TAB>' og
+  'razor install /usr/bin/gtk-perf<TAB>'
+
+- test suite should be easy, just keep .repo files around and test
+  different type of upgrades that way (obsoletes, conflicts, file
+  conflicts, file/dir problems etc).  Or maybe just keep a simple file
+  format ad use a custom importer to create the .repo files.
+
