@@ -61,6 +61,21 @@ command_list_files(int argc, const char *argv[])
 }
 
 static int
+command_list_file_packages(int argc, const char *argv[])
+{
+	struct razor_set *set;
+
+	set = razor_set_open(repo_filename);
+	if (set == NULL)
+		return 1;
+	razor_set_list_file_packages(set, argv[0]);
+	razor_set_destroy(set);
+
+	return 0;
+}
+
+
+static int
 command_what_requires(int argc, const char *argv[])
 {
 	struct razor_set *set;
@@ -183,6 +198,7 @@ static struct {
 	{ "list-requires", "list all requires or requires for the given package", command_list_requires },
 	{ "list-provides", "list all provides or provides for the give package", command_list_provides },
 	{ "list-files", "list files for package set", command_list_files },
+	{ "list-file-packages", "list packages owning file", command_list_file_packages },
 	{ "what-requires", "list the packages that have the given requires", command_what_requires },
 	{ "what-provides", "list the packages that have the given provides", command_what_provides },
 	{ "import-yum", "import yum filelist.xml on stdin", command_import_yum },

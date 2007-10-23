@@ -82,3 +82,7 @@
   is disk bound.  Start installing once we have self-contained set of
   packages.  Install in reverse topo-sort order.  Interruptible
   installation; stops at nearest checkpoint.
+
+- make packages pointers be either an index into the package pool or a
+  direct link to a package when there is only one package.  set a high
+  bit to indicate which it is.  similar for properties.

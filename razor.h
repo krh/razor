@@ -19,6 +19,7 @@ void razor_set_list_provides_packages(struct razor_set *set,
 				      const char *name,
 				      const char *version);
 void razor_set_list_files(struct razor_set *set, const char *prefix);
+void razor_set_list_file_packages(struct razor_set *set, const char *filename);
 
 void razor_set_list_unsatisfied(struct razor_set *set);
 struct razor_set *razor_set_update(struct razor_set *set,
