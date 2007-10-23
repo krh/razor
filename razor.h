@@ -9,7 +9,7 @@ struct razor_set *razor_set_open(const char *filename);
 void razor_set_destroy(struct razor_set *set);
 int razor_set_write(struct razor_set *set, const char *filename);
 
-void razor_set_list(struct razor_set *set);
+void razor_set_list(struct razor_set *set, const char *pattern);
 void razor_set_list_requires(struct razor_set *set, const char *name);
 void razor_set_list_provides(struct razor_set *set, const char *name);
 void razor_set_list_requires_packages(struct razor_set *set,

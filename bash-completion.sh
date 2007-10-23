@@ -1,17 +1,19 @@
 __razor_commands () {
-    COMPREPLY=($(compgen -W "list-requires list-provides list-files list-file-packages what-requires what-provides import-yum import-rpmdb validate update diff" -- $1))
+    local IFS=$'\n'
+    COMPREPLY=($(IFS=: compgen -S' ' -W "list-requires:list-provides:list-files:list-file-packages:what-requires:what-provides:import-yum:import-rpmdb:validate:update:diff" -- $1))
 }
 
 __razor_packages () {
-    COMPREPLY=($(compgen -W "$(./razor list)" -- $1))
+    local IFS=$'\n'
+
+    COMPREPLY=($(./razor list "$1*" | while read p; do echo "$p "; done))
 }
 
 __razor_files() {
-    COMPREPLY=($(compgen -W "$(./razor list-files)" -- $1))
+    COMPREPLY=($(./razor list-files "$1*"))
 }
 
 __razor_requires() {
-    echo requires
     COMPREPLY=($(compgen -W "$(./razor list-requires)" -- $1))
 }
 
@@ -34,4 +36,4 @@ __razor() {
     fi
 }
 
-complete -F __razor razor
+complete -o nospace -F __razor razor

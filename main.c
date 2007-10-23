@@ -16,7 +16,7 @@ command_list(int argc, const char *argv[])
 	struct razor_set *set;
 
 	set = razor_set_open(repo_filename);
-	razor_set_list(set);
+	razor_set_list(set, argv[0]);
 	razor_set_destroy(set);
 
 	return 0;

@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <ctype.h>
+#include <fnmatch.h>
 
 #include "razor.h"
 
@@ -834,56 +835,74 @@ build_file_tree(struct razor_importer *importer)
 	array_release(&importer->files);
 }
 
-static struct razor_entry *
-find_entry(struct razor_set *set, struct razor_entry *dir, const char *name)
+static const char *
+find_dir(struct razor_set *set, struct razor_entry **dir, const char *pattern)
 {
 	struct razor_entry *e, *end;
-	char *pool = set->string_pool.data;
-	char *p, *n;
+	const char *n, *pool = set->string_pool.data;
+	int len;
 
-	if (name == NULL)
-		return dir;
-
-	p = strchr(name + 1, '/');
-	e = (struct razor_entry *) set->file_tree.data + dir->start;
-	end = e + dir->count;
+	e = (struct razor_entry *) set->file_tree.data + (*dir)->start;
+	end = e + (*dir)->count;
 
 	while (e < end) {
 		n = pool + e->name;
-		if ((p != NULL && strncmp(n, name + 1, p - (name + 1)) == 0) ||
-		    (p == NULL && strcmp(n, name + 1) == 0))
-			return find_entry(set, e, p);
+		len = strlen(n);
+		if (len == 0) {
+			/* FIXME: Shouldn't have 0-length entries... */
+			e++;
+			continue;
+		}
+			
+		if (strncmp(pattern + 1, n, len) == 0 &&
+		    pattern[len + 1] == '/') {
+			*dir = e;
+			return find_dir(set, dir, pattern + len + 1);
+		}
 		e++;
 	}
 
-	return NULL;
+	return pattern + 1;
 }
 
 static void
-list_dir(struct razor_set *set, struct razor_entry *e, int indent)
+list_dir(struct razor_set *set, struct razor_entry *dir,
+	 const char *pattern, const char *base)
 {
-	struct razor_entry *c;
+	struct razor_entry *e, *end;
 	char *pool = set->string_pool.data;
-	int i;
 
-	for (i = 0; i < indent; i++)
-		putchar(' ');
-	printf("%s\n", pool + e->name);
-	for (i = 0; i < e->count; i++) {
-		c = (struct razor_entry *) set->file_tree.data + e->start + i;
-		list_dir(set, c, indent + 2);
+	e = (struct razor_entry *) set->file_tree.data + dir->start;
+	end = e + dir->count;
+
+	for ( ; e < end; e++) {
+		if (base && base[0] && fnmatch(base, &pool[e->name], 0) != 0)
+			continue;
+		if (base && pattern)
+			printf("%.*s%s%s\n",
+			       base - pattern, pattern, pool + e->name,
+			       e->count > 0 ? "/" : "");
+		else
+			printf("%s%s\n", pool + e->name,
+			       e->count > 0 ? "/" : "");
+		
 	}
 }
 
 void
-razor_set_list_files(struct razor_set *set, const char *prefix)
+razor_set_list_files(struct razor_set *set, const char *pattern)
 {
 	struct razor_entry *e;
+	const char *base;
 
-	e = find_entry(set, set->file_tree.data, prefix);
-	if (e == NULL)
+	if (pattern == NULL)
+		pattern = "/";
+
+	e = set->file_tree.data;
+	base = find_dir(set, &e, pattern);
+	if (base == NULL)
 		return;
-	list_dir(set, e, 2);
+	list_dir(set, e, pattern, base);
 }
 
 void
@@ -891,11 +910,12 @@ razor_set_list_file_packages(struct razor_set *set, const char *filename)
 {
 	struct razor_entry *e;
 	struct razor_package *packages, *p;
-	const char *pool;
+	const char *pool, *base;
 	unsigned long *r;
 
-	e = find_entry(set, set->file_tree.data, filename);
-	if (e == NULL)
+	e = set->file_tree.data;
+	base = find_dir(set, &e, filename);
+	if (base == NULL)
 		return;
 	
 	r = (unsigned long *) set->package_pool.data + e->packages;
@@ -946,15 +966,22 @@ razor_importer_finish(struct razor_importer *importer)
 }
 
 void
-razor_set_list(struct razor_set *set)
+razor_set_list(struct razor_set *set, const char *pattern)
 {
 	struct razor_package *p, *end;
+	int with_version = 0;
 	char *pool;
 
 	pool = set->string_pool.data;
 	end = set->packages.data + set->packages.size;
-	for (p = set->packages.data; p < end; p++)
-		printf("%s %s\n", &pool[p->name], &pool[p->version]);
+	for (p = set->packages.data; p < end; p++) {
+		if (pattern && fnmatch(pattern, &pool[p->name], 0) != 0)
+		    continue;
+		if (with_version)
+			printf("%s %s\n", &pool[p->name], &pool[p->version]);
+		else
+			printf("%s\n", &pool[p->name]);
+	}
 }
 
 struct razor_set *bsearch_set;
