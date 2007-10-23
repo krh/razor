@@ -78,3 +78,7 @@
   conflicts, file/dir problems etc).  Or maybe just keep a simple file
   format ad use a custom importer to create the .repo files.
 
+- pipelined download and install; download is network bound, install
+  is disk bound.  Start installing once we have self-contained set of
+  packages.  Install in reverse topo-sort order.  Interruptible
+  installation; stops at nearest checkpoint.
