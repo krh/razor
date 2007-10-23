@@ -28,7 +28,7 @@ command_list_requires(int argc, const char *argv[])
 	struct razor_set *set;
 
 	set = razor_set_open(repo_filename);
-	razor_set_list_requires(set, argv[2]);
+	razor_set_list_requires(set, argv[0]);
 	razor_set_destroy(set);
 
 	return 0;
@@ -40,7 +40,7 @@ command_list_provides(int argc, const char *argv[])
 	struct razor_set *set;
 
 	set = razor_set_open(repo_filename);
-	razor_set_list_provides(set, argv[2]);
+	razor_set_list_provides(set, argv[0]);
 	razor_set_destroy(set);
 
 	return 0;
@@ -66,7 +66,7 @@ command_what_requires(int argc, const char *argv[])
 	struct razor_set *set;
 
 	set = razor_set_open(repo_filename);
-	razor_set_list_requires_packages(set, argv[2], argv[3]);
+	razor_set_list_requires_packages(set, argv[0], argv[1]);
 	razor_set_destroy(set);
 
 	return 0;
@@ -78,7 +78,7 @@ command_what_provides(int argc, const char *argv[])
 	struct razor_set *set;
 
 	set = razor_set_open(repo_filename);
-	razor_set_list_provides_packages(set, argv[2], argv[3]);
+	razor_set_list_provides_packages(set, argv[0], argv[1]);
 	razor_set_destroy(set);
 
 	return 0;
