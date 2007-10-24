@@ -1,0 +1,55 @@
+Just random notes at this point:
+
+ - Razor is a package management system replacing rpm and yum.  Razor
+   implements management of packages installed on the system,
+   dependency solving, and upgrading in a small compact code base with
+   minimal dependencies.
+
+ - Key points: one file format for package sets, specified and
+   implemented by razor; no point in splitting dep-solver and package
+   manager, there is too much implementation overlap.  By hand coding
+   the on-disk format we have a solid foundation on which to
+   implementing fast dependency solving, error recovery etc.  No
+   complex dependencies in package management stack.  In other words,
+   package management is *simple*, no need to overdesign it.
+
+ - Use one simple file format as the core of the system.  The razor
+   package set data structure represents a set of packages and is used
+   for the current installed set, the sets available from upstream
+   sources, and the set currently being install during a transaction.
+   Tiered systems such as rpm+yum, deb+apt etc end up duplicating and
+   reimplementing common operations on packages.  Other systems
+   typically pull in external database libraries to manage the package
+   meta data and in some cases each layer in the stack uses a
+   different database dependency to represent essentially the same
+   data.
+
+ - Using external database libraries may seem a good idea up front,
+   but monotone vs git is a good example of how you need to control
+   the data structure and the on-disk format to really get excellent
+   performance.  The razor package set data structure is fairly
+   simple; it's an read-only, mmap()'able on-disk data structure.  The
+   package set has a sorted index of the packages in the set, a sorted
+   index of all dependencies and a sorted, compact directory of all
+   files in all the packages.  Operations such as merging package
+   sets, satisfying requires from one set against another can all be
+   implemented in linear time.  Razor implements the package set
+   representation down to the bytes on the disk and can optimize the
+   representation and access methods to make the necessary operations
+   fast and reliable.
+
+ - The set of installed packages on a system is represented by just
+   one package set file.  As we install a set of new packages, we
+   prepare the new package set a temporary file and once the install
+   has succeeded, we copy the package set file to the real filename.
+   If there is a system crash, razor will notice the temporary file on
+   boot and resume the update.  
+
+ - We want to keep the numer of dependencies down in a system critical
+   component such as the package manager.  Between rpm and yum we're
+   pulling in berkeley db, sqlite, expat, python.
+
+ - During update of several packages rpm+yum leaves the system in an
+   inconsistent state for long periods of time.  Power failure in this
+   window causes critical system corruption.  We want to minimize the
+   window.
