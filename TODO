@@ -2,45 +2,6 @@
   so we can roll back to yesterday, or see what got installed in the
   latest yum update.
 
-- we build a cache of the currently installed set to service
-  dependency inquiries fast:
-
-	map from property to pkg (as hash) providing it
-	map from property to pkgs requiring it
-	map from pkg name to manifest
-	map from string to string pool index
-
-	no implicit provides? not even pkgname?
-
-- properties are strings, stored in a string table
-
-- on disk maps are binary files of (string table index, hash) pairs
-
-- at run time, we mmap the map, and keep changes in memory in a splay
-  tree or similar.  if searching the splay tree fails we punt to the
-  mmap.  once the transaction is done, we merge the map and the splay
-  tree and write it back out.
-
-- the on-disk string pool is sorted and we keep a list of indices into
-  the string pool in sorted order so we can bsearch the list with a
-  string to get its string pool index.  maybe a hash table is better,
-  less I/O as we will expect to find the string within the block we
-  look up with the hash function.
-
-- represent all files as a breadth first traversal of the tree of all
-  files.  each entry has its name (string pool index), the number of
-  immediate children, total number of children, and owning package.
-  for files both these numbers are zero.  a file is identified by its
-  index in this flattened tree.
-
-  to get the file name from an index, we search through the list.  by
-  summing up the number of children, we know when to skip a directory
-  and when to descend into one.  as we go we accumulate the path
-  elements.
-
-  hmm, dropping number of immediate children and using a sentinel drops
-  a word from every entry.
-
 - signed pkgs
 
 - gzip repository of look-aside pkg xml files somehow?
@@ -70,9 +31,6 @@
   way we can assign them unique IDs immediately (like tokenizing
   strings).
 
-- bash completion for 'razor install gtk2-<TAB>' og
-  'razor install /usr/bin/gtk-perf<TAB>'
-
 - test suite should be easy, just keep .repo files around and test
   different type of upgrades that way (obsoletes, conflicts, file
   conflicts, file/dir problems etc).  Or maybe just keep a simple file
@@ -86,3 +44,6 @@
 - make packages pointers be either an index into the package pool or a
   direct link to a package when there is only one package.  set a high
   bit to indicate which it is.  similar for properties.
+
+- split out hash table code from importer, make the merger use just
+  the hash table.
