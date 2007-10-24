@@ -318,8 +318,9 @@ razor_set_create_from_rpmdb(void)
 		headerGetEntry(h, RPMTAG_NAME, &type, &name.p, &count);
 		headerGetEntry(h, RPMTAG_VERSION, &type, &version.p, &count);
 		headerGetEntry(h, RPMTAG_RELEASE, &type, &release.p, &count);
-		razor_importer_begin_package(importer,
-					     name.string, version.string);
+		snprintf(filename, sizeof filename, "%s-%s",
+			 version.string, release.string);
+		razor_importer_begin_package(importer, name.string, filename);
 
 		headerGetEntry(h, RPMTAG_REQUIRENAME, &type,
 			       &property_names.p, &count);

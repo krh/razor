@@ -930,7 +930,7 @@ razor_set_list(struct razor_set *set, const char *pattern)
 		if (pattern && fnmatch(pattern, &pool[p->name], 0) != 0)
 		    continue;
 		if (with_version)
-			printf("%s %s\n", &pool[p->name], &pool[p->version]);
+			printf("%s-%s\n", &pool[p->name], &pool[p->version]);
 		else
 			printf("%s\n", &pool[p->name]);
 	}
@@ -997,7 +997,7 @@ razor_set_list_all_properties(struct razor_set *set, struct array *properties)
 	pool = set->string_pool.data;
 	end = properties->data + properties->size;
 	for (p = properties->data; p < end; p++)
-		printf("%s %s\n", &pool[p->name], &pool[p->version]);
+		printf("%s-%s\n", &pool[p->name], &pool[p->version]);
 }
 
 void
@@ -1016,7 +1016,7 @@ razor_set_list_requires(struct razor_set *set, const char *name)
 		pool = set->string_pool.data;
 		while (~*r) {
 			p = &requires[*r++];
-			printf("%s %s\n", &pool[p->name], &pool[p->version]);
+			printf("%s-%s\n", &pool[p->name], &pool[p->version]);
 		}
 	} else
 		razor_set_list_all_properties(set, &set->requires);
@@ -1038,7 +1038,7 @@ razor_set_list_provides(struct razor_set *set, const char *name)
 		pool = set->string_pool.data;
 		while (~*r) {
 			p = &provides[*r++];
-			printf("%s %s\n", &pool[p->name], &pool[p->version]);
+			printf("%s-%s\n", &pool[p->name], &pool[p->version]);
 		}
 	} else 
 		razor_set_list_all_properties(set, &set->provides);
@@ -1069,7 +1069,7 @@ razor_set_list_property_packages(struct razor_set *set,
 			set->package_pool.data + property->packages;
 		while (~*r) {
 			p = &packages[*r++];
-			printf("%s %s\n",
+			printf("%s-%s\n",
 			       &pool[p->name], &pool[p->version]);
 		}
 	next:
@@ -1175,7 +1175,7 @@ razor_set_list_file_packages(struct razor_set *set, const char *filename)
 	pool = set->string_pool.data;
 	while (~*r) {
 		p = &packages[*r++];
-		printf("%s %s\n", &pool[p->name], &pool[p->version]);
+		printf("%s-%s\n", &pool[p->name], &pool[p->version]);
 	}
 }
 
@@ -1304,7 +1304,7 @@ razor_set_list_unsatisfied(struct razor_set *set)
 
 	for (u = unsatisfied.data; u < end; u++) {
 		r = requires + *u;
-		printf("%s %s not satisfied\n",
+		printf("%s-%s not satisfied\n",
 		       &pool[r->name], &pool[r->version]);
 	}
 
