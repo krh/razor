@@ -803,14 +803,15 @@ build_file_tree(struct razor_importer *importer)
 		f = filenames[i].name;
 		if (*f != '/')
 			continue;
+		f++;
 
 		d = &root;
 		while (*f) {
-			end = strchr(f + 1, '/');
+			end = strchr(f, '/');
 			if (end == NULL)
 				end = f + strlen(f);
-			length = end - (f + 1);
-			memcpy(dirname, f + 1, length);
+			length = end - f;
+			memcpy(dirname, f, length);
 			dirname[length] ='\0';
 			name = razor_importer_tokenize(importer, dirname);
 			if (d->last == NULL || d->last->name != name) {
@@ -821,7 +822,9 @@ build_file_tree(struct razor_importer *importer)
 				array_init(&d->last->packages);
 			}
 			d = d->last;				
-			f = end;
+			f = end + 1;
+			if (*end == '\0')
+				break;
 		}
 
 		r = array_add(&d->packages, sizeof *r);
@@ -1100,13 +1103,9 @@ find_entry(struct razor_set *set, struct razor_entry *dir, const char *pattern)
 	e = (struct razor_entry *) set->files.data + dir->start;
 	do {
 		n = pool + (e->name & RAZOR_ENTRY_MASK);
-		len = strlen(n);
-		if (len == 0)
-			/* FIXME: Shouldn't have 0-length entries... */
-			continue;
-			
 		if (strcmp(pattern + 1, n) == 0)
 			return e;
+		len = strlen(n);
 		if (e->start != 0 && strncmp(pattern + 1, n, len) == 0 &&
 		    pattern[len + 1] == '/') {
 			return find_entry(set, e, pattern + len + 1);
