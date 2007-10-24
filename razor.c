@@ -35,20 +35,22 @@ struct razor_set_header {
 #define RAZOR_MAGIC 0x7a7a7a7a
 #define RAZOR_VERSION 1
 
-#define RAZOR_PACKAGES 0
-#define RAZOR_REQUIRES 1
-#define RAZOR_PROVIDES 2
-#define RAZOR_STRING_POOL 3
-#define RAZOR_PACKAGE_POOL 4
-#define RAZOR_REQUIRES_POOL 5
-#define RAZOR_PROVIDES_POOL 6
-#define RAZOR_FILE_TREE 7
+#define RAZOR_STRING_POOL 0
+#define RAZOR_PACKAGES 1
+#define RAZOR_REQUIRES 2
+#define RAZOR_PROVIDES 3
+#define RAZOR_FILES 4
+#define RAZOR_PACKAGE_POOL 5
+#define RAZOR_REQUIRES_POOL 6
+#define RAZOR_PROVIDES_POOL 7
+#define RAZOR_FILE_POOL 8
 
 struct razor_package {
 	unsigned long name;
 	unsigned long version;
 	unsigned long requires;
 	unsigned long provides;
+	unsigned long files;
 };
 
 struct razor_property {
@@ -59,7 +61,6 @@ struct razor_property {
 
 struct razor_entry {
 	unsigned long name;
-	unsigned long count;
 	unsigned long start;
 	unsigned long packages;
 };
@@ -67,12 +68,13 @@ struct razor_entry {
 struct razor_set {
 	struct array string_pool;
  	struct array packages;
-	struct array package_pool;
  	struct array requires;
  	struct array provides;
+ 	struct array files;
+	struct array package_pool;
  	struct array requires_pool;
  	struct array provides_pool;
- 	struct array file_tree;
+ 	struct array file_pool;
 	struct razor_set_header *header;
 };
 
@@ -170,14 +172,15 @@ zalloc(size_t size)
 }
 
 struct razor_set_section razor_sections[] = {
+	{ RAZOR_STRING_POOL,	offsetof(struct razor_set, string_pool) },
 	{ RAZOR_PACKAGES,	offsetof(struct razor_set, packages) },
 	{ RAZOR_REQUIRES,	offsetof(struct razor_set, requires) },
 	{ RAZOR_PROVIDES,	offsetof(struct razor_set, provides) },
-	{ RAZOR_STRING_POOL,	offsetof(struct razor_set, string_pool) },
+	{ RAZOR_FILES,		offsetof(struct razor_set, files) },
 	{ RAZOR_PACKAGE_POOL,	offsetof(struct razor_set, package_pool) },
 	{ RAZOR_REQUIRES_POOL,	offsetof(struct razor_set, requires_pool) },
 	{ RAZOR_PROVIDES_POOL,	offsetof(struct razor_set, provides_pool) },
-	{ RAZOR_FILE_TREE,	offsetof(struct razor_set, file_tree) },
+	{ RAZOR_FILE_POOL,	offsetof(struct razor_set, file_pool) },
 };
 
 struct razor_set *
@@ -737,12 +740,15 @@ count_entries(struct import_directory *d)
 	}		
 }
 
+#define RAZOR_ENTRY_LAST 0x80000000ul
+#define RAZOR_ENTRY_MASK 0x00fffffful
+
 static void
 serialize_files(struct razor_set *set,
 		struct import_directory *d, struct array *array)
 {
 	struct import_directory *p, *end;
-	struct razor_entry *e;
+	struct razor_entry *e = NULL;
 	unsigned long s;
 
 	p = d->files.data;
@@ -751,14 +757,15 @@ serialize_files(struct razor_set *set,
 	while (p < end) {
 		e = array_add(array, sizeof *e);
 		e->name = p->name;
-		e->count = p->files.size / sizeof *p;
-		e->start = s;
+		e->start = p->count > 0 ? s : 0;
 		s += p->count;
 		e->packages = add_to_property_pool(&set->package_pool,
 						   &p->packages);
 		array_release(&p->packages);
 		p++;
 	}		
+	if (e != NULL)
+		e->name |= RAZOR_ENTRY_LAST;
 
 	p = d->files.data;
 	end = d->files.data + d->files.size;
@@ -823,108 +830,48 @@ build_file_tree(struct razor_importer *importer)
 	}
 
 	count_entries(&root);
-	array_init(&importer->set->file_tree);
+	array_init(&importer->set->files);
 
-	e = array_add(&importer->set->file_tree, sizeof *e);
-	e->name = root.name;
-	e->count = root.files.size / sizeof *d;
+	e = array_add(&importer->set->files, sizeof *e);
+	e->name = root.name | RAZOR_ENTRY_LAST;
 	e->start = 1;
+	e->packages = 0;
 
-	serialize_files(importer->set, &root, &importer->set->file_tree);
+	serialize_files(importer->set, &root, &importer->set->files);
 
 	array_release(&importer->files);
 }
 
-static const char *
-find_dir(struct razor_set *set, struct razor_entry **dir, const char *pattern)
+static void
+build_package_file_lists(struct razor_set *set)
 {
+	struct razor_package *p, *packages;
+	struct array *pkgs;
 	struct razor_entry *e, *end;
-	const char *n, *pool = set->string_pool.data;
-	int len;
+	unsigned long *r, *q;
+	int i, count;
 
-	e = (struct razor_entry *) set->file_tree.data + (*dir)->start;
-	end = e + (*dir)->count;
+	count = set->packages.size / sizeof *p;
+	pkgs = zalloc(count * sizeof *pkgs);
 
+	e = set->files.data;
+	end = set->files.data + set->files.size;
 	while (e < end) {
-		n = pool + e->name;
-		len = strlen(n);
-		if (len == 0) {
-			/* FIXME: Shouldn't have 0-length entries... */
-			e++;
-			continue;
-		}
-			
-		if (strncmp(pattern + 1, n, len) == 0 &&
-		    pattern[len + 1] == '/') {
-			*dir = e;
-			return find_dir(set, dir, pattern + len + 1);
+		r = (unsigned long *) set->package_pool.data + e->packages;
+		while (~*r) {
+			q = array_add(&pkgs[*r++], sizeof *q);
+			*q = e - (struct razor_entry *) set->files.data;
 		}
 		e++;
 	}
 
-	return pattern + 1;
-}
-
-static void
-list_dir(struct razor_set *set, struct razor_entry *dir,
-	 const char *pattern, const char *base)
-{
-	struct razor_entry *e, *end;
-	char *pool = set->string_pool.data;
-
-	e = (struct razor_entry *) set->file_tree.data + dir->start;
-	end = e + dir->count;
-
-	for ( ; e < end; e++) {
-		if (base && base[0] && fnmatch(base, &pool[e->name], 0) != 0)
-			continue;
-		if (base && pattern)
-			printf("%.*s%s%s\n",
-			       base - pattern, pattern, pool + e->name,
-			       e->count > 0 ? "/" : "");
-		else
-			printf("%s%s\n", pool + e->name,
-			       e->count > 0 ? "/" : "");
-		
-	}
-}
-
-void
-razor_set_list_files(struct razor_set *set, const char *pattern)
-{
-	struct razor_entry *e;
-	const char *base;
-
-	if (pattern == NULL)
-		pattern = "/";
-
-	e = set->file_tree.data;
-	base = find_dir(set, &e, pattern);
-	if (base == NULL)
-		return;
-	list_dir(set, e, pattern, base);
-}
-
-void
-razor_set_list_file_packages(struct razor_set *set, const char *filename)
-{
-	struct razor_entry *e;
-	struct razor_package *packages, *p;
-	const char *pool, *base;
-	unsigned long *r;
-
-	e = set->file_tree.data;
-	base = find_dir(set, &e, filename);
-	if (base == NULL)
-		return;
-	
-	r = (unsigned long *) set->package_pool.data + e->packages;
 	packages = set->packages.data;
-	pool = set->string_pool.data;
-	while (~*r) {
-		p = &packages[*r++];
-		printf("%s %s\n", &pool[p->name], &pool[p->version]);
+	for (i = 0; i < count; i++) {
+		packages[i].files =
+			add_to_property_pool(&set->file_pool, &pkgs[i]);
+		array_release(&pkgs[i]);
 	}
+	free(pkgs);
 }
 
 struct razor_set *
@@ -957,6 +904,8 @@ razor_importer_finish(struct razor_importer *importer)
 	build_file_tree(importer);
 	remap_links(&importer->set->package_pool, rmap);
 	free(rmap);
+
+	build_package_file_lists(importer->set);
 
 	set = importer->set;
 	array_release(&importer->buckets);
@@ -1139,6 +1088,167 @@ razor_set_list_provides_packages(struct razor_set *set,
 				 const char *version)
 {
 	razor_set_list_property_packages(set, &set->provides, name, version);
+}
+
+static struct razor_entry *
+find_entry(struct razor_set *set, struct razor_entry *dir, const char *pattern)
+{
+	struct razor_entry *e;
+	const char *n, *pool = set->string_pool.data;
+	int len;
+
+	e = (struct razor_entry *) set->files.data + dir->start;
+	do {
+		n = pool + (e->name & RAZOR_ENTRY_MASK);
+		len = strlen(n);
+		if (len == 0)
+			/* FIXME: Shouldn't have 0-length entries... */
+			continue;
+			
+		if (strcmp(pattern + 1, n) == 0)
+			return e;
+		if (e->start != 0 && strncmp(pattern + 1, n, len) == 0 &&
+		    pattern[len + 1] == '/') {
+			return find_entry(set, e, pattern + len + 1);
+		}
+	} while (((e++)->name & RAZOR_ENTRY_LAST) == 0);
+
+	return NULL;
+}
+
+static void
+list_dir(struct razor_set *set, struct razor_entry *dir,
+	 const char *prefix, const char *pattern)
+{
+	struct razor_entry *e;
+	const char *n, *pool = set->string_pool.data;
+
+	e = (struct razor_entry *) set->files.data + dir->start;
+	do {
+		n = pool + (e->name & RAZOR_ENTRY_MASK);
+		if (pattern && pattern[0] && fnmatch(pattern, n, 0) != 0)
+			continue;
+		printf("%s/%s%s\n", prefix, n, e->start > 0 ? "/" : "");
+	} while (((e++)->name & RAZOR_ENTRY_LAST) == 0);
+}
+
+void
+razor_set_list_files(struct razor_set *set, const char *pattern)
+{
+	struct razor_entry *e;
+	char buffer[512], *p, *base;
+
+	if (pattern == NULL)
+		pattern = "/";
+
+	strcpy(buffer, pattern);
+	e = find_entry(set, set->files.data, buffer);
+	if (e && e->start > 0) {
+		base = NULL;
+	} else {
+		p = strrchr(buffer, '/');
+		if (p) {
+			*p = '\0';
+			base = p + 1;
+		} else {
+			base = NULL;
+		}
+	}
+	e = find_entry(set, set->files.data, buffer);
+	if (e->start != 0)
+		list_dir(set, e, buffer, base);
+}
+
+void
+razor_set_list_file_packages(struct razor_set *set, const char *filename)
+{
+	struct razor_entry *e;
+	struct razor_package *packages, *p;
+	const char *pool;
+	unsigned long *r;
+
+	e = find_entry(set, set->files.data, filename);
+	if (e == NULL)
+		return;
+	
+	r = (unsigned long *) set->package_pool.data + e->packages;
+	packages = set->packages.data;
+	pool = set->string_pool.data;
+	while (~*r) {
+		p = &packages[*r++];
+		printf("%s %s\n", &pool[p->name], &pool[p->version]);
+	}
+}
+
+static unsigned long *
+list_package_files(struct razor_set *set, unsigned long *r,
+		   struct razor_entry *dir, unsigned long end,
+		   char *prefix)
+{
+	struct razor_entry *e, *f, *entries;
+	unsigned long next;
+	char *pool;
+	int len;
+	
+	entries = (struct razor_entry *) set->files.data;
+	pool = set->string_pool.data;
+
+	e = entries + dir->start;
+	do {
+		if (entries + *r == e) {
+			printf("%s/%s\n", prefix,
+			       pool + (e->name & RAZOR_ENTRY_MASK));
+			r++;
+			if (*r >= end)
+				break;
+		}
+	} while (((e++)->name & RAZOR_ENTRY_LAST) == 0);
+
+	e = entries + dir->start;
+	do {
+		if (e->start == 0)
+			continue;
+
+		if (e->name & RAZOR_ENTRY_LAST)
+			next = end;
+		else {
+			f = e + 1; 
+			while (f->start == 0 && !(f->name & RAZOR_ENTRY_LAST))
+				f++;
+			if (f->start == 0)
+				next = end;
+			else
+				next = f->start;
+		}
+
+		if (e->start <= *r && *r < next) {
+			len = strlen(prefix);
+			prefix[len] = '/';
+			strcpy(prefix + len + 1,
+			       pool + (e->name & RAZOR_ENTRY_MASK));
+			r = list_package_files(set, r, e, next, prefix);
+			prefix[len] = '\0';
+			if (*r >= end)
+				break;
+		}
+	} while (((e++)->name & RAZOR_ENTRY_LAST) == 0);
+
+	return r;
+}
+
+void
+razor_set_list_package_files(struct razor_set *set, const char *name)
+{
+	struct razor_package *package;
+	unsigned long *r, end;
+	char buffer[512];
+
+	package = razor_set_get_package(set, name);
+
+	r = (unsigned long *) set->file_pool.data + package->files;
+	end = set->files.size / sizeof (struct razor_entry);
+	buffer[0] = '\0';
+	list_package_files(set, r, set->files.data, end, buffer);
 }
 
 static void

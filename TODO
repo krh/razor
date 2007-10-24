@@ -47,3 +47,9 @@
 
 - split out hash table code from importer, make the merger use just
   the hash table.
+
+- try to clean up the
+
+	do { ... } while (((e++)->name & RAZOR_ENTRY_LAST) == 0);
+
+  idiom for iteration of directories.
