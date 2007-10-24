@@ -35,6 +35,10 @@ struct razor_set_header {
 #define RAZOR_MAGIC 0x7a7a7a7a
 #define RAZOR_VERSION 1
 
+#define RAZOR_ENTRY_LAST	0x80000000ul
+#define RAZOR_IMMEDIATE		0x80000000ul
+#define RAZOR_ENTRY_MASK	0x00fffffful
+
 #define RAZOR_STRING_POOL 0
 #define RAZOR_PACKAGES 1
 #define RAZOR_REQUIRES 2
@@ -696,7 +700,13 @@ uniqueify_properties(struct razor_set *set, struct array *properties)
 	properties->size = (void *) up - properties->data;
 	rp_end = up;
 	for (rp = properties->data, p = pkgs; rp < rp_end; rp++, p++) {
-		rp->packages = add_to_property_pool(&set->package_pool, p);
+		if (p->size / sizeof *r == 1) {
+			r = p->data;
+			rp->packages = *r | RAZOR_IMMEDIATE;
+		} else {
+			rp->packages =
+				add_to_property_pool(&set->package_pool, p);
+		}
 		array_release(p);
 	}
 
@@ -740,10 +750,6 @@ count_entries(struct import_directory *d)
 	}		
 }
 
-#define RAZOR_ENTRY_LAST	0x80000000ul
-#define RAZOR_IMMEDIATE		0x80000000ul
-#define RAZOR_ENTRY_MASK	0x00fffffful
-
 static void
 serialize_files(struct razor_set *set,
 		struct import_directory *d, struct array *array)
@@ -761,7 +767,7 @@ serialize_files(struct razor_set *set,
 		e->start = p->count > 0 ? s : 0;
 		s += p->count;
 
-		if (p->packages.size / sizeof (unsigned long) == 1) {
+		if (p->packages.size / sizeof *r == 1) {
 			r = p->packages.data;
 			e->packages = *r | RAZOR_IMMEDIATE;
 		} else {
@@ -780,6 +786,18 @@ serialize_files(struct razor_set *set,
 		serialize_files(set, p, array);
 		p++;
 	}
+}
+
+static void
+remap_property_package_links(struct array *properties, unsigned long *rmap)
+{
+	struct razor_property *p, *end;
+
+	end = properties->data + properties->size;
+	for (p = properties->data; p < end; p++)
+		if (p->packages & RAZOR_IMMEDIATE)
+			p->packages = rmap[p->packages & RAZOR_ENTRY_MASK] |
+				RAZOR_IMMEDIATE;
 }
 
 static void
@@ -923,8 +941,9 @@ razor_importer_finish(struct razor_importer *importer)
 	build_file_tree(importer);
 	remap_links(&importer->set->package_pool, rmap);
 	build_package_file_lists(importer->set, rmap);
+	remap_property_package_links(&importer->set->requires, rmap);
+	remap_property_package_links(&importer->set->provides, rmap);
 	free(rmap);
-
 
 	set = importer->set;
 	array_release(&importer->buckets);
@@ -1081,12 +1100,17 @@ razor_set_list_property_packages(struct razor_set *set,
 	while (property < end && strcmp(name, &pool[property->name]) == 0) {
 		if (version && versioncmp(version, &pool[property->version]) != 0)
 			goto next;
-		r = (unsigned long *)
-			set->package_pool.data + property->packages;
+		
+		if (property->packages & RAZOR_IMMEDIATE)
+			r = &property->packages;
+		else
+			r = (unsigned long *)
+				set->package_pool.data + property->packages;
 		while (~*r) {
-			p = &packages[*r++];
-			printf("%s-%s\n",
-			       &pool[p->name], &pool[p->version]);
+			p = &packages[*r & RAZOR_ENTRY_MASK];
+			printf("%s-%s\n", &pool[p->name], &pool[p->version]);
+			if (*r++ & RAZOR_IMMEDIATE)
+				break;
 		}
 	next:
 		property++;
@@ -1558,7 +1582,13 @@ rebuild_package_lists(struct razor_set *set)
 	prop_end = set->requires.data + set->requires.size;
 	a = requires_pkgs;
 	for (prop = set->requires.data; prop < prop_end; prop++, a++) {
-		prop->packages = add_to_property_pool(&set->requires_pool, a);
+		if (a->size / sizeof *r == 1) {
+			r = a->data;
+			prop->packages = *r | RAZOR_IMMEDIATE;
+		} else {
+			prop->packages =
+				add_to_property_pool(&set->requires_pool, a);
+		}
 		array_release(a);
 	}
 	free(requires_pkgs);
@@ -1566,7 +1596,13 @@ rebuild_package_lists(struct razor_set *set)
 	prop_end = set->provides.data + set->provides.size;
 	a = provides_pkgs;
 	for (prop = set->provides.data; prop < prop_end; prop++, a++) {
-		prop->packages = add_to_property_pool(&set->provides_pool, a);
+		if (a->size / sizeof *r == 1) {
+			r = a->data;
+			prop->packages = *r | RAZOR_IMMEDIATE;
+		} else {
+			prop->packages =
+				add_to_property_pool(&set->provides_pool, a);
+		}
 		array_release(a);
 	}
 	free(provides_pkgs);
@@ -1684,7 +1720,10 @@ razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
 		} else {
 			pkg = array_add(list, sizeof *pkg);
 			/* We just pull in the first package that provides */
-			*pkg = package_pool[p->packages];
+			if (p->packages & RAZOR_IMMEDIATE)
+				*pkg = p->packages & RAZOR_ENTRY_MASK;
+			else
+				*pkg = package_pool[p->packages];
 		}
 	}	
 }
