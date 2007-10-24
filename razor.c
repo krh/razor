@@ -740,8 +740,9 @@ count_entries(struct import_directory *d)
 	}		
 }
 
-#define RAZOR_ENTRY_LAST 0x80000000ul
-#define RAZOR_ENTRY_MASK 0x00fffffful
+#define RAZOR_ENTRY_LAST	0x80000000ul
+#define RAZOR_IMMEDIATE		0x80000000ul
+#define RAZOR_ENTRY_MASK	0x00fffffful
 
 static void
 serialize_files(struct razor_set *set,
@@ -749,7 +750,7 @@ serialize_files(struct razor_set *set,
 {
 	struct import_directory *p, *end;
 	struct razor_entry *e = NULL;
-	unsigned long s;
+	unsigned long s, *r;
 
 	p = d->files.data;
 	end = d->files.data + d->files.size;
@@ -759,8 +760,14 @@ serialize_files(struct razor_set *set,
 		e->name = p->name;
 		e->start = p->count > 0 ? s : 0;
 		s += p->count;
-		e->packages = add_to_property_pool(&set->package_pool,
-						   &p->packages);
+
+		if (p->packages.size / sizeof (unsigned long) == 1) {
+			r = p->packages.data;
+			e->packages = *r | RAZOR_IMMEDIATE;
+		} else {
+			e->packages = add_to_property_pool(&set->package_pool,
+							   &p->packages);
+		}
 		array_release(&p->packages);
 		p++;
 	}		
@@ -846,7 +853,7 @@ build_file_tree(struct razor_importer *importer)
 }
 
 static void
-build_package_file_lists(struct razor_set *set)
+build_package_file_lists(struct razor_set *set, unsigned long *rmap)
 {
 	struct razor_package *p, *packages;
 	struct array *pkgs;
@@ -860,10 +867,19 @@ build_package_file_lists(struct razor_set *set)
 	e = set->files.data;
 	end = set->files.data + set->files.size;
 	while (e < end) {
-		r = (unsigned long *) set->package_pool.data + e->packages;
+		if (e->packages & RAZOR_IMMEDIATE) {
+			e->packages = rmap[e->packages & RAZOR_ENTRY_MASK] |
+				RAZOR_IMMEDIATE;
+			r = &e->packages;
+		} else {
+			r = (unsigned long *) set->package_pool.data + e->packages;
+		}
+
 		while (~*r) {
-			q = array_add(&pkgs[*r++], sizeof *q);
+			q = array_add(&pkgs[*r & RAZOR_ENTRY_MASK], sizeof *q);
 			*q = e - (struct razor_entry *) set->files.data;
+			if (*r++ & RAZOR_IMMEDIATE)
+				break;
 		}
 		e++;
 	}
@@ -906,9 +922,9 @@ razor_importer_finish(struct razor_importer *importer)
 
 	build_file_tree(importer);
 	remap_links(&importer->set->package_pool, rmap);
+	build_package_file_lists(importer->set, rmap);
 	free(rmap);
 
-	build_package_file_lists(importer->set);
 
 	set = importer->set;
 	array_release(&importer->buckets);
@@ -1170,12 +1186,18 @@ razor_set_list_file_packages(struct razor_set *set, const char *filename)
 	if (e == NULL)
 		return;
 	
-	r = (unsigned long *) set->package_pool.data + e->packages;
+	if (e->packages & RAZOR_IMMEDIATE)
+		r = &e->packages;
+	else
+		r = (unsigned long *) set->package_pool.data + e->packages;
+
 	packages = set->packages.data;
 	pool = set->string_pool.data;
 	while (~*r) {
-		p = &packages[*r++];
+		p = &packages[*r & RAZOR_ENTRY_MASK];
 		printf("%s-%s\n", &pool[p->name], &pool[p->version]);
+		if (*r++ & RAZOR_IMMEDIATE)
+			break;
 	}
 }
 
