@@ -348,10 +348,9 @@ add_to_property_pool(struct array *pool, struct array *properties)
 {
 	unsigned long  *p;
 
-	p = array_add(properties, sizeof *p);
-	*p = ~0ul;
 	p = array_add(pool, properties->size);
 	memcpy(p, properties->data, properties->size);
+	p[properties->size / sizeof *p - 1] |= RAZOR_IMMEDIATE;
 
 	return p - (unsigned long *) pool->data;
 }
@@ -722,8 +721,7 @@ remap_links(struct array *links, unsigned long *map)
 
 	end = links->data + links->size;
 	for (p = links->data; p < end; p++)
-		if (*p != ~0)
-			*p = map[*p];
+		*p = map[*p & RAZOR_ENTRY_MASK] | (*p & ~RAZOR_ENTRY_MASK);
 }
 
 static int
@@ -767,7 +765,11 @@ serialize_files(struct razor_set *set,
 		e->start = p->count > 0 ? s : 0;
 		s += p->count;
 
-		if (p->packages.size / sizeof *r == 1) {
+		if (p->packages.size == 0) {
+			/* FIXME: We need to make sure this is handled
+			 * correctly as the empty list. */
+			e->packages = 0 | RAZOR_IMMEDIATE;
+		} else if (p->packages.size / sizeof *r == 1) {
 			r = p->packages.data;
 			e->packages = *r | RAZOR_IMMEDIATE;
 		} else {
@@ -893,7 +895,7 @@ build_package_file_lists(struct razor_set *set, unsigned long *rmap)
 			r = (unsigned long *) set->package_pool.data + e->packages;
 		}
 
-		while (~*r) {
+		while (1) {
 			q = array_add(&pkgs[*r & RAZOR_ENTRY_MASK], sizeof *q);
 			*q = e - (struct razor_entry *) set->files.data;
 			if (*r++ & RAZOR_IMMEDIATE)
@@ -1049,9 +1051,11 @@ razor_set_list_requires(struct razor_set *set, const char *name)
 			package->requires;
 		requires = set->requires.data;
 		pool = set->string_pool.data;
-		while (~*r) {
-			p = &requires[*r++];
+		while (1) {
+			p = &requires[*r & RAZOR_ENTRY_MASK];
 			printf("%s-%s\n", &pool[p->name], &pool[p->version]);
+			if (*r++ & RAZOR_IMMEDIATE)
+				break;
 		}
 	} else
 		razor_set_list_all_properties(set, &set->requires);
@@ -1071,9 +1075,11 @@ razor_set_list_provides(struct razor_set *set, const char *name)
 			package->provides;
 		provides = set->provides.data;
 		pool = set->string_pool.data;
-		while (~*r) {
-			p = &provides[*r++];
+		while (1) {
+			p = &provides[*r & RAZOR_ENTRY_MASK];
 			printf("%s-%s\n", &pool[p->name], &pool[p->version]);
+			if (*r++ & RAZOR_IMMEDIATE)
+				break;
 		}
 	} else 
 		razor_set_list_all_properties(set, &set->provides);
@@ -1106,7 +1112,7 @@ razor_set_list_property_packages(struct razor_set *set,
 		else
 			r = (unsigned long *)
 				set->package_pool.data + property->packages;
-		while (~*r) {
+		while (1) {
 			p = &packages[*r & RAZOR_ENTRY_MASK];
 			printf("%s-%s\n", &pool[p->name], &pool[p->version]);
 			if (*r++ & RAZOR_IMMEDIATE)
@@ -1217,7 +1223,7 @@ razor_set_list_file_packages(struct razor_set *set, const char *filename)
 
 	packages = set->packages.data;
 	pool = set->string_pool.data;
-	while (~*r) {
+	while (1) {
 		p = &packages[*r & RAZOR_ENTRY_MASK];
 		printf("%s-%s\n", &pool[p->name], &pool[p->version]);
 		if (*r++ & RAZOR_IMMEDIATE)
@@ -1401,15 +1407,27 @@ add_package(struct razor_importer *importer,
 	p->requires = package->requires;
 	p->provides = package->provides;
 
-	r = (unsigned long *)
-		source->set->requires_pool.data + package->requires;
-	while (*r != ~0)
-		source->requires_map[*r++] = 1;
+	if (package->requires & RAZOR_IMMEDIATE)
+		r = &package->requires;
+	else
+		r = (unsigned long *)
+			source->set->requires_pool.data + package->requires;
+	while (1) {
+		source->requires_map[*r & RAZOR_ENTRY_MASK] = 1;
+		if (*r++ & RAZOR_IMMEDIATE)
+			break;
+	}
 
-	r = (unsigned long *)
-		source->set->provides_pool.data + package->provides;
-	while (*r != ~0)
-		source->provides_map[*r++] = 1;
+	if (package->provides & RAZOR_IMMEDIATE)
+		r = &package->requires;
+	else
+		r = (unsigned long *)
+			source->set->provides_pool.data + package->provides;
+	while (1) {
+		source->provides_map[*r & RAZOR_ENTRY_MASK] = 1;
+		if (*r++ & RAZOR_IMMEDIATE)
+			break;
+	}
 }
 
 
@@ -1536,13 +1554,12 @@ emit_properties(struct array *source_pool, unsigned long index,
 
 	r = pool->size / sizeof *q;
 	p = (unsigned long *) source_pool->data + index;
-	while (*p != ~0) {
+	while (1) {
 		q = array_add(pool, sizeof *q);
-		*q = map[*p++];
+		*q = map[*p & RAZOR_ENTRY_MASK] | (*p & ~RAZOR_ENTRY_MASK);
+		if (*p++ & RAZOR_ENTRY_LAST)
+			break;
 	}
-
-	q = array_add(pool, sizeof *q);
-	*q = ~0;
 
 	return r;
 }
@@ -1569,13 +1586,17 @@ rebuild_package_lists(struct razor_set *set)
 	ppool = set->provides_pool.data;
 
 	for (pkg = set->packages.data; pkg < pkg_end; pkg++) {
-		for (r = &rpool[pkg->requires]; *r != ~0; r++) {
-			q = array_add(&requires_pkgs[*r], sizeof *q);
+		for (r = &rpool[pkg->requires]; ; r++) {
+			q = array_add(&requires_pkgs[*r & RAZOR_ENTRY_MASK], sizeof *q);
 			*q = pkg - (struct razor_package *) set->packages.data;
+			if (*r & RAZOR_IMMEDIATE)
+				break;
 		}
-		for (r = &ppool[pkg->provides]; *r != ~0; r++) {
-			q = array_add(&provides_pkgs[*r], sizeof *q);
+		for (r = &ppool[pkg->provides]; ; r++) {
+			q = array_add(&provides_pkgs[*r & RAZOR_ENTRY_MASK], sizeof *q);
 			*q = pkg - (struct razor_package *) set->packages.data;
+			if (*r & RAZOR_IMMEDIATE)
+				break;
 		}
 	}
 
