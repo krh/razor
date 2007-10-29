@@ -1,16 +1,33 @@
+Towards replacing rpm + yum (0.1):
+
+- installer part
+
+- rpm file parser, create repo command
+
+- conflicts, obsoletes
+
+- versions in depsolving
+
+- signed packages
+
+- merge file lists when merging package sets
+
+- import filelist.xml.gz too in yum importer
+
+- download (libcurl?)
+
+- figure out how to canonically represent empty string... ~0?
+
+Misc ideas:
+
 - keep history of installed packages/journal of package transaction,
   so we can roll back to yesterday, or see what got installed in the
   latest yum update.
-
-- signed pkgs
 
 - gzip repository of look-aside pkg xml files somehow?
 
 - transactions, proper recovery, make sure we don't poop our package
   database (no more rm /var/lib/rpm/__cache*).
-
-- diff from one package set to another answers: "what changed in
-  rawhide between since yesterday?"
 
 - rewrite qsort and bsearch that doesn't require global context var
   and can output a map describing the permutaion.
@@ -40,10 +57,6 @@
   is disk bound.  Start installing once we have self-contained set of
   packages.  Install in reverse topo-sort order.  Interruptible
   installation; stops at nearest checkpoint.
-
-- make packages pointers be either an index into the package pool or a
-  direct link to a package when there is only one package.  set a high
-  bit to indicate which it is.  similar for properties.
 
 - split out hash table code from importer, make the merger use just
   the hash table.
