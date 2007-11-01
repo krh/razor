@@ -5,19 +5,24 @@
 
 struct razor_set;
 
+enum razor_property_type {
+	RAZOR_PROPERTY_REQUIRES,
+	RAZOR_PROPERTY_PROVIDES,
+	RAZOR_PROPERTY_CONFLICTS,
+	RAZOR_PROPERTY_OBSOLETES
+};
+
 struct razor_set *razor_set_open(const char *filename);
 void razor_set_destroy(struct razor_set *set);
 int razor_set_write(struct razor_set *set, const char *filename);
 
 void razor_set_list(struct razor_set *set, const char *pattern);
-void razor_set_list_requires(struct razor_set *set, const char *name);
-void razor_set_list_provides(struct razor_set *set, const char *name);
-void razor_set_list_requires_packages(struct razor_set *set,
+void razor_set_list_properties(struct razor_set *set, const char *name,
+			       enum razor_property_type type);
+void razor_set_list_property_packages(struct razor_set *set,
 				      const char *name,
-				      const char *version);
-void razor_set_list_provides_packages(struct razor_set *set,
-				      const char *name,
-				      const char *version);
+				      const char *version,
+				      enum razor_property_type type);
 void razor_set_list_files(struct razor_set *set, const char *prefix);
 void razor_set_list_file_packages(struct razor_set *set, const char *filename);
 void razor_set_list_package_files(struct razor_set *set, const char *name);
@@ -44,10 +49,9 @@ struct razor_importer;
 struct razor_importer *razor_importer_new(void);
 void razor_importer_begin_package(struct razor_importer *importer,
 				const char *name, const char *version);
-void razor_importer_add_requires(struct razor_importer *importer,
-				 const char *name, const char *version);
-void razor_importer_add_provides(struct razor_importer *importer,
-				 const char *name, const char *version);
+void razor_importer_add_property(struct razor_importer *importer,
+				 const char *name, const char *version,
+				 enum razor_property_type type);
 void razor_importer_add_file(struct razor_importer *importer,
 			     const char *name);
 void razor_importer_finish_package(struct razor_importer *importer);

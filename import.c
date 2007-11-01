@@ -60,10 +60,12 @@ parse_property(struct razor_importer *importer, const char **atts, void *data)
 
 	switch ((int) data) {
 	case RZR_REQUIRES:
-		razor_importer_add_requires(importer, name, version);
+		razor_importer_add_property(importer, name, version,
+					    RAZOR_PROPERTY_REQUIRES);
 		break;
 	case RZR_PROVIDES:
-		razor_importer_add_provides(importer, name, version);
+		razor_importer_add_property(importer, name, version,
+					    RAZOR_PROPERTY_PROVIDES);
 		break;
 	}
 }
@@ -229,10 +231,12 @@ yum_start_element(void *data, const char *name, const char **atts)
 			
 		switch (ctx->state) {
 		case YUM_STATE_REQUIRES:
-			razor_importer_add_requires(ctx->importer, n, buffer);
+			razor_importer_add_property(ctx->importer, n, buffer,
+						    RAZOR_PROPERTY_REQUIRES);
 			break;
 		case YUM_STATE_PROVIDES:
-			razor_importer_add_provides(ctx->importer, n, buffer);
+			razor_importer_add_property(ctx->importer, n, buffer,
+						    RAZOR_PROPERTY_PROVIDES);
 			break;
 		}
 	} else if (strcmp(name, "file") == 0) {
@@ -352,18 +356,20 @@ razor_set_create_from_rpmdb(void)
 		headerGetEntry(h, RPMTAG_REQUIREFLAGS, &type,
 			       &property_flags.p, &count);
 		for (i = 0; i < count; i++)
-			razor_importer_add_requires(importer,
+			razor_importer_add_property(importer,
 						    property_names.list[i],
-						    property_versions.list[i]);
+						    property_versions.list[i],
+						    RAZOR_PROPERTY_REQUIRES);
 
 		headerGetEntry(h, RPMTAG_PROVIDENAME, &type,
 			       &property_names.p, &count);
 		headerGetEntry(h, RPMTAG_PROVIDEVERSION, &type,
 			       &property_versions.p, &count);
 		for (i = 0; i < count; i++)
-			razor_importer_add_provides(importer,
+			razor_importer_add_property(importer,
 						    property_names.list[i],
-						    property_versions.list[i]);
+						    property_versions.list[i],
+						    RAZOR_PROPERTY_PROVIDES);
 
 		headerGetEntry(h, RPMTAG_BASENAMES, &type,
 			       &basenames.p, &count);

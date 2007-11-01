@@ -20,6 +20,8 @@ Towards replacing rpm + yum (0.1):
 
 Misc ideas:
 
+- eliminate duplicate entries in package property lists.
+
 - keep history of installed packages/journal of package transaction,
   so we can roll back to yesterday, or see what got installed in the
   latest yum update.
