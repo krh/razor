@@ -47,6 +47,30 @@ command_list_provides(int argc, const char *argv[])
 }
 
 static int
+command_list_obsoletes(int argc, const char *argv[])
+{
+	struct razor_set *set;
+
+	set = razor_set_open(repo_filename);
+	razor_set_list_properties(set, argv[0], RAZOR_PROPERTY_OBSOLETES);
+	razor_set_destroy(set);
+
+	return 0;
+}
+
+static int
+command_list_conflicts(int argc, const char *argv[])
+{
+	struct razor_set *set;
+
+	set = razor_set_open(repo_filename);
+	razor_set_list_properties(set, argv[0], RAZOR_PROPERTY_CONFLICTS);
+	razor_set_destroy(set);
+
+	return 0;
+}
+
+static int
 command_list_files(int argc, const char *argv[])
 {
 	struct razor_set *set;
@@ -210,8 +234,10 @@ static struct {
 	int (*func)(int argc, const char *argv[]);
 } razor_commands[] = {
 	{ "list", "list all packages", command_list },
-	{ "list-requires", "list all requires or requires for the given package", command_list_requires },
-	{ "list-provides", "list all provides or provides for the give package", command_list_provides },
+	{ "list-requires", "list all requires for the given package", command_list_requires },
+	{ "list-provides", "list all provides for the give package", command_list_provides },
+	{ "list-obsoletes", "list all obsoletes for the give package", command_list_obsoletes },
+	{ "list-conflicts", "list all conflicts for the give package", command_list_conflicts },
 	{ "list-files", "list files for package set", command_list_files },
 	{ "list-file-packages", "list packages owning file", command_list_file_packages },
 	{ "list-package-files", "list files in package", command_list_package_files },

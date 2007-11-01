@@ -159,6 +159,8 @@ enum {
 	YUM_STATE_PACKAGE_NAME,
 	YUM_STATE_REQUIRES,
 	YUM_STATE_PROVIDES,
+	YUM_STATE_OBSOLETES,
+	YUM_STATE_CONFLICTS,
 	YUM_STATE_FILE
 };
 
@@ -201,6 +203,10 @@ yum_start_element(void *data, const char *name, const char **atts)
 		ctx->state = YUM_STATE_REQUIRES;
 	} else if (strcmp(name, "rpm:provides") == 0) {
 		ctx->state = YUM_STATE_PROVIDES;
+	} else if (strcmp(name, "rpm:obsoletes") == 0) {
+		ctx->state = YUM_STATE_OBSOLETES;
+	} else if (strcmp(name, "rpm:conflicts") == 0) {
+		ctx->state = YUM_STATE_CONFLICTS;
 	} else if (strcmp(name, "rpm:entry") == 0 &&
 		   ctx->state != YUM_STATE_BEGIN) {
 		n = NULL;
@@ -237,6 +243,14 @@ yum_start_element(void *data, const char *name, const char **atts)
 		case YUM_STATE_PROVIDES:
 			razor_importer_add_property(ctx->importer, n, buffer,
 						    RAZOR_PROPERTY_PROVIDES);
+			break;
+		case YUM_STATE_OBSOLETES:
+			razor_importer_add_property(ctx->importer, n, buffer,
+						    RAZOR_PROPERTY_OBSOLETES);
+			break;
+		case YUM_STATE_CONFLICTS:
+			razor_importer_add_property(ctx->importer, n, buffer,
+						    RAZOR_PROPERTY_CONFLICTS);
 			break;
 		}
 	} else if (strcmp(name, "file") == 0) {
@@ -365,11 +379,37 @@ razor_set_create_from_rpmdb(void)
 			       &property_names.p, &count);
 		headerGetEntry(h, RPMTAG_PROVIDEVERSION, &type,
 			       &property_versions.p, &count);
+		headerGetEntry(h, RPMTAG_PROVIDEFLAGS, &type,
+			       &property_flags.p, &count);
 		for (i = 0; i < count; i++)
 			razor_importer_add_property(importer,
 						    property_names.list[i],
 						    property_versions.list[i],
 						    RAZOR_PROPERTY_PROVIDES);
+
+		headerGetEntry(h, RPMTAG_OBSOLETENAME, &type,
+			       &property_names.p, &count);
+		headerGetEntry(h, RPMTAG_OBSOLETEVERSION, &type,
+			       &property_versions.p, &count);
+		headerGetEntry(h, RPMTAG_OBSOLETEFLAGS, &type,
+			       &property_flags.p, &count);
+		for (i = 0; i < count; i++)
+			razor_importer_add_property(importer,
+						    property_names.list[i],
+						    property_versions.list[i],
+						    RAZOR_PROPERTY_OBSOLETES);
+
+		headerGetEntry(h, RPMTAG_CONFLICTNAME, &type,
+			       &property_names.p, &count);
+		headerGetEntry(h, RPMTAG_CONFLICTVERSION, &type,
+			       &property_versions.p, &count);
+		headerGetEntry(h, RPMTAG_CONFLICTFLAGS, &type,
+			       &property_flags.p, &count);
+		for (i = 0; i < count; i++)
+			razor_importer_add_property(importer,
+						    property_names.list[i],
+						    property_versions.list[i],
+						    RAZOR_PROPERTY_CONFLICTS);
 
 		headerGetEntry(h, RPMTAG_BASENAMES, &type,
 			       &basenames.p, &count);
