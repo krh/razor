@@ -1414,12 +1414,12 @@ merge_packages(struct razor_importer *importer,
 
 static unsigned long
 add_property(struct razor_importer *importer,
-	     const char *name, const char *version)
+	     const char *name, const char *version, int type)
 {
 	struct razor_property *p;
 
 	p = array_add(&importer->set->properties, sizeof *p);
-	p->name = razor_importer_tokenize(importer, name);
+	p->name = razor_importer_tokenize(importer, name) | (type << 30);
 	p->version = razor_importer_tokenize(importer, version);
 
 	return p - (struct razor_property *) importer->set->properties.data;
@@ -1467,15 +1467,18 @@ merge_properties(struct razor_importer *importer,
 		if (cmp < 0) {
 			map1[i++] = add_property(importer,
 						 &pool1[p1->name & RAZOR_ENTRY_MASK],
-						 &pool1[p1->version]);
+						 &pool1[p1->version],
+						 (p1->name >> 30));
 		} else if (cmp > 0) {
 			map2[j++] = add_property(importer,
 						 &pool2[p2->name & RAZOR_ENTRY_MASK],
-						 &pool2[p2->version]);
+						 &pool2[p2->version],
+						 (p2->name >> 30));
 		} else  {
 			map1[i++] = map2[j++] = add_property(importer,
 							     &pool1[p1->name & RAZOR_ENTRY_MASK],
-							     &pool1[p1->version]);
+							     &pool1[p1->version],
+							     (p1->name >> 30));
 		}
 	}
 }
