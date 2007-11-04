@@ -264,7 +264,13 @@ yum_end_element (void *data, const char *name)
 {
 	struct yum_context *ctx = data;
 
-	ctx->state = YUM_STATE_BEGIN;
+	switch (ctx->state) {
+	case YUM_STATE_PACKAGE_NAME:
+	case YUM_STATE_FILE:
+		ctx->state = YUM_STATE_BEGIN;
+		break;
+	}
+
 	if (strcmp(name, "package") == 0)
 		razor_importer_finish_package(ctx->importer);
 	else if (strcmp(name, "file") == 0)
