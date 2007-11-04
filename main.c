@@ -143,7 +143,7 @@ command_import_yum(int argc, const char *argv[])
 {
 	struct razor_set *set;
 
-	set = razor_set_create_from_yum_filelist(STDIN_FILENO);
+	set = razor_set_create_from_yum();
 	if (set == NULL)
 		return 1;
 	razor_set_write(set, rawhide_repo_filename);

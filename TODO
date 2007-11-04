@@ -18,6 +18,11 @@ Towards replacing rpm + yum (0.1):
 
 - figure out how to canonically represent empty string... ~0?
 
+- space calculation before transaction, but ideally, do a number of
+  smaller transactions.
+
+- pre-link changing binaries and libs on disk screwing up checksum?
+
 Misc ideas:
 
 - eliminate duplicate entries in package property lists.

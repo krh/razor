@@ -9,6 +9,7 @@
 #include <errno.h>
 
 #include <expat.h>
+#include <zlib.h>
 #include <rpm/rpmlib.h>
 #include <rpm/rpmdb.h>
 #include "sha1.h"
@@ -157,6 +158,7 @@ razor_import_rzr_files(int count, const char *files[])
 enum {
 	YUM_STATE_BEGIN,
 	YUM_STATE_PACKAGE_NAME,
+	YUM_STATE_CHECKSUM,
 	YUM_STATE_REQUIRES,
 	YUM_STATE_PROVIDES,
 	YUM_STATE_OBSOLETES,
@@ -165,14 +167,19 @@ enum {
 };
 
 struct yum_context {
+	XML_Parser primary_parser;
+	XML_Parser filelists_parser;
+	XML_Parser current_parser;
+
 	struct razor_importer *importer;
 	struct import_property_context *current_property_context;
 	char name[256], buffer[512], *p;
+	char pkgid[128];
 	int state;
 };
 
 static void
-yum_start_element(void *data, const char *name, const char **atts)
+yum_primary_start_element(void *data, const char *name, const char **atts)
 {
 	struct yum_context *ctx = data;
 	const char *n, *version, *release;
@@ -199,6 +206,9 @@ yum_start_element(void *data, const char *name, const char **atts)
 
 		snprintf(buffer, sizeof buffer, "%s-%s", version, release);
 		razor_importer_begin_package(ctx->importer, ctx->name, buffer);
+	} else if (strcmp(name, "checksum") == 0) {
+		ctx->p = ctx->pkgid;
+		ctx->state = YUM_STATE_CHECKSUM;
 	} else if (strcmp(name, "rpm:requires") == 0) {
 		ctx->state = YUM_STATE_REQUIRES;
 	} else if (strcmp(name, "rpm:provides") == 0) {
@@ -253,28 +263,26 @@ yum_start_element(void *data, const char *name, const char **atts)
 						    RAZOR_PROPERTY_CONFLICTS);
 			break;
 		}
-	} else if (strcmp(name, "file") == 0) {
-		ctx->state = YUM_STATE_FILE;
-		ctx->p = ctx->buffer;
 	}
 }
 
 static void
-yum_end_element (void *data, const char *name)
+yum_primary_end_element (void *data, const char *name)
 {
 	struct yum_context *ctx = data;
 
 	switch (ctx->state) {
 	case YUM_STATE_PACKAGE_NAME:
+	case YUM_STATE_CHECKSUM:
 	case YUM_STATE_FILE:
 		ctx->state = YUM_STATE_BEGIN;
 		break;
 	}
 
-	if (strcmp(name, "package") == 0)
-		razor_importer_finish_package(ctx->importer);
-	else if (strcmp(name, "file") == 0)
-		razor_importer_add_file(ctx->importer, ctx->buffer);
+	if (strcmp(name, "package") == 0) {
+		XML_StopParser(ctx->current_parser, XML_TRUE);
+		ctx->current_parser = ctx->filelists_parser;
+	}
 }
 
 static void
@@ -284,6 +292,7 @@ yum_character_data (void *data, const XML_Char *s, int len)
 
 	switch (ctx->state) {
 	case YUM_STATE_PACKAGE_NAME:
+	case YUM_STATE_CHECKSUM:
 	case YUM_STATE_FILE:
 		memcpy(ctx->p, s, len);
 		ctx->p += len;
@@ -292,41 +301,121 @@ yum_character_data (void *data, const XML_Char *s, int len)
 	}
 }
 
+static void
+yum_filelists_start_element(void *data, const char *name, const char **atts)
+{
+	struct yum_context *ctx = data;
+	const char *pkg, *pkgid;
+	int i;
+
+	if (strcmp(name, "package") == 0) {
+		pkg = NULL;
+		pkgid = NULL;
+		for (i = 0; atts[i]; i += 2) {
+			if (strcmp(atts[i], "name") == 0)
+				pkg = atts[i + 1];
+			else if (strcmp(atts[i], "pkgid") == 0)
+				pkgid = atts[i + 1];
+		}
+		if (strcmp(pkgid, ctx->pkgid) != 0)
+			fprintf(stderr, "primary.xml and filelists.xml "
+				"mismatch for %s: %s vs %s",
+				pkg, pkgid, ctx->pkgid);
+	} else if (strcmp(name, "file") == 0) {
+		ctx->state = YUM_STATE_FILE;
+		ctx->p = ctx->buffer;
+	}
+}
+
+
+static void
+yum_filelists_end_element (void *data, const char *name)
+{
+	struct yum_context *ctx = data;
+
+	ctx->state = YUM_STATE_BEGIN;
+	if (strcmp(name, "package") == 0) {
+		XML_StopParser(ctx->current_parser, XML_TRUE);
+		ctx->current_parser = ctx->primary_parser;
+		razor_importer_finish_package(ctx->importer);
+	} else if (strcmp(name, "file") == 0)
+		razor_importer_add_file(ctx->importer, ctx->buffer);
+
+}
+
+#define XML_BUFFER_SIZE 4096
+
 struct razor_set *
-razor_set_create_from_yum_filelist(int fd)
+razor_set_create_from_yum(void)
 {
 	struct yum_context ctx;
-	XML_Parser parser;
-	char buf[4096];
-	int len;
+	void *buf;
+	int len, ret;
+	gzFile primary, filelists;
+	XML_ParsingStatus status;
 
 	ctx.importer = razor_importer_new();	
 	ctx.state = YUM_STATE_BEGIN;
 
-	parser = XML_ParserCreate(NULL);
-	XML_SetUserData(parser, &ctx);
-	XML_SetElementHandler(parser, yum_start_element, yum_end_element);
-	XML_SetCharacterDataHandler(parser, yum_character_data);
+	ctx.primary_parser = XML_ParserCreate(NULL);
+	XML_SetUserData(ctx.primary_parser, &ctx);
+	XML_SetElementHandler(ctx.primary_parser,
+			      yum_primary_start_element,
+			      yum_primary_end_element);
+	XML_SetCharacterDataHandler(ctx.primary_parser,
+				    yum_character_data);
 
-	while (1) {
-		len = read(fd, buf, sizeof buf);
-		if (len < 0) {
-			fprintf(stderr,
-				"couldn't read input: %s\n", strerror(errno));
-			return NULL;
-		} else if (len == 0)
+	ctx.filelists_parser = XML_ParserCreate(NULL);
+	XML_SetUserData(ctx.filelists_parser, &ctx);
+	XML_SetElementHandler(ctx.filelists_parser,
+			      yum_filelists_start_element,
+			      yum_filelists_end_element);
+	XML_SetCharacterDataHandler(ctx.filelists_parser,
+				    yum_character_data);
+
+	primary = gzopen("primary.xml.gz", "rb");
+	if (primary == NULL)
+		return NULL;
+	filelists = gzopen("filelists.xml.gz", "rb");
+	if (filelists == NULL)
+		return NULL;
+
+	ctx.current_parser = ctx.primary_parser;
+
+	do {
+		XML_GetParsingStatus(ctx.current_parser, &status);
+		switch (status.parsing) {
+		case XML_SUSPENDED:
+			ret = XML_ResumeParser(ctx.current_parser);
 			break;
+		case XML_PARSING:
+		case XML_INITIALIZED:
+			buf = XML_GetBuffer(ctx.current_parser,
+					    XML_BUFFER_SIZE);
+			if (ctx.current_parser == ctx.primary_parser)
+				len = gzread(primary, buf, XML_BUFFER_SIZE);
+			else
+				len = gzread(filelists, buf, XML_BUFFER_SIZE);
+			if (len < 0) {
+				fprintf(stderr,
+					"couldn't read input: %s\n",
+					strerror(errno));
+				return NULL;
+			}
 
-		if (XML_Parse(parser, buf, len, 0) == XML_STATUS_ERROR) {
-			fprintf(stderr,
-				"%s at line %ld\n",
-				XML_ErrorString(XML_GetErrorCode(parser)),
-				XML_GetCurrentLineNumber(parser));
-			return NULL;
+			XML_ParseBuffer(ctx.current_parser, len, len == 0);
+			break;
+		case XML_FINISHED:
+			break;
 		}
-	}
+	} while (status.parsing != XML_FINISHED);
 
-	XML_ParserFree(parser);
+
+	XML_ParserFree(ctx.primary_parser);
+	XML_ParserFree(ctx.filelists_parser);
+
+	gzclose(primary);
+	gzclose(filelists);
 
 	return razor_importer_finish(ctx.importer);
 }

@@ -1,5 +1,5 @@
 CFLAGS = -Wall -g -O2
-LDLIBS = -lexpat -g -lrpm
+LDLIBS = -lexpat -lz -g -lrpm
 
 razor : razor.o import.o sha1.o main.o
 
