@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <curl/curl.h>
 #include "razor.h"
 
 static const char *repo_filename = "system.repo";
@@ -138,10 +139,35 @@ command_what_provides(int argc, const char *argv[])
 	return 0;
 }
 
+#define REPO_URL "http://download.fedora.redhat.com" \
+	"/pub/fedora/linux/development/i386/os/repodata"
+
 static int
 command_import_yum(int argc, const char *argv[])
 {
 	struct razor_set *set;
+	CURL *curl;
+	CURLcode res;
+	FILE *fp;
+
+	curl = curl_easy_init();
+	if (curl == NULL)
+		return 1;
+
+	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0);
+	fp = fopen("primary.xml.gz", "w");
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+	curl_easy_setopt(curl, CURLOPT_URL, REPO_URL "/primary.xml.gz");
+	res = curl_easy_perform(curl);
+	fclose(fp);
+
+	fp = fopen("filelists.xml.gz", "w");
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+	curl_easy_setopt(curl, CURLOPT_URL, REPO_URL "/filelists.xml.gz");
+	res = curl_easy_perform(curl);
+	fclose(fp);
+
+	curl_easy_cleanup(curl);
 
 	set = razor_set_create_from_yum();
 	if (set == NULL)

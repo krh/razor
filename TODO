@@ -12,8 +12,6 @@ Towards replacing rpm + yum (0.1):
 
 - merge file lists when merging package sets
 
-- import filelist.xml.gz too in yum importer
-
 - download (libcurl?)
 
 - figure out how to canonically represent empty string... ~0?
@@ -88,3 +86,6 @@ Misc ideas:
   maybe the effective set is the on-disk representation and the
   overlay can be computed when needed, we just keep a link back to the
   base.
+
+- incremental rawhide repo updates? instead of downloading 10MB zipped
+  repo every time, download a diff repo?
