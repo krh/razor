@@ -2,6 +2,8 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <curl/curl.h>
@@ -149,23 +151,30 @@ command_import_yum(int argc, const char *argv[])
 	CURL *curl;
 	CURLcode res;
 	FILE *fp;
+	struct stat buf;
 
 	curl = curl_easy_init();
 	if (curl == NULL)
 		return 1;
 
-	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0);
-	fp = fopen("primary.xml.gz", "w");
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
-	curl_easy_setopt(curl, CURLOPT_URL, REPO_URL "/primary.xml.gz");
-	res = curl_easy_perform(curl);
-	fclose(fp);
+	if (stat("primary.xml.gz", &buf) < 0) {
+		curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0);
+		fp = fopen("primary.xml.gz", "w");
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+		curl_easy_setopt(curl, CURLOPT_URL,
+				 REPO_URL "/primary.xml.gz");
+		res = curl_easy_perform(curl);
+		fclose(fp);
+	}
 
-	fp = fopen("filelists.xml.gz", "w");
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
-	curl_easy_setopt(curl, CURLOPT_URL, REPO_URL "/filelists.xml.gz");
-	res = curl_easy_perform(curl);
-	fclose(fp);
+	if (stat("filelist.xml.gz", &buf) < 0) {
+		fp = fopen("filelists.xml.gz", "w");
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+		curl_easy_setopt(curl, CURLOPT_URL,
+				 REPO_URL "/filelists.xml.gz");
+		res = curl_easy_perform(curl);
+		fclose(fp);
+	}
 
 	curl_easy_cleanup(curl);
 
