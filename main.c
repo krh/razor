@@ -141,6 +141,52 @@ command_what_provides(int argc, const char *argv[])
 	return 0;
 }
 
+static int
+show_progress(void *clientp,
+	      double dltotal, double dlnow, double ultotal, double ulnow)
+{
+	const char *file = clientp;
+
+	if (!dlnow < dltotal)
+		fprintf(stderr, "\rdownloading %s, %dkB/%dkB",
+			file, (int) dlnow / 1024, (int) dltotal / 1024);
+	else
+		fprintf(stderr, "\n");
+
+	return 0;
+}
+
+static int
+download_if_missing(CURL *curl, const char *url, const char *file)
+{
+	struct stat buf;
+	char error[256];
+	FILE *fp;
+	CURLcode res;
+	char buffer[256];
+
+	curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, error);
+	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0);
+	curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, show_progress);
+	curl_easy_setopt(curl, CURLOPT_PROGRESSDATA, file);
+
+	if (stat(file, &buf) < 0) {
+		fp = fopen(file, "w");
+		snprintf(buffer, sizeof buffer, "%s/%s", url, file);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+		curl_easy_setopt(curl, CURLOPT_URL, buffer);
+		res = curl_easy_perform(curl);
+		fclose(fp);
+		if (res != CURLE_OK) {
+			fprintf(stderr, "curl error: %s\n", error);
+			unlink(file);
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
 #define REPO_URL "http://download.fedora.redhat.com" \
 	"/pub/fedora/linux/development/i386/os/repodata"
 
@@ -149,33 +195,15 @@ command_import_yum(int argc, const char *argv[])
 {
 	struct razor_set *set;
 	CURL *curl;
-	CURLcode res;
-	FILE *fp;
-	struct stat buf;
 
 	curl = curl_easy_init();
 	if (curl == NULL)
 		return 1;
 
-	if (stat("primary.xml.gz", &buf) < 0) {
-		curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0);
-		fp = fopen("primary.xml.gz", "w");
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
-		curl_easy_setopt(curl, CURLOPT_URL,
-				 REPO_URL "/primary.xml.gz");
-		res = curl_easy_perform(curl);
-		fclose(fp);
-	}
-
-	if (stat("filelist.xml.gz", &buf) < 0) {
-		fp = fopen("filelists.xml.gz", "w");
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
-		curl_easy_setopt(curl, CURLOPT_URL,
-				 REPO_URL "/filelists.xml.gz");
-		res = curl_easy_perform(curl);
-		fclose(fp);
-	}
-
+	if (download_if_missing(curl, REPO_URL, "primary.xml.gz") < 0)
+		return -1;
+	if (download_if_missing(curl, REPO_URL, "filelists.xml.gz") < 0)
+		return -1;
 	curl_easy_cleanup(curl);
 
 	set = razor_set_create_from_yum();
