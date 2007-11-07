@@ -291,6 +291,14 @@ command_diff(int argc, const char *argv[])
 	return 0;
 }
 
+static int
+command_dump_rpm(int argc, const char *argv[])
+{
+	razor_rpm_dump(argv[0]);
+
+	return 0;
+}
+
 static struct {
 	const char *name;
 	const char *description;
@@ -310,7 +318,8 @@ static struct {
 	{ "import-rpmdb", "import the system rpm database", command_import_rpmdb },
 	{ "validate", "validate a package set", command_validate },
 	{ "update", "update all or specified packages", command_update },
-	{ "diff", "show diff between two package sets", command_diff }
+	{ "diff", "show diff between two package sets", command_diff },
+	{ "dump", "dump rpm file contents", command_dump_rpm }
 };
 
 static int

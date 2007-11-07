@@ -61,4 +61,8 @@ struct razor_set *razor_import_rzr_files(int count, const char **files);
 struct razor_set *razor_set_create_from_yum(void);
 struct razor_set *razor_set_create_from_rpmdb(void);
 
+/* RPM functions */
+void
+razor_rpm_dump(const char *filename);
+
 #endif /* _RAZOR_H_ */
