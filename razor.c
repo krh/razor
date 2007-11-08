@@ -470,6 +470,14 @@ razor_importer_new(void)
 	return importer;
 }
 
+/* Destroy an importer without creating the set. */
+void
+razor_importer_destroy(struct razor_importer *importer)
+{
+	/* FIXME: write this */
+}
+
+
 typedef int (*compare_with_data_func_t)(const void *p1,
 					const void *p,
 					void *data);
@@ -550,6 +558,9 @@ qsort_with_data(void *base, size_t nelem, size_t size,
 	struct qsort_context ctx;
 	unsigned long *map;
 	int i;
+
+	if (nelem == 0)
+		return NULL;
 
 	ctx.size = size;
 	ctx.compare = compare;

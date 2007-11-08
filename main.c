@@ -5,7 +5,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
+#include <dirent.h>
 #include <curl/curl.h>
 #include "razor.h"
 
@@ -292,9 +292,51 @@ command_diff(int argc, const char *argv[])
 }
 
 static int
-command_dump_rpm(int argc, const char *argv[])
+command_import_rpms(int argc, const char *argv[])
 {
-	razor_rpm_dump(argv[0]);
+	DIR *dir;
+	struct dirent *de;
+	struct razor_importer *importer;
+	struct razor_set *set;
+	int len;
+	char filename[256];
+	const char *dirname = argv[0];
+
+	if (dirname == NULL) {
+		fprintf(stderr, "usage: razor import-rpms DIR\n");
+		return -1;
+	}
+
+	dir = opendir(dirname);
+	if (dir == NULL) {
+		fprintf(stderr, "couldn't read dir %s\n", dirname);
+		return -1;
+	}
+
+	importer = razor_importer_new();
+
+	while (de = readdir(dir), de != NULL) {
+		len = strlen(de->d_name);
+		if (len < 5 || strcmp(de->d_name + len - 4, ".rpm") != 0)
+		    continue;
+		snprintf(filename, sizeof filename,
+			 "%s/%s", dirname, de->d_name);
+		if (razor_importer_add_rpm(importer, filename)) {
+			fprintf(stderr, "couldn't import %s\n", filename);
+			break;
+		}
+	}
+
+	if (de != NULL) {
+		razor_importer_destroy(importer);
+		return -1;
+	}
+
+	set = razor_importer_finish(importer);
+
+	razor_set_write(set, repo_filename);
+	razor_set_destroy(set);
+	printf("wrote %s\n", repo_filename);
 
 	return 0;
 }
@@ -306,20 +348,20 @@ static struct {
 } razor_commands[] = {
 	{ "list", "list all packages", command_list },
 	{ "list-requires", "list all requires for the given package", command_list_requires },
-	{ "list-provides", "list all provides for the give package", command_list_provides },
-	{ "list-obsoletes", "list all obsoletes for the give package", command_list_obsoletes },
-	{ "list-conflicts", "list all conflicts for the give package", command_list_conflicts },
+	{ "list-provides", "list all provides for the given package", command_list_provides },
+	{ "list-obsoletes", "list all obsoletes for the given package", command_list_obsoletes },
+	{ "list-conflicts", "list all conflicts for the given package", command_list_conflicts },
 	{ "list-files", "list files for package set", command_list_files },
 	{ "list-file-packages", "list packages owning file", command_list_file_packages },
 	{ "list-package-files", "list files in package", command_list_package_files },
 	{ "what-requires", "list the packages that have the given requires", command_what_requires },
 	{ "what-provides", "list the packages that have the given provides", command_what_provides },
-	{ "import-yum", "import yum filelist.xml on stdin", command_import_yum },
+	{ "import-yum", "import yum metadata files", command_import_yum },
 	{ "import-rpmdb", "import the system rpm database", command_import_rpmdb },
+	{ "import-rpms", "import rpms from the given directory", command_import_rpms },
 	{ "validate", "validate a package set", command_validate },
 	{ "update", "update all or specified packages", command_update },
-	{ "diff", "show diff between two package sets", command_diff },
-	{ "dump", "dump rpm file contents", command_dump_rpm }
+	{ "diff", "show diff between two package sets", command_diff }
 };
 
 static int

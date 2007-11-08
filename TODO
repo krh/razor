@@ -94,3 +94,5 @@ Misc ideas:
 
 - use hash tables for dirs when importing files to avoid qsorting all
   files in rawhide.
+
+- corner cases such as no files/properties in repo etc segfault.

@@ -47,6 +47,7 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 struct razor_importer;
 
 struct razor_importer *razor_importer_new(void);
+void razor_importer_destroy(struct razor_importer *importer);
 void razor_importer_begin_package(struct razor_importer *importer,
 				const char *name, const char *version);
 void razor_importer_add_property(struct razor_importer *importer,
@@ -55,6 +56,10 @@ void razor_importer_add_property(struct razor_importer *importer,
 void razor_importer_add_file(struct razor_importer *importer,
 			     const char *name);
 void razor_importer_finish_package(struct razor_importer *importer);
+
+int razor_importer_add_rpm(struct razor_importer *importer,
+			   const char *filename);
+
 struct razor_set *razor_importer_finish(struct razor_importer *importer);
 
 struct razor_set *razor_import_rzr_files(int count, const char **files);
