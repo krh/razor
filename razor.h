@@ -62,7 +62,6 @@ int razor_importer_add_rpm(struct razor_importer *importer,
 
 struct razor_set *razor_importer_finish(struct razor_importer *importer);
 
-struct razor_set *razor_import_rzr_files(int count, const char **files);
 struct razor_set *razor_set_create_from_yum(void);
 struct razor_set *razor_set_create_from_rpmdb(void);
 
