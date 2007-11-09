@@ -45,6 +45,7 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
  * like yum, rpmdb or razor package files. */
 
 struct razor_importer;
+struct razor_rpm;
 
 struct razor_importer *razor_importer_new(void);
 void razor_importer_destroy(struct razor_importer *importer);
@@ -58,7 +59,7 @@ void razor_importer_add_file(struct razor_importer *importer,
 void razor_importer_finish_package(struct razor_importer *importer);
 
 int razor_importer_add_rpm(struct razor_importer *importer,
-			   const char *filename);
+			   struct razor_rpm *rpm);
 
 struct razor_set *razor_importer_finish(struct razor_importer *importer);
 
@@ -66,7 +67,9 @@ struct razor_set *razor_set_create_from_yum(void);
 struct razor_set *razor_set_create_from_rpmdb(void);
 
 /* RPM functions */
-void
-razor_rpm_dump(const char *filename);
+
+struct razor_rpm *razor_rpm_open(const char *filename);
+int razor_rpm_install(struct razor_rpm *rpm, const char *root);
+int razor_rpm_close(struct razor_rpm *rpm);
 
 #endif /* _RAZOR_H_ */

@@ -298,6 +298,7 @@ command_import_rpms(int argc, const char *argv[])
 	struct dirent *de;
 	struct razor_importer *importer;
 	struct razor_set *set;
+	struct razor_rpm *rpm;
 	int len;
 	char filename[256];
 	const char *dirname = argv[0];
@@ -321,10 +322,17 @@ command_import_rpms(int argc, const char *argv[])
 		    continue;
 		snprintf(filename, sizeof filename,
 			 "%s/%s", dirname, de->d_name);
-		if (razor_importer_add_rpm(importer, filename)) {
+		rpm = razor_rpm_open(filename);
+		if (rpm == NULL) {
+			fprintf(stderr,
+				"failed to open rpm \"%s\"\n", filename);
+			continue;
+		}
+		if (razor_importer_add_rpm(importer, rpm)) {
 			fprintf(stderr, "couldn't import %s\n", filename);
 			break;
 		}
+		razor_rpm_close(rpm);
 	}
 
 	if (de != NULL) {
@@ -337,6 +345,44 @@ command_import_rpms(int argc, const char *argv[])
 	razor_set_write(set, repo_filename);
 	razor_set_destroy(set);
 	printf("wrote %s\n", repo_filename);
+
+	return 0;
+}
+
+static int
+command_install(int argc, const char *argv[])
+{
+	struct razor_rpm *rpm;
+	const char *filename = argv[0];
+	struct stat buf;
+	const char root[] = "install";
+
+	if (stat(root, &buf) < 0) {
+		if (mkdir(root, 0777) < 0) {
+			fprintf(stderr,
+				"could not create install root \"%s\"\n",
+				root);
+			return -1;
+		}
+		fprintf(stderr, "created install root \"%s\"\n", root);
+	} else if (!S_ISDIR(buf.st_mode)) {
+		fprintf(stderr,
+			"install root \"%s\" exists, but is not a directory\n",
+			root);
+		return -1;
+	}
+
+	rpm = razor_rpm_open(filename);
+	if (rpm == NULL) {
+		fprintf(stderr, "failed to open rpm %s\n", filename);
+		return -1;
+	}
+	if (razor_rpm_install(rpm, root) < 0) {
+		fprintf(stderr, "failed to install rpm %s\n", filename);
+		return -1;
+	}
+	
+	razor_rpm_close(rpm);
 
 	return 0;
 }
@@ -361,7 +407,8 @@ static struct {
 	{ "import-rpms", "import rpms from the given directory", command_import_rpms },
 	{ "validate", "validate a package set", command_validate },
 	{ "update", "update all or specified packages", command_update },
-	{ "diff", "show diff between two package sets", command_diff }
+	{ "diff", "show diff between two package sets", command_diff },
+	{ "install", "install rpm", command_install }
 };
 
 static int
