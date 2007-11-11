@@ -89,9 +89,14 @@ struct import_directory {
 	struct import_directory *last;
 };
 
+struct hashtable {
+	struct array buckets;
+	struct array *pool;
+};
+
 struct razor_importer {
 	struct razor_set *set;
-	struct array buckets;
+	struct hashtable table;
 	struct razor_package *package;
 	struct array properties;
 	struct array files;
@@ -294,18 +299,18 @@ hash_string(const char *key)
 }
 
 static unsigned long
-razor_importer_lookup(struct razor_importer *importer, const char *key)
+hashtable_lookup(struct hashtable *table, const char *key)
 {
 	unsigned int mask, start, i;
 	unsigned long *b;
 	char *pool;
 
-	pool = importer->set->string_pool.data;
-	mask = importer->buckets.alloc - 1;
+	pool = table->pool->data;
+	mask = table->buckets.alloc - 1;
 	start = hash_string(key) * sizeof(unsigned long);
 
-	for (i = 0; i < importer->buckets.alloc; i += sizeof *b) {
-		b = importer->buckets.data + ((start + i) & mask);
+	for (i = 0; i < table->buckets.alloc; i += sizeof *b) {
+		b = table->buckets.data + ((start + i) & mask);
 
 		if (*b == 0)
 			return 0;
@@ -318,16 +323,16 @@ razor_importer_lookup(struct razor_importer *importer, const char *key)
 }
 
 static unsigned long
-add_to_string_pool(struct razor_set *set, const char *key)
+add_to_string_pool(struct hashtable *table, const char *key)
 {
 	int len;
 	char *p;
 
 	len = strlen(key) + 1;
-	p = array_add(&set->string_pool, len);
+	p = array_add(table->pool, len);
 	memcpy(p, key, len);
 
-	return p - (char *) set->string_pool.data;
+	return p - (char *) table->pool->data;
 }
 
 static unsigned long
@@ -343,18 +348,18 @@ add_to_property_pool(struct array *pool, struct array *properties)
 }
 
 static void
-do_insert(struct razor_importer *importer, unsigned long value)
+do_insert(struct hashtable *table, unsigned long value)
 {
 	unsigned int mask, start, i;
 	unsigned long *b;
 	const char *key;
 
-	key = (char *) importer->set->string_pool.data + value;
-	mask = importer->buckets.alloc - 1;
+	key = (char *) table->pool->data + value;
+	mask = table->buckets.alloc - 1;
 	start = hash_string(key) * sizeof(unsigned long);
 
-	for (i = 0; i < importer->buckets.alloc; i += sizeof *b) {
-		b = importer->buckets.data + ((start + i) & mask);
+	for (i = 0; i < table->buckets.alloc; i += sizeof *b) {
+		b = table->buckets.data + ((start + i) & mask);
 		if (*b == 0) {
 			*b = value;
 			break;
@@ -363,29 +368,42 @@ do_insert(struct razor_importer *importer, unsigned long value)
 }
 
 static unsigned long
-razor_importer_insert(struct razor_importer *importer, const char *key)
+hashtable_insert(struct hashtable *table, const char *key)
 {
 	unsigned long value, *buckets, *b, *end;
 	int alloc;
 
-	alloc = importer->buckets.alloc;
-	array_add(&importer->buckets, 4 * sizeof *buckets);
-	if (alloc != importer->buckets.alloc) {
-		end = importer->buckets.data + alloc;
-		memset(end, 0, importer->buckets.alloc - alloc);
-		for (b = importer->buckets.data; b < end; b++) {
+	alloc = table->buckets.alloc;
+	array_add(&table->buckets, 4 * sizeof *buckets);
+	if (alloc != table->buckets.alloc) {
+		end = table->buckets.data + alloc;
+		memset(end, 0, table->buckets.alloc - alloc);
+		for (b = table->buckets.data; b < end; b++) {
 			value = *b;
 			if (value != 0) {
 				*b = 0;
-				do_insert(importer, value);
+				do_insert(table, value);
 			}
 		}
 	}
 
-	value = add_to_string_pool(importer->set, key);
-	do_insert (importer, value);
+	value = add_to_string_pool(table, key);
+	do_insert (table, value);
 
 	return value;
+}
+
+static void
+hashtable_init(struct hashtable *table, struct array *pool)
+{
+	array_init(&table->buckets);
+	table->pool = pool;
+}
+
+static void
+hashtable_release(struct hashtable *table)
+{
+	array_release(&table->buckets);
 }
 
 static unsigned long
@@ -394,13 +412,13 @@ razor_importer_tokenize(struct razor_importer *importer, const char *string)
 	unsigned long token;
 
 	if (string == NULL)
-		return razor_importer_tokenize(importer, "");
+		string = "";
 
-	token = razor_importer_lookup(importer, string);
+	token = hashtable_lookup(&importer->table, string);
 	if (token != 0)
 		return token;
 
-	return razor_importer_insert(importer, string);
+	return hashtable_insert(&importer->table, string);
 }
 
 void
@@ -466,6 +484,7 @@ razor_importer_new(void)
 
 	importer = zalloc(sizeof *importer);
 	importer->set = razor_set_create();
+	hashtable_init(&importer->table, &importer->set->string_pool);
 
 	return importer;
 }
@@ -923,7 +942,7 @@ razor_importer_finish(struct razor_importer *importer)
 	free(rmap);
 
 	set = importer->set;
-	array_release(&importer->buckets);
+	hashtable_release(&importer->table);
 	free(importer);
 
 	return set;
@@ -1614,7 +1633,7 @@ razor_set_add(struct razor_set *set, struct razor_set *upstream,
 	rebuild_package_lists(importer->set);
 
 	result = importer->set;
-	array_release(&importer->buckets);
+	hashtable_release(&importer->table);
 	free(importer);
 
 	return result;
