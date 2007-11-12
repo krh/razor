@@ -407,18 +407,24 @@ hashtable_release(struct hashtable *table)
 }
 
 static unsigned long
-razor_importer_tokenize(struct razor_importer *importer, const char *string)
+hashtable_tokenize(struct hashtable *table, const char *string)
 {
 	unsigned long token;
 
 	if (string == NULL)
 		string = "";
 
-	token = hashtable_lookup(&importer->table, string);
+	token = hashtable_lookup(table, string);
 	if (token != 0)
 		return token;
 
-	return hashtable_insert(&importer->table, string);
+	return hashtable_insert(table, string);
+}
+
+static unsigned long
+razor_importer_tokenize(struct razor_importer *importer, const char *string)
+{
+	return hashtable_tokenize(&importer->table, string);
 }
 
 void
@@ -1357,21 +1363,39 @@ struct source {
 	unsigned long *property_map;
 };
 
-static void
-prepare_source(struct source *source, struct razor_set *set)
+struct razor_merger {
+	struct razor_set *set;
+	struct hashtable table;
+	struct source source1;
+	struct source source2;
+};
+
+static struct razor_merger *
+razor_merger_create(struct razor_set *set1, struct razor_set *set2)
 {
+	struct razor_merger *merger;
 	int count;
 	size_t size;
 
-	source->set = set;
+	merger = zalloc(sizeof *merger);
+	merger->set = razor_set_create();
+	hashtable_init(&merger->table, &merger->set->string_pool);
 
-	count = set->properties.size / sizeof (struct razor_property);
-	size = count * sizeof *source->property_map;
-	source->property_map = zalloc(size);
+	count = set1->properties.size / sizeof (struct razor_property);
+	size = count * sizeof merger->source1.property_map[0];
+	merger->source1.property_map = zalloc(size);
+	merger->source1.set = set1;
+
+	count = set2->properties.size / sizeof (struct razor_property);
+	size = count * sizeof merger->source2.property_map[0];
+	merger->source2.property_map = zalloc(size);
+	merger->source2.set = set2;
+
+	return merger;
 }
 
 static void
-add_package(struct razor_importer *importer,
+add_package(struct razor_merger *merger,
 	    struct razor_package *package, struct source *source,
 	    unsigned long flags)
 {
@@ -1380,11 +1404,11 @@ add_package(struct razor_importer *importer,
 	struct razor_package *p;
 
 	pool = source->set->string_pool.data;
-	p = array_add(&importer->set->packages, sizeof *p);
-	p->name = razor_importer_tokenize(importer, &pool[package->name]);
+	p = array_add(&merger->set->packages, sizeof *p);
+	p->name = hashtable_tokenize(&merger->table, &pool[package->name]);
 	p->name |= flags;
-	p->version = razor_importer_tokenize(importer,
-					     &pool[package->version]);
+	p->version = hashtable_tokenize(&merger->table,
+					&pool[package->version]);
 	p->properties = package->properties;
 
 	if (package->properties & RAZOR_IMMEDIATE)
@@ -1401,18 +1425,18 @@ add_package(struct razor_importer *importer,
 
 
 /* Build the new package list sorted by merging the two package lists.
- * Build new string pool as we go. (for now we just re-use that part of
- * the importer). */
+ * Build new string pool as we go. */
 static void
-merge_packages(struct razor_importer *importer,
-	       struct source *source1, struct source *source2,
-	       struct array *packages)
+merge_packages(struct razor_merger *merger, struct array *packages)
 {
 	struct razor_package *upstream_packages, *p, *s, *send;
+	struct source *source1, *source2;
 	char *spool, *upool;
 	unsigned long *u, *uend;
 	int cmp;
 
+	source1 = &merger->source1;
+	source2 = &merger->source2;
 	upstream_packages = source2->set->packages.data;
 
 	u = packages->data;
@@ -1429,42 +1453,45 @@ merge_packages(struct razor_importer *importer,
 		if (u < uend)
 			cmp = strcmp(&spool[s->name], &upool[p->name]);
 		if (u >= uend || cmp < 0) {
-			add_package(importer, s, source1, 0);
+			add_package(merger, s, source1, 0);
 			s++;
 		} else if (cmp == 0) {
-			add_package(importer, p, source2, UPSTREAM_SOURCE);
+			add_package(merger, p, source2, UPSTREAM_SOURCE);
 			s++;
 			u++;
 		} else {
-			add_package(importer, p, source2, UPSTREAM_SOURCE);
+			add_package(merger, p, source2, UPSTREAM_SOURCE);
 			u++;
 		}
 	}
 }
 
 static unsigned long
-add_property(struct razor_importer *importer,
+add_property(struct razor_merger *merger,
 	     const char *name, const char *version, int type)
 {
 	struct razor_property *p;
 
-	p = array_add(&importer->set->properties, sizeof *p);
-	p->name = razor_importer_tokenize(importer, name) | (type << 30);
-	p->version = razor_importer_tokenize(importer, version);
+	p = array_add(&merger->set->properties, sizeof *p);
+	p->name = hashtable_tokenize(&merger->table, name) | (type << 30);
+	p->version = hashtable_tokenize(&merger->table, version);
 
-	return p - (struct razor_property *) importer->set->properties.data;
+	return p - (struct razor_property *) merger->set->properties.data;
 }
 
 static void
-merge_properties(struct razor_importer *importer,
-		 struct razor_set *set1,
-		 unsigned long *map1,
-		 struct razor_set *set2,
-		 unsigned long *map2)
+merge_properties(struct razor_merger *merger)
 {
 	struct razor_property *p1, *p2;
+	struct razor_set *set1, *set2;
+	unsigned long *map1, *map2;
 	int i, j, cmp, count1, count2;
 	char *pool1, *pool2;
+
+	set1 = merger->source1.set;
+	set2 = merger->source2.set;
+	map1 = merger->source1.property_map;
+	map2 = merger->source2.property_map;
 
 	i = 0;
 	j = 0;
@@ -1495,17 +1522,17 @@ merge_properties(struct razor_importer *importer,
 			cmp = versioncmp(&pool1[p1->version],
 					 &pool2[p2->version]);
 		if (cmp < 0) {
-			map1[i++] = add_property(importer,
+			map1[i++] = add_property(merger,
 						 &pool1[p1->name & RAZOR_ENTRY_MASK],
 						 &pool1[p1->version],
 						 (p1->name >> 30));
 		} else if (cmp > 0) {
-			map2[j++] = add_property(importer,
+			map2[j++] = add_property(merger,
 						 &pool2[p2->name & RAZOR_ENTRY_MASK],
 						 &pool2[p2->version],
 						 (p2->name >> 30));
 		} else  {
-			map1[i++] = map2[j++] = add_property(importer,
+			map1[i++] = map2[j++] = add_property(merger,
 							     &pool1[p1->name & RAZOR_ENTRY_MASK],
 							     &pool1[p1->version],
 							     (p1->name >> 30));
@@ -1573,6 +1600,18 @@ rebuild_package_lists(struct razor_set *set)
 	free(pkgs);
 }
 
+struct razor_set *
+razor_merger_finish(struct razor_merger *merger)
+{
+	struct razor_set *result;
+
+	result = merger->set;
+	hashtable_release(&merger->table);
+	free(merger);
+
+	return result;
+}
+
 /* Add packages from 'upstream' to 'set'.  The packages to add are
  * specified by the 'packages' array, which is a sorted list of
  * package indexes.  Returns a newly allocated package set.  Does not
@@ -1587,17 +1626,12 @@ struct razor_set *
 razor_set_add(struct razor_set *set, struct razor_set *upstream,
 	      struct array *packages)
 {
-	struct razor_set *result;
-	struct razor_importer *importer;
+	struct razor_merger *merger;
 	struct razor_package *p, *pend;
-	struct source source, upstream_source;
 
-	importer = razor_importer_new();
+	merger = razor_merger_create(set, upstream);
 
-	prepare_source(&upstream_source, upstream);
-	prepare_source(&source, set);
-
-	merge_packages(importer, &source, &upstream_source, packages);
+	merge_packages(merger, packages);
 
 	/* As we built the package list, we filled out a bitvector of
 	 * the properties that are referenced by the packages in the
@@ -1607,36 +1641,30 @@ razor_set_add(struct razor_set *set, struct razor_set *upstream,
 	 * indices in the old property list to indices in the new
 	 * property list for both sets. */
 
-	merge_properties(importer,
-			 set, source.property_map,
-			 upstream, upstream_source.property_map);
+	merge_properties(merger);
 
 	/* Now we loop through the packages again and emit the
 	 * property lists, remapped to point to the new properties. */
 
-	pend = importer->set->packages.data + importer->set->packages.size;
-	for (p = importer->set->packages.data; p < pend; p++) {
+	pend = merger->set->packages.data + merger->set->packages.size;
+	for (p = merger->set->packages.data; p < pend; p++) {
 		struct source *src;
 
 		if (p->name & UPSTREAM_SOURCE)
-			src = &upstream_source;
+			src = &merger->source2;
 		else
-			src = &source;
+			src = &merger->source1;
 
 		p->properties = emit_properties(&src->set->property_pool,
 						p->properties,
 						src->property_map,
-						&importer->set->property_pool);
+						&merger->set->property_pool);
 		p->name &= INDEX_MASK;
 	}
 
-	rebuild_package_lists(importer->set);
+	rebuild_package_lists(merger->set);
 
-	result = importer->set;
-	hashtable_release(&importer->table);
-	free(importer);
-
-	return result;
+	return razor_merger_finish(merger);
 }
 
 void
