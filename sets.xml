@@ -1,0 +1,11 @@
+<test-sets>
+  <set name="b">
+    <package name="bash" version="3.2-18.fc8">
+      <requires name="libc.so.6"/>
+      <requires name="config(bash)" eq="3.2-18.fc8"/>
+      <provides name="bash" eq="3.2-18.fc8"/>
+      <file name="/bin"/>
+      <file name="/bin/bash"/>
+    </package>
+  </set>
+</test-sets>
