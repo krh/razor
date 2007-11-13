@@ -1,10 +1,15 @@
 Towards replacing rpm + yum (0.1):
 
-- installer part
+- installer part:
 
-- rpm file parser, create repo command
+   - pre install check; check that dirs can be created (no files where
+     want to create dirs), move config files according to file
+     flags. (.rpmnew etc)
 
-- conflicts, obsoletes
+   - run hooks; probably fork to shell and in the parent just do a
+     write() of the hook section to a pipe to the shell.
+
+   - store rpm headers for installed packages.
 
 - versions in depsolving
 
@@ -25,16 +30,28 @@ Towards replacing rpm + yum (0.1):
 
 - version the sections in the file, put the element size in the header
   so we can add stuff to elements in a backwards compatible way.
+  maybe not necessary, we can just add sections that augment the
+  sections we want to add to (similar to how rpm has add versioned
+  deps).
+
+- pipelined download and install; topo-sort packages in update set,
+  pick one with all deps in the current set, add it to the current set
+  and satisfy deps against update set => result: minimal update
+  transaction.  Queue download and install/update transaction for the
+  packages in the minimal set, start over.  This also makes the
+  installation phase much more interruptible, basically just stop
+  after a sub-transaction finishes.  As we keep the update set around
+  as a target, we can restart if needed.  Probably don't need to, can
+  just do a new update.  During a sub-transaction we should keep the
+  target set (i.e. the current set to be) around as a lock file
+  (system.repo.lock or so, see git) so that razor updates are
+  prevented if the systems crashes during an update.
 
 Misc ideas:
-
-- eliminate duplicate entries in package property lists.
 
 - keep history of installed packages/journal of package transaction,
   so we can roll back to yesterday, or see what got installed in the
   latest yum update.
-
-- gzip repository of look-aside pkg xml files somehow?
 
 - transactions, proper recovery, make sure we don't poop our package
   database (no more rm /var/lib/rpm/__cache*).
@@ -63,14 +80,6 @@ Misc ideas:
   conflicts, file/dir problems etc).  Or maybe just keep a simple file
   format ad use a custom importer to create the .repo files.
 
-- pipelined download and install; download is network bound, install
-  is disk bound.  Start installing once we have self-contained set of
-  packages.  Install in reverse topo-sort order.  Interruptible
-  installation; stops at nearest checkpoint.
-
-- split out hash table code from importer, make the merger use just
-  the hash table.
-
 - try to clean up the
 
 	do { ... } while (((e++)->name & RAZOR_ENTRY_LAST) == 0);
@@ -90,9 +99,21 @@ Misc ideas:
   base.
 
 - incremental rawhide repo updates? instead of downloading 10MB zipped
-  repo every time, download a diff repo?
+  repo every time, download a diff repo?  Should be pretty small,
+  especially if we don't have file checksums in metadata.  Filenames
+  and properties are for the most part already present, typically just
+  a version bump plus maybe tweaking a couple requires.  The upstream
+  repo can store multiple incremental updates in one big file and
+  provide an index file that maps updates for a given date (we should
+  use repo-file checksums though) to a range in the file: Download the
+  index file, search for a match for your latest rawhide.repo file,
+  download range of updates that brings it up to date.
 
 - use hash tables for dirs when importing files to avoid qsorting all
   files in rawhide.
+
+Bugs:
+
+- eliminate duplicate entries in package property lists.
 
 - corner cases such as no files/properties in repo etc segfault.
