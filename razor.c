@@ -1214,7 +1214,7 @@ list_package_files(struct razor_set *set, unsigned long *r,
 		   char *prefix)
 {
 	struct razor_entry *e, *f, *entries;
-	unsigned long next;
+	unsigned long next, file;
 	char *pool;
 	int len;
 	
@@ -1223,14 +1223,16 @@ list_package_files(struct razor_set *set, unsigned long *r,
 
 	e = entries + dir->start;
 	do {
-		if (entries + *r == e) {
+		if (entries + (*r & RAZOR_ENTRY_MASK) == e) {
 			printf("%s/%s\n", prefix,
 			       pool + (e->name & RAZOR_ENTRY_MASK));
+			if (*r & RAZOR_ENTRY_LAST)
+				return NULL;
 			r++;
-			if (*r >= end)
-				break;
+			if ((*r & RAZOR_ENTRY_MASK) >= end)
+				return r;
 		}
-	} while (((e++)->name & RAZOR_ENTRY_LAST) == 0);
+	} while (!((e++)->name & RAZOR_ENTRY_LAST));
 
 	e = entries + dir->start;
 	do {
@@ -1249,17 +1251,16 @@ list_package_files(struct razor_set *set, unsigned long *r,
 				next = f->start;
 		}
 
-		if (e->start <= *r && *r < next) {
+		file = *r & RAZOR_ENTRY_MASK;
+		if (e->start <= file && file < next) {
 			len = strlen(prefix);
 			prefix[len] = '/';
 			strcpy(prefix + len + 1,
 			       pool + (e->name & RAZOR_ENTRY_MASK));
 			r = list_package_files(set, r, e, next, prefix);
 			prefix[len] = '\0';
-			if (*r >= end)
-				break;
 		}
-	} while (((e++)->name & RAZOR_ENTRY_LAST) == 0);
+	} while (!((e++)->name & RAZOR_ENTRY_LAST) && r != NULL);
 
 	return r;
 }
