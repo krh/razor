@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stddef.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -59,6 +60,11 @@ struct razor_rpm {
 	struct rpm_header_index *filemodes;
 	struct rpm_header_index *filestates;
 	const char **dirs;
+
+	struct rpm_header_index *prein;
+	struct rpm_header_index *postin;
+	struct rpm_header_index *preun;
+	struct rpm_header_index *postun;
 
 	struct properties provides;
 	struct properties requires;
@@ -121,13 +127,47 @@ import_files(struct razor_importer *importer, struct razor_rpm *rpm)
 	}
 }
 
+#define MAP_ENTRY(field, tag) { offsetof(struct razor_rpm, field), tag }
+
+static struct index_map {
+	unsigned int offset;
+	unsigned int tag;
+} index_map[] =	{
+	MAP_ENTRY(prein, RPMTAG_PREIN),
+	MAP_ENTRY(prein, RPMTAG_PREIN),
+	MAP_ENTRY(postin, RPMTAG_POSTIN),
+	MAP_ENTRY(preun, RPMTAG_PREUN),
+	MAP_ENTRY(postun, RPMTAG_POSTUN),
+	MAP_ENTRY(name, RPMTAG_NAME),
+	MAP_ENTRY(version, RPMTAG_VERSION),
+	MAP_ENTRY(release, RPMTAG_RELEASE),
+	MAP_ENTRY(requires.name, RPMTAG_REQUIRENAME),
+	MAP_ENTRY(requires.version, RPMTAG_REQUIREVERSION),
+	MAP_ENTRY(requires.flags, RPMTAG_REQUIREFLAGS),
+	MAP_ENTRY(provides.name, RPMTAG_PROVIDENAME),
+	MAP_ENTRY(provides.version, RPMTAG_PROVIDEVERSION),
+	MAP_ENTRY(provides.flags, RPMTAG_PROVIDEFLAGS),
+	MAP_ENTRY(obsoletes.name, RPMTAG_OBSOLETENAME),
+	MAP_ENTRY(obsoletes.version, RPMTAG_OBSOLETEVERSION),
+	MAP_ENTRY(obsoletes.flags, RPMTAG_OBSOLETEFLAGS),
+	MAP_ENTRY(conflicts.name, RPMTAG_CONFLICTNAME),
+	MAP_ENTRY(conflicts.version, RPMTAG_CONFLICTVERSION),
+	MAP_ENTRY(conflicts.flags, RPMTAG_CONFLICTFLAGS),
+	MAP_ENTRY(dirindexes, RPMTAG_DIRINDEXES),
+	MAP_ENTRY(basenames, RPMTAG_BASENAMES),
+	MAP_ENTRY(dirnames, RPMTAG_DIRNAMES),
+	MAP_ENTRY(filesizes, RPMTAG_FILESIZES),
+	MAP_ENTRY(filemodes, RPMTAG_FILEMODES),
+	MAP_ENTRY(filestates, RPMTAG_FILESTATES),
+};
+
 struct razor_rpm *
 razor_rpm_open(const char *filename)
 {
 	struct razor_rpm *rpm;
 	struct rpm_header_index *base, *index;
 	struct stat buf;
-	int fd, nindex, hsize, i, count;
+	int fd, nindex, hsize, i, j, count;
 	const char *name;
 
 	rpm = malloc(sizeof *rpm);
@@ -165,76 +205,13 @@ razor_rpm_open(const char *filename)
 
 	for (i = 0; i < nindex; i++) {
 		index = base + i;
-		switch (ntohl(index->tag)) {
-		case RPMTAG_NAME:
-			rpm->name = index;
-			break;
-		case RPMTAG_VERSION:
-			rpm->version = index;
-			break;
-		case RPMTAG_RELEASE:
-			rpm->release = index;
-			break;
-
-		case RPMTAG_REQUIRENAME:
-			rpm->requires.name = index;
-			break;
-		case RPMTAG_REQUIREVERSION:
-			rpm->requires.version = index;
-			break;
-		case RPMTAG_REQUIREFLAGS:
-			rpm->requires.flags = index;
-			break;
-
-		case RPMTAG_PROVIDENAME:
-			rpm->provides.name = index;
-			break;
-		case RPMTAG_PROVIDEVERSION:
-			rpm->provides.version = index;
-			break;
-		case RPMTAG_PROVIDEFLAGS:
-			rpm->provides.flags = index;
-			break;
-
-		case RPMTAG_OBSOLETENAME:
-			rpm->obsoletes.name = index;
-			break;
-		case RPMTAG_OBSOLETEVERSION:
-			rpm->obsoletes.version = index;
-			break;
-		case RPMTAG_OBSOLETEFLAGS:
-			rpm->obsoletes.flags = index;
-			break;
-
-		case RPMTAG_CONFLICTNAME:
-			rpm->conflicts.name = index;
-			break;
-		case RPMTAG_CONFLICTVERSION:
-			rpm->conflicts.version = index;
-			break;
-		case RPMTAG_CONFLICTFLAGS:
-			rpm->conflicts.flags = index;
-			break;
-
-		case RPMTAG_DIRINDEXES:
-			rpm->dirindexes = index;
-			break;
-		case RPMTAG_BASENAMES:
-			rpm->basenames = index;
-			break;
-		case RPMTAG_DIRNAMES:
-			rpm->dirnames = index;
-			break;
-		case RPMTAG_FILESIZES:
-			rpm->filesizes = index;
-			break;
-		case RPMTAG_FILEMODES:
-			rpm->filemodes = index;
-			break;
-		case RPMTAG_FILESTATES:
-			rpm->filestates = index;
-			break;
-		}
+		for (j = 0; j < ARRAY_SIZE(index_map); j++) {
+			struct rpm_header_index **p;
+			if (index_map[j].tag == ntohl(index->tag)) {
+				p = (void *) rpm + index_map[j].offset;
+				*p = index;
+			}
+		}				 
 	}
 
 	/* Look up dir names now so we can index them directly. */
