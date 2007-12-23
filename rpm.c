@@ -3,6 +3,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <arpa/inet.h>
@@ -60,11 +62,6 @@ struct razor_rpm {
 	struct rpm_header_index *filemodes;
 	struct rpm_header_index *filestates;
 	const char **dirs;
-
-	struct rpm_header_index *prein;
-	struct rpm_header_index *postin;
-	struct rpm_header_index *preun;
-	struct rpm_header_index *postun;
 
 	struct properties provides;
 	struct properties requires;
@@ -133,11 +130,6 @@ static struct index_map {
 	unsigned int offset;
 	unsigned int tag;
 } index_map[] =	{
-	MAP_ENTRY(prein, RPMTAG_PREIN),
-	MAP_ENTRY(prein, RPMTAG_PREIN),
-	MAP_ENTRY(postin, RPMTAG_POSTIN),
-	MAP_ENTRY(preun, RPMTAG_PREUN),
-	MAP_ENTRY(postun, RPMTAG_POSTUN),
 	MAP_ENTRY(name, RPMTAG_NAME),
 	MAP_ENTRY(version, RPMTAG_VERSION),
 	MAP_ENTRY(release, RPMTAG_RELEASE),
@@ -160,6 +152,22 @@ static struct index_map {
 	MAP_ENTRY(filemodes, RPMTAG_FILEMODES),
 	MAP_ENTRY(filestates, RPMTAG_FILESTATES),
 };
+
+static struct rpm_header_index *
+razor_rpm_get_header(struct razor_rpm *rpm, unsigned int tag)
+{
+	struct rpm_header_index *index, *end;
+
+	index = (struct rpm_header_index *) (rpm->header + 1);
+	end = index + ntohl(rpm->header->nindex);
+	while (index < end) {
+		if (ntohl(index->tag) == tag)
+			return index;
+		index++;
+	}
+
+	return NULL;
+}
 
 struct razor_rpm *
 razor_rpm_open(const char *filename)
@@ -304,6 +312,64 @@ create_path(const char *root, const char *path,
 	}
 }
 
+static int
+run_script(struct razor_rpm *rpm, const char *root, unsigned int tag)
+{
+	struct rpm_header_index *index;
+	int pid, status, fd[2];
+	const char *script;
+
+	index = razor_rpm_get_header(rpm, tag);
+	if (index == NULL) {
+		fprintf(stderr, "no script for tag %d\n", tag);
+		return 0;
+	}
+
+	if (pipe(fd) < 0) {
+		fprintf(stderr, "failed to create pipe\n");
+		return -1;
+	}
+	pid = fork();
+	if (pid < 0) {
+		fprintf(stderr, "failed to fork, %m\n");
+	} else if (pid == 0) {
+		if (dup2(fd[0], STDIN_FILENO) < 0) {
+			fprintf(stderr, "failed redirect stdin, %m\n");
+			return -1;
+		}
+		if (close(fd[0]) < 0 || close(fd[1]) < 0) {
+			fprintf(stderr, "failed to close pipe, %m\n");
+			exit(-1);
+		}
+		if (chroot(root) < 0) {
+			fprintf(stderr, "failed to chroot to %s, %m\n", root);
+			return -1;
+		}
+		printf("executing script for %d\n", tag);
+		if (execl("/bin/sh", "/bin/sh", NULL)) {
+			fprintf(stderr, "failed to exec /bin/sh, %m\n");
+			return -1;
+		}
+	} else {
+		script = rpm->pool + ntohl(index->offset);
+		if (write(fd[1], script, strlen(script)) < 0) {
+			fprintf(stderr, "failed to pipe script, %m\n");
+			return -1;
+		}
+		if (close(fd[0]) || close(fd[1])) {
+			fprintf(stderr, "failed to close pipe, %m\n");
+			return -1;
+		}
+		if (wait(&status) < 0) {
+			fprintf(stderr, "wait for child failed, %m");
+			return -1;
+		}
+		printf("script exited with status %d\n", status);
+	}
+
+	return 0;
+}
+
 int
 razor_rpm_install(struct razor_rpm *rpm, const char *root)
 {
@@ -338,6 +404,8 @@ razor_rpm_install(struct razor_rpm *rpm, const char *root)
 			"unknown payload compression method or flags set\n");
 		return -1;
 	}
+
+	run_script(rpm, root, RPMTAG_PREIN);
 
 	stream.zalloc = NULL;
 	stream.zfree = NULL;
@@ -425,6 +493,8 @@ razor_rpm_install(struct razor_rpm *rpm, const char *root)
 		fprintf(stderr, "inflateEnd error: %d\n", err);
 		return -1;
 	}	    
+
+	run_script(rpm, root, RPMTAG_POSTIN);
 
 	return 0;
 }
