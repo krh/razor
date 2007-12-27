@@ -60,7 +60,7 @@ struct razor_rpm {
 	struct rpm_header_index *basenames;
 	struct rpm_header_index *filesizes;
 	struct rpm_header_index *filemodes;
-	struct rpm_header_index *filestates;
+	struct rpm_header_index *fileflags;
 	const char **dirs;
 
 	struct properties provides;
@@ -150,7 +150,7 @@ static struct index_map {
 	MAP_ENTRY(dirnames, RPMTAG_DIRNAMES),
 	MAP_ENTRY(filesizes, RPMTAG_FILESIZES),
 	MAP_ENTRY(filemodes, RPMTAG_FILEMODES),
-	MAP_ENTRY(filestates, RPMTAG_FILESTATES),
+	MAP_ENTRY(fileflags, RPMTAG_FILEFLAGS),
 };
 
 static struct rpm_header_index *
@@ -262,19 +262,75 @@ struct cpio_file_header {
 #define COMMENT      0x10 /* bit 4 set: file comment present */
 #define RESERVED     0xE0 /* bits 5..7: reserved */
 
+struct installer {
+	const char *root;
+	struct razor_rpm *rpm;
+	z_stream stream;
+	unsigned char buffer[32768];
+	size_t rest, length;
+};
+
 static int
-create_path(const char *root, const char *path,
-	    const char *name, unsigned mode, int *fd)
+installer_inflate(struct installer *installer)
+{
+	size_t length;
+	int err;
+
+	if (ALIGN(installer->rest, 4) > sizeof installer->buffer)
+		length = sizeof installer->buffer;
+	else
+		length = installer->rest;
+
+	installer->stream.next_out = installer->buffer;
+	installer->stream.avail_out = ALIGN(length, 4);
+	err = inflate(&installer->stream, Z_SYNC_FLUSH);
+	if (err != Z_OK && err != Z_STREAM_END) {
+		fprintf(stderr, "inflate error: %d (%m)\n", err);
+		return -1;
+	}
+
+	installer->rest -= length;
+	installer->length = length;
+
+	return 0;
+}
+
+static int
+xwrite(int fd, const void *data, size_t size)
+{
+	size_t rest;
+	ssize_t written;
+	const unsigned char *p;
+
+	rest = size;
+	p = data;
+	while (rest > 0) {
+		written = write(fd, p, rest);
+		if (written < 0) {
+			fprintf(stderr, "write error: %m\n");
+			return -1;
+		}
+		rest -= written;
+		p += written;
+	}
+
+	return 0;
+}
+
+static int
+create_path(struct installer *installer,
+	    const char *path, const char *name, unsigned int mode)
 {
 	char buffer[256], *p;
 	const char *slash, *next;
 	struct stat buf;
+	int fd;
 
 	/* Create all sub-directories in dir and then create name. We
 	 * know root exists and is a dir, root does not end in a '/',
 	 * and path has a leading '/'. */
 
-	strcpy(buffer, root);
+	strcpy(buffer, installer->root);
 	p = buffer + strlen(buffer);
 	slash = path;
 	for (slash = path; slash[1] != '\0'; slash = next) {
@@ -303,26 +359,77 @@ create_path(const char *root, const char *path,
 
 	switch (mode >> 12) {
 	case REG:
-	default:
-		*fd = open(buffer, O_WRONLY | O_CREAT | O_TRUNC, mode & 0x1ff);
-		return *fd;
+		fd = open(buffer, O_WRONLY | O_CREAT | O_TRUNC, mode & 0x1ff);
+		if (fd < 0){
+			fprintf(stderr, "failed to create file %s\n", buffer);
+			return -1;
+		}
+		while (installer->rest > 0) {
+			if (installer_inflate(installer)) {
+				fprintf(stderr, "failed to inflate\n");
+				return -1;
+			}
+			if (xwrite(fd, installer->buffer, installer->length)) {
+				fprintf(stderr, "failed to write payload\n");
+				return -1;
+			}
+		}
+		if (close(fd) < 0) {
+			fprintf(stderr, "failed to close %s: %m\n", buffer);
+			return -1;
+		}
+		return 0;
 	case XDIR:
-		*fd = -1;
 		return mkdir(buffer, mode & 0x1ff);
+	case PIPE:
+	case CDEV:
+	case BDEV:
+	case SOCK:
+		printf("%s: unhandled file type %d\n", buffer, mode >> 12);
+		return 0;
+	case LINK:
+		if (installer_inflate(installer)) {
+			fprintf(stderr, "failed to inflate\n");
+			return -1;
+		}
+		if (installer->length >= sizeof installer->buffer) {
+			fprintf(stderr, "link name too long\n");
+			return -1;
+		}
+		installer->buffer[installer->length] = '\0';
+		if (symlink((const char *) installer->buffer, buffer)) {
+			fprintf(stderr, "failed to create symlink, %m\n");
+			return -1;
+		}
+		return 0;
+	default:
+		printf("%s: unknown file type %d\n", buffer, mode >> 12);
+		return 0;
 	}
 }
 
 static int
-run_script(struct razor_rpm *rpm, const char *root, unsigned int tag)
+run_script(struct installer *installer,
+	   unsigned int program_tag, unsigned int script_tag)
 {
 	struct rpm_header_index *index;
 	int pid, status, fd[2];
-	const char *script;
+	const char *script = NULL, *program = NULL;
 
-	index = razor_rpm_get_header(rpm, tag);
-	if (index == NULL) {
-		fprintf(stderr, "no script for tag %d\n", tag);
-		return 0;
+	index = razor_rpm_get_header(installer->rpm, program_tag);
+	if (index != NULL)
+		program = installer->rpm->pool + ntohl(index->offset);
+
+	index = razor_rpm_get_header(installer->rpm, script_tag);
+	if (index != NULL)
+		script = installer->rpm->pool + ntohl(index->offset);
+
+	if (program == NULL && script == NULL) {
+		printf("no script or program for tags %d and %d\n",
+		       program_tag, script_tag);
+		return -1;
+	} else if (program == NULL) {
+		program = "/bin/sh";
 	}
 
 	if (pipe(fd) < 0) {
@@ -341,18 +448,19 @@ run_script(struct razor_rpm *rpm, const char *root, unsigned int tag)
 			fprintf(stderr, "failed to close pipe, %m\n");
 			exit(-1);
 		}
-		if (chroot(root) < 0) {
-			fprintf(stderr, "failed to chroot to %s, %m\n", root);
+		if (chroot(installer->root) < 0) {
+			fprintf(stderr, "failed to chroot to %s, %m\n",
+				installer->root);
 			return -1;
 		}
-		printf("executing script for %d\n", tag);
-		if (execl("/bin/sh", "/bin/sh", NULL)) {
-			fprintf(stderr, "failed to exec /bin/sh, %m\n");
+		printf("executing program %s in chroot %s\n",
+		       program, installer->root);
+		if (execl(program, program, NULL)) {
+			fprintf(stderr, "failed to exec %s, %m\n", program);
 			return -1;
 		}
 	} else {
-		script = rpm->pool + ntohl(index->offset);
-		if (write(fd[1], script, strlen(script)) < 0) {
+		if (script && write(fd[1], script, strlen(script)) < 0) {
 			fprintf(stderr, "failed to pipe script, %m\n");
 			return -1;
 		}
@@ -370,27 +478,13 @@ run_script(struct razor_rpm *rpm, const char *root, unsigned int tag)
 	return 0;
 }
 
-int
-razor_rpm_install(struct razor_rpm *rpm, const char *root)
+static int
+installer_init(struct installer *installer)
 {
-	z_stream stream;
-	unsigned char payload[32768], *gz_header;
-	char buffer[256];
-	int err, method, flags, count, i, fd, written;
-	struct cpio_file_header *header;
-	unsigned long *size, *index, rest, length;
-	unsigned short *mode;
-	const char *name, *dir;
-	struct stat buf;
+	unsigned char *gz_header;
+	int method, flags, err;
 
-	if (stat(root, &buf) < 0 || !S_ISDIR(buf.st_mode)) {
-		fprintf(stderr,
-			"root installation directory \"%s\" does not exist\n",
-			root);
-		return -1;
-	}
-
-	gz_header = rpm->payload;
+	gz_header = installer->rpm->payload;
 	if (gz_header[0] != 0x1f || gz_header[1] != 0x8b) {
 		fprintf(stderr, "payload section doesn't have gz header\n");
 		return -1;
@@ -405,96 +499,103 @@ razor_rpm_install(struct razor_rpm *rpm, const char *root)
 		return -1;
 	}
 
-	run_script(rpm, root, RPMTAG_PREIN);
+	installer->stream.zalloc = NULL;
+	installer->stream.zfree = NULL;
+	installer->stream.opaque = NULL;
 
-	stream.zalloc = NULL;
-	stream.zfree = NULL;
-	stream.opaque = NULL;
+	installer->stream.next_in  = gz_header + 10;
+	installer->stream.avail_in =
+		(installer->rpm->map + installer->rpm->size) -
+		(void *) installer->stream.next_in;
+	installer->stream.next_out = NULL;
+	installer->stream.avail_out = 0;
 
-	stream.next_in  = gz_header + 10;
-	stream.avail_in = (rpm->map + rpm->size) - (void *) stream.next_in;
-	stream.next_out = NULL;
-	stream.avail_out = 0;
-
-	err = inflateInit2(&stream, -MAX_WBITS);
+	err = inflateInit2(&installer->stream, -MAX_WBITS);
 	if (err != Z_OK) {
 		fprintf(stderr, "inflateInit error: %d\n", err);
 		return -1;
 	}
 
-	count = ntohl(rpm->basenames->count);
-	size = (unsigned long *) (rpm->pool + ntohl(rpm->filesizes->offset));
-	index = (unsigned long *) (rpm->pool + ntohl(rpm->dirindexes->offset));
-	mode = (unsigned short *) (rpm->pool + ntohl(rpm->filemodes->offset));
-	name = rpm->pool + ntohl(rpm->basenames->offset);
-	for (i = 0; i < count; i++) {
-		dir = rpm->dirs[ntohl(*index)];
-		snprintf(buffer, sizeof buffer, "%s%s", dir, name);
+	return 0;
+}
 
-		stream.next_out = payload;
-		/* Plus two for the leading '.' and the terminating NUL. */
-		stream.avail_out =
-			ALIGN(sizeof *header + strlen(buffer) + 2, 4);
-		err = inflate(&stream, Z_SYNC_FLUSH);
-		if (err != Z_OK) {
-			fprintf(stderr, "inflate error: %d\n", err);
-			return -1;
-		}
-	    
-		header = (struct cpio_file_header *) payload;
+static int
+installer_finish(struct installer *installer)
+{
+	int err;
 
-		/* FIXME: Figure out if it's a symlink, device file,
-		 * directorys or whatever.  Maybe do this upfront. */
-		if (create_path(root, dir, name, ntohs(*mode), &fd) < 0)
-			return -1;
-		if (ntohs(*mode) >> 12 == XDIR)
-			rest = 0;
-		else
-			rest = ntohl(*size);
-
-		while (rest > 0) {
-			if (ALIGN(rest, 4) > sizeof payload)
-				length = sizeof payload;
-			else
-				length = rest;
-			stream.next_out = payload;
-			stream.avail_out = ALIGN(length, 4);
-			err = inflate(&stream, Z_SYNC_FLUSH);
-			if (err != Z_OK && err != Z_STREAM_END) {
-				fprintf(stderr,
-					"inflate error: %d (%m)\n", err);
-				return -1;
-			}
-			rest -= length;
-			stream.next_out = payload;
-			while (length > 0) {
-				written = write(fd, stream.next_out, length);
-				if (written < 0) {
-					fprintf(stderr, "write error: %m\n");
-					return -1;
-				}
-				length -= written;
-			}
-		}
-		if (fd > 0 && close(fd) < 0) {
-			fprintf(stderr, "failed to close \"%s/%s%s\": %m\n",
-				root, dir, name);
-			return -1;
-		}
-		name += strlen(name) + 1;
-		index++;
-		size++;
-		mode++;
-	}
-
-	err = inflateEnd(&stream);
+	err = inflateEnd(&installer->stream);
 
 	if (err != Z_OK) {
 		fprintf(stderr, "inflateEnd error: %d\n", err);
 		return -1;
 	}	    
 
-	run_script(rpm, root, RPMTAG_POSTIN);
+	return 0;
+}
+
+int
+razor_rpm_install(struct razor_rpm *rpm, const char *root)
+{
+	struct installer installer;
+	int count, i;
+	struct cpio_file_header *header;
+	unsigned long *size, *index, length, *flags;
+	unsigned short *mode;
+	const char *name, *dir;
+	struct stat buf;
+
+	installer.rpm = rpm;
+	installer.root = root;
+
+	/* FIXME: Only do this before a transaction, not per rpm. */
+	if (stat(root, &buf) < 0 || !S_ISDIR(buf.st_mode)) {
+		fprintf(stderr,
+			"root installation directory \"%s\" does not exist\n",
+			root);
+		return -1;
+	}
+
+	if (installer_init(&installer))
+		return -1;
+
+	run_script(&installer, RPMTAG_PREINPROG, RPMTAG_PREIN);
+
+	count = ntohl(rpm->basenames->count);
+	size = (unsigned long *) (rpm->pool + ntohl(rpm->filesizes->offset));
+	index = (unsigned long *) (rpm->pool + ntohl(rpm->dirindexes->offset));
+	mode = (unsigned short *) (rpm->pool + ntohl(rpm->filemodes->offset));
+	flags = (unsigned long *) (rpm->pool + ntohl(rpm->fileflags->offset));
+
+	name = rpm->pool + ntohl(rpm->basenames->offset);
+	for (i = 0; i < count; i++) {
+		dir = rpm->dirs[ntohl(*index)];
+
+		/* Skip past the cpio header block unless it's a ghost file,
+		 * in which case doesn't appear in the cpio archive. */
+		if (!(ntohl(*flags) & RPMFILE_GHOST)) {
+			/* Plus two for the leading '.' and the terminating NUL. */
+			length = sizeof *header + strlen(dir) + strlen(name) + 2;
+			installer.rest = ALIGN(length, 4);
+			if (installer_inflate(&installer))
+				return -1;
+		}
+
+		installer.rest = ntohl(*size);
+		if (create_path(&installer, dir, name, ntohs(*mode)) < 0)
+			return -1;
+
+		name += strlen(name) + 1;
+		index++;
+		size++;
+		mode++;
+		flags++;
+	}
+
+	if (installer_finish(&installer))
+		return -1;
+
+	run_script(&installer, RPMTAG_POSTINPROG, RPMTAG_POSTIN);
 
 	return 0;
 }
