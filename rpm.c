@@ -15,18 +15,6 @@
 
 #define	RPM_LEAD_SIZE 96
 
-struct rpm_lead {
-	unsigned char magic[4];
-	unsigned char major;
-	unsigned char minor;
-	short type;
-	short archnum;
-	char name[66];
-	short osnum;
-	short signature_type;
-	char reserved[16];
-};
-
 struct rpm_header {
 	unsigned char magic[4];
 	unsigned char reserved[4];
@@ -41,33 +29,10 @@ struct rpm_header_index {
 	int count;
 };
 
-struct properties {
-	struct rpm_header_index *name;
-	struct rpm_header_index *version;
-	struct rpm_header_index *flags;
-};
-
 struct razor_rpm {
 	struct rpm_header *signature;
 	struct rpm_header *header;
-
-	struct rpm_header_index *name;
-	struct rpm_header_index *version;
-	struct rpm_header_index *release;
-
-	struct rpm_header_index *dirnames;
-	struct rpm_header_index *dirindexes;
-	struct rpm_header_index *basenames;
-	struct rpm_header_index *filesizes;
-	struct rpm_header_index *filemodes;
-	struct rpm_header_index *fileflags;
 	const char **dirs;
-
-	struct properties provides;
-	struct properties requires;
-	struct properties obsoletes;
-	struct properties conflicts;
-
 	const char *pool;
 	void *map;
 	size_t size;
@@ -75,83 +40,6 @@ struct razor_rpm {
 };
 
 #define ALIGN(value, base) (((value) + (base - 1)) & ~((base) - 1))
-
-static void
-import_properties(struct razor_importer *importer,
-		  struct properties *properties,
-		  const char *pool, unsigned long type)
-{
-	const char *name, *version;
-	int i, count;
-
-	/* assert: count is the same for all arrays */
-
-	if (properties->name == NULL)
-		return;
-
-	count = ntohl(properties->name->count);
-	name = pool + ntohl(properties->name->offset);
-	version = pool + ntohl(properties->version->offset);
-	for (i = 0; i < count; i++) {
-		razor_importer_add_property(importer, name, version, type);
-		name += strlen(name) + 1;
-		version += strlen(version) + 1;
-	}
-}
-
-static void
-import_files(struct razor_importer *importer, struct razor_rpm *rpm)
-{
-	const char *name;
-	unsigned long *index;
-	int i, count;
-	char buffer[256];
-
-	/* assert: count is the same for all arrays */
-
-	if (rpm->dirnames == NULL)
-		return;
-
-	count = ntohl(rpm->basenames->count);
-	index = (unsigned long *) (rpm->pool + ntohl(rpm->dirindexes->offset));
-	name = rpm->pool + ntohl(rpm->basenames->offset);
-	for (i = 0; i < count; i++) {
-		snprintf(buffer, sizeof buffer,
-			 "%s%s", rpm->dirs[ntohl(*index)], name);
-		razor_importer_add_file(importer, buffer);
-		name += strlen(name) + 1;
-		index++;
-	}
-}
-
-#define MAP_ENTRY(field, tag) { offsetof(struct razor_rpm, field), tag }
-
-static struct index_map {
-	unsigned int offset;
-	unsigned int tag;
-} index_map[] =	{
-	MAP_ENTRY(name, RPMTAG_NAME),
-	MAP_ENTRY(version, RPMTAG_VERSION),
-	MAP_ENTRY(release, RPMTAG_RELEASE),
-	MAP_ENTRY(requires.name, RPMTAG_REQUIRENAME),
-	MAP_ENTRY(requires.version, RPMTAG_REQUIREVERSION),
-	MAP_ENTRY(requires.flags, RPMTAG_REQUIREFLAGS),
-	MAP_ENTRY(provides.name, RPMTAG_PROVIDENAME),
-	MAP_ENTRY(provides.version, RPMTAG_PROVIDEVERSION),
-	MAP_ENTRY(provides.flags, RPMTAG_PROVIDEFLAGS),
-	MAP_ENTRY(obsoletes.name, RPMTAG_OBSOLETENAME),
-	MAP_ENTRY(obsoletes.version, RPMTAG_OBSOLETEVERSION),
-	MAP_ENTRY(obsoletes.flags, RPMTAG_OBSOLETEFLAGS),
-	MAP_ENTRY(conflicts.name, RPMTAG_CONFLICTNAME),
-	MAP_ENTRY(conflicts.version, RPMTAG_CONFLICTVERSION),
-	MAP_ENTRY(conflicts.flags, RPMTAG_CONFLICTFLAGS),
-	MAP_ENTRY(dirindexes, RPMTAG_DIRINDEXES),
-	MAP_ENTRY(basenames, RPMTAG_BASENAMES),
-	MAP_ENTRY(dirnames, RPMTAG_DIRNAMES),
-	MAP_ENTRY(filesizes, RPMTAG_FILESIZES),
-	MAP_ENTRY(filemodes, RPMTAG_FILEMODES),
-	MAP_ENTRY(fileflags, RPMTAG_FILEFLAGS),
-};
 
 static struct rpm_header_index *
 razor_rpm_get_header(struct razor_rpm *rpm, unsigned int tag)
@@ -169,14 +57,74 @@ razor_rpm_get_header(struct razor_rpm *rpm, unsigned int tag)
 	return NULL;
 }
 
+static const void *
+razor_rpm_get_indirect(struct razor_rpm *rpm,
+		       unsigned int tag, unsigned int *count)
+{
+	struct rpm_header_index *index;
+
+	index = razor_rpm_get_header(rpm, tag);
+	if (index != NULL) {
+		if (count)
+			*count = ntohl(index->count);
+
+		return rpm->pool + ntohl(index->offset);
+	}
+
+	return NULL;
+}
+
+static void
+import_properties(struct razor_importer *importer, unsigned long type,
+		  struct razor_rpm *rpm,
+		  int name_tag, int version_tag, int flags_tag)
+{
+	const char *name, *version;
+	unsigned int i, count;
+
+	name = razor_rpm_get_indirect(rpm, name_tag, &count);
+	if (name == NULL)
+		return;
+
+	/* FIXME: Concat version and release. */
+	version = razor_rpm_get_indirect(rpm, version_tag, &count);
+	for (i = 0; i < count; i++) {
+		razor_importer_add_property(importer, name, version, type);
+		name += strlen(name) + 1;
+		version += strlen(version) + 1;
+	}
+}
+
+static void
+import_files(struct razor_importer *importer, struct razor_rpm *rpm)
+{
+	const char *name;
+	const unsigned long *index;
+	unsigned int i, count;
+	char buffer[256];
+
+	/* assert: count is the same for all arrays */
+
+	index = razor_rpm_get_indirect(rpm, RPMTAG_DIRINDEXES, &count);
+	name = razor_rpm_get_indirect(rpm, RPMTAG_BASENAMES, &count);
+	for (i = 0; i < count; i++) {
+		snprintf(buffer, sizeof buffer,
+			 "%s%s", rpm->dirs[ntohl(*index)], name);
+		razor_importer_add_file(importer, buffer);
+		name += strlen(name) + 1;
+		index++;
+	}
+}
+
 struct razor_rpm *
 razor_rpm_open(const char *filename)
 {
 	struct razor_rpm *rpm;
 	struct rpm_header_index *base, *index;
 	struct stat buf;
-	int fd, nindex, hsize, i, j, count;
+	unsigned int count, i, nindex, hsize;
 	const char *name;
+	int fd;
 
 	rpm = malloc(sizeof *rpm);
 	memset(rpm, 0, sizeof *rpm);
@@ -211,26 +159,17 @@ razor_rpm_open(const char *filename)
 	base = (struct rpm_header_index *) (rpm->header + 1);
 	rpm->pool = (void *) base + nindex * sizeof *index;
 
-	for (i = 0; i < nindex; i++) {
-		index = base + i;
-		for (j = 0; j < ARRAY_SIZE(index_map); j++) {
-			struct rpm_header_index **p;
-			if (index_map[j].tag == ntohl(index->tag)) {
-				p = (void *) rpm + index_map[j].offset;
-				*p = index;
-			}
-		}				 
+	/* Look up dir names now so we can index them directly. */
+	name = razor_rpm_get_indirect(rpm, RPMTAG_DIRNAMES, &count);
+	if (name == NULL) {
+		fprintf(stderr, "old filename style not handled\n");
+		return NULL;
 	}
 
-	/* Look up dir names now so we can index them directly. */
-	if (rpm->dirnames != NULL) {
-		count = ntohl(rpm->dirnames->count);
-		rpm->dirs = calloc(count, sizeof *rpm->dirs);
-		name = rpm->pool + ntohl(rpm->dirnames->offset);
-		for (i = 0; i < count; i++) {
-			rpm->dirs[i] = name;
-			name += strlen(name) + 1;
-		}
+	rpm->dirs = calloc(count, sizeof *rpm->dirs);
+	for (i = 0; i < count; i++) {
+		rpm->dirs[i] = name;
+		name += strlen(name) + 1;
 	}
 
 	return rpm;
@@ -412,18 +351,11 @@ static int
 run_script(struct installer *installer,
 	   unsigned int program_tag, unsigned int script_tag)
 {
-	struct rpm_header_index *index;
 	int pid, status, fd[2];
 	const char *script = NULL, *program = NULL;
 
-	index = razor_rpm_get_header(installer->rpm, program_tag);
-	if (index != NULL)
-		program = installer->rpm->pool + ntohl(index->offset);
-
-	index = razor_rpm_get_header(installer->rpm, script_tag);
-	if (index != NULL)
-		script = installer->rpm->pool + ntohl(index->offset);
-
+	program = razor_rpm_get_indirect(installer->rpm, program_tag, NULL);
+	script = razor_rpm_get_indirect(installer->rpm, script_tag, NULL);
 	if (program == NULL && script == NULL) {
 		printf("no script or program for tags %d and %d\n",
 		       program_tag, script_tag);
@@ -538,10 +470,10 @@ int
 razor_rpm_install(struct razor_rpm *rpm, const char *root)
 {
 	struct installer installer;
-	int count, i;
+	unsigned int count, i, length;
 	struct cpio_file_header *header;
-	unsigned long *size, *index, length, *flags;
-	unsigned short *mode;
+	const unsigned long *size, *index, *flags;
+	const unsigned short *mode;
 	const char *name, *dir;
 	struct stat buf;
 
@@ -561,13 +493,12 @@ razor_rpm_install(struct razor_rpm *rpm, const char *root)
 
 	run_script(&installer, RPMTAG_PREINPROG, RPMTAG_PREIN);
 
-	count = ntohl(rpm->basenames->count);
-	size = (unsigned long *) (rpm->pool + ntohl(rpm->filesizes->offset));
-	index = (unsigned long *) (rpm->pool + ntohl(rpm->dirindexes->offset));
-	mode = (unsigned short *) (rpm->pool + ntohl(rpm->filemodes->offset));
-	flags = (unsigned long *) (rpm->pool + ntohl(rpm->fileflags->offset));
+	name = razor_rpm_get_indirect(rpm, RPMTAG_BASENAMES, &count);
+	size = razor_rpm_get_indirect(rpm, RPMTAG_FILESIZES, &count);
+	index = razor_rpm_get_indirect(rpm, RPMTAG_DIRINDEXES, &count);
+	mode = razor_rpm_get_indirect(rpm, RPMTAG_FILEMODES, &count);
+	flags = razor_rpm_get_indirect(rpm, RPMTAG_FILEFLAGS, &count);
 
-	name = rpm->pool + ntohl(rpm->basenames->offset);
 	for (i = 0; i < count; i++) {
 		dir = rpm->dirs[ntohl(*index)];
 
@@ -615,18 +546,35 @@ razor_rpm_close(struct razor_rpm *rpm)
 int
 razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 {
-	razor_importer_begin_package(importer,
-				     rpm->pool + ntohl(rpm->name->offset),
-				     rpm->pool + ntohl(rpm->version->offset));
+	const char *name, *version, *release;
 
-	import_properties(importer, &rpm->requires,
-			  rpm->pool, RAZOR_PROPERTY_REQUIRES);
-	import_properties(importer, &rpm->provides,
-			  rpm->pool, RAZOR_PROPERTY_PROVIDES);
-	import_properties(importer, &rpm->conflicts,
-			  rpm->pool, RAZOR_PROPERTY_CONFLICTS);
-	import_properties(importer, &rpm->obsoletes,
-			  rpm->pool, RAZOR_PROPERTY_OBSOLETES);
+	name = razor_rpm_get_indirect(rpm, RPMTAG_NAME, NULL);
+	version = razor_rpm_get_indirect(rpm, RPMTAG_VERSION, NULL);
+	release = razor_rpm_get_indirect(rpm, RPMTAG_RELEASE, NULL);
+
+	/* FIXME: Concatenate version and release. */
+	razor_importer_begin_package(importer, name, version);
+
+	import_properties(importer, RAZOR_PROPERTY_REQUIRES, rpm,
+			  RPMTAG_REQUIRENAME,
+			  RPMTAG_REQUIREVERSION,
+			  RPMTAG_REQUIREFLAGS);
+
+	import_properties(importer, RAZOR_PROPERTY_PROVIDES, rpm,
+			  RPMTAG_PROVIDENAME,
+			  RPMTAG_PROVIDEVERSION,
+			  RPMTAG_PROVIDEFLAGS);
+
+	import_properties(importer, RAZOR_PROPERTY_OBSOLETES, rpm,
+			  RPMTAG_OBSOLETENAME,
+			  RPMTAG_OBSOLETEVERSION,
+			  RPMTAG_OBSOLETEFLAGS);
+
+	import_properties(importer, RAZOR_PROPERTY_CONFLICTS, rpm,
+			  RPMTAG_CONFLICTNAME,
+			  RPMTAG_CONFLICTVERSION,
+			  RPMTAG_CONFLICTFLAGS);
+
 	import_files(importer, rpm);
 
 	razor_importer_finish_package(importer);
