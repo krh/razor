@@ -128,16 +128,18 @@ razor_rpm_open(const char *filename)
 
 	rpm = malloc(sizeof *rpm);
 	memset(rpm, 0, sizeof *rpm);
-	if (stat(filename, &buf) < 0) {
-		fprintf(stderr, "no such file %s (%m)\n", filename);
-		return NULL;
-	}
 
 	fd = open(filename, O_RDONLY);
 	if (fd < 0) {
 		fprintf(stderr, "couldn't open %s\n", filename);
 		return NULL;
 	}
+
+	if (fstat(fd, &buf) < 0) {
+		fprintf(stderr, "failed to stat %s (%m)\n", filename);
+		return NULL;
+	}
+
 	rpm->size = buf.st_size;
 	rpm->map = mmap(NULL, rpm->size, PROT_READ, MAP_PRIVATE, fd, 0);
 	if (rpm->map == MAP_FAILED) {
@@ -290,7 +292,9 @@ create_path(struct installer *installer,
 				buffer);
 			return -1;
 		}
-		/* FIXME: permissions */
+
+		/* FIXME: What to do about permissions for dirs we
+		 * have to create but are not in the cpio archive? */
 	}
 
 	*p++ = '/';
