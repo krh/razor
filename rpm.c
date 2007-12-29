@@ -382,7 +382,7 @@ run_script(struct installer *installer,
 		}
 		if (close(fd[0]) < 0 || close(fd[1]) < 0) {
 			fprintf(stderr, "failed to close pipe, %m\n");
-			exit(-1);
+			return -1;
 		}
 		if (chroot(installer->root) < 0) {
 			fprintf(stderr, "failed to chroot to %s, %m\n",
@@ -393,7 +393,7 @@ run_script(struct installer *installer,
 		       program, installer->root);
 		if (execl(program, program, NULL)) {
 			fprintf(stderr, "failed to exec %s, %m\n", program);
-			return -1;
+			exit(-1);
 		}
 	} else {
 		if (script && write(fd[1], script, strlen(script)) < 0) {
