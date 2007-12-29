@@ -12,7 +12,6 @@
 #include <zlib.h>
 #include <rpm/rpmlib.h>
 #include <rpm/rpmdb.h>
-#include "sha1.h"
 #include "razor.h"
 
 /* Import a yum filelist as a razor package set. */
