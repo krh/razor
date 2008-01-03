@@ -12,6 +12,7 @@
 #include <zlib.h>
 
 #include "razor.h"
+#include "razor-internal.h"
 
 #define	RPM_LEAD_SIZE 96
 
@@ -38,8 +39,6 @@ struct razor_rpm {
 	size_t size;
 	void *payload;
 };
-
-#define ALIGN(value, base) (((value) + (base - 1)) & ~((base) - 1))
 
 static struct rpm_header_index *
 razor_rpm_get_header(struct razor_rpm *rpm, unsigned int tag)
@@ -237,68 +236,17 @@ installer_inflate(struct installer *installer)
 }
 
 static int
-xwrite(int fd, const void *data, size_t size)
-{
-	size_t rest;
-	ssize_t written;
-	const unsigned char *p;
-
-	rest = size;
-	p = data;
-	while (rest > 0) {
-		written = write(fd, p, rest);
-		if (written < 0) {
-			fprintf(stderr, "write error: %m\n");
-			return -1;
-		}
-		rest -= written;
-		p += written;
-	}
-
-	return 0;
-}
-
-static int
 create_path(struct installer *installer,
 	    const char *path, const char *name, unsigned int mode)
 {
-	char buffer[256], *p;
-	const char *slash, *next;
-	struct stat buf;
+	char buffer[PATH_MAX];
 	int fd;
 
-	/* Create all sub-directories in dir and then create name. We
-	 * know root exists and is a dir, root does not end in a '/',
-	 * and path has a leading '/'. */
+	if (razor_create_dir(installer->root, path) < 0)
+		return -1;
 
-	strcpy(buffer, installer->root);
-	p = buffer + strlen(buffer);
-	slash = path;
-	for (slash = path; slash[1] != '\0'; slash = next) {
-		next = strchr(slash + 1, '/');
-		memcpy(p, slash, next - slash);
-		p += next - slash;
-		*p = '\0';
-
-		if (stat(buffer, &buf) == 0) {
-			if (!S_ISDIR(buf.st_mode)) {
-				fprintf(stderr,
-					"%s exists but is not a directory\n",
-					buffer);
-				return -1;
-			}
-		} else if (mkdir(buffer, 0777) < 0) {
-			fprintf(stderr, "failed to make directory %s: %m\n",
-				buffer);
-			return -1;
-		}
-
-		/* FIXME: What to do about permissions for dirs we
-		 * have to create but are not in the cpio archive? */
-	}
-
-	*p++ = '/';
-	strcpy(p, name);
+	snprintf(buffer, sizeof buffer, "%s%s/%s",
+		 installer->root, path, name);
 
 	switch (mode >> 12) {
 	case REG:
@@ -312,7 +260,8 @@ create_path(struct installer *installer,
 				fprintf(stderr, "failed to inflate\n");
 				return -1;
 			}
-			if (xwrite(fd, installer->buffer, installer->length)) {
+			if (razor_write(fd, installer->buffer,
+					installer->length)) {
 				fprintf(stderr, "failed to write payload\n");
 				return -1;
 			}

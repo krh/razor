@@ -14,6 +14,7 @@
 #include <fnmatch.h>
 
 #include "razor.h"
+#include "razor-internal.h"
 
 struct array {
 	void *data;
@@ -142,22 +143,6 @@ array_add(struct array *array, int size)
 	return p;
 }
 
-static int
-write_to_fd(int fd, void *p, size_t size)
-{
-	int rest, len;
-
-	rest = size;
-	while (rest > 0) {
-		len = write(fd, p, rest);
-		if (len < 0)
-			return -1;
-		rest -= len;
-	}
-
-	return 0;
-}
-
 static void *
 zalloc(size_t size)
 {
@@ -262,7 +247,7 @@ razor_set_write(struct razor_set *set, const char *filename)
 		header->sections[i].type = i;
 		header->sections[i].offset = offset;
 		header->sections[i].size = a->size;
-		offset += (a->size + 4095) & ~4095;
+		offset += ALIGN(a->size, 4096);
 	}
 
 	header->sections[i].type = ~0;
@@ -273,12 +258,12 @@ razor_set_write(struct razor_set *set, const char *filename)
 	if (fd < 0)
 		return -1;
 
-	write_to_fd(fd, data, sizeof data);
+	razor_write(fd, data, sizeof data);
 	for (i = 0; i < ARRAY_SIZE(razor_sections); i++) {
 		if (razor_sections[i].type != i)
 			continue;
 		a = (void *) set + razor_sections[i].offset;
-		write_to_fd(fd, a->data, (a->size + 4095) & ~4095);
+		razor_write(fd, a->data, ALIGN(a->size, 4096));
 	}
 
 	close(fd);

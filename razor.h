@@ -12,6 +12,7 @@ enum razor_property_type {
 	RAZOR_PROPERTY_OBSOLETES
 };
 
+struct razor_set *razor_set_create(void);
 struct razor_set *razor_set_open(const char *filename);
 void razor_set_destroy(struct razor_set *set);
 int razor_set_write(struct razor_set *set, const char *filename);

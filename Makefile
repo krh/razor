@@ -3,9 +3,9 @@ LDLIBS = -lexpat -lz -g -lrpm -lcurl
 
 all : razor test-driver
 
-razor : razor.o import.o main.o rpm.o
+razor : razor.o import.o main.o rpm.o util.o
 
-test-driver : razor.o test-driver.o
+test-driver : razor.o util.o test-driver.o
 
 test : test-driver
 	./test-driver sets.xml test.xml
