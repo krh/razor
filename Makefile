@@ -8,7 +8,7 @@ razor : razor.o import.o main.o rpm.o util.o
 test-driver : razor.o util.o test-driver.o
 
 test : test-driver
-	./test-driver sets.xml test.xml
+	./test-driver test.xml
 
 clean :
 	rm -f *.o razor

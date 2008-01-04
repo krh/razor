@@ -323,7 +323,12 @@ add_to_string_pool(struct hashtable *table, const char *key)
 static unsigned long
 add_to_property_pool(struct array *pool, struct array *properties)
 {
-	unsigned long  *p;
+	unsigned long *p;
+
+	if (properties->size == 0)
+		return ~0;
+	else if (properties->size == sizeof *p)
+		return *(unsigned long *) properties->data | RAZOR_IMMEDIATE;
 
 	p = array_add(pool, properties->size);
 	memcpy(p, properties->data, properties->size);
@@ -756,9 +761,7 @@ serialize_files(struct razor_set *set,
 		s += p->count;
 
 		if (p->packages.size == 0) {
-			/* FIXME: We need to make sure this is handled
-			 * correctly as the empty list. */
-			e->packages = 0 | RAZOR_IMMEDIATE;
+			e->packages = ~0;
 		} else if (p->packages.size / sizeof *r == 1) {
 			r = p->packages.data;
 			e->packages = *r | RAZOR_IMMEDIATE;
@@ -855,7 +858,7 @@ build_file_tree(struct razor_importer *importer)
 	e = array_add(&importer->set->files, sizeof *e);
 	e->name = root.name | RAZOR_ENTRY_LAST;
 	e->start = 1;
-	e->packages = 0;
+	e->packages = ~0;
 
 	serialize_files(importer->set, &root, &importer->set->files);
 
@@ -874,10 +877,11 @@ build_package_file_lists(struct razor_set *set, unsigned long *rmap)
 	count = set->packages.size / sizeof *p;
 	pkgs = zalloc(count * sizeof *pkgs);
 
-	e = set->files.data;
 	end = set->files.data + set->files.size;
-	while (e < end) {
-		if (e->packages & RAZOR_IMMEDIATE) {
+	for (e = set->files.data; e < end; e++) {
+		if (e->packages == ~0) {
+			continue;
+		} else if (e->packages & RAZOR_IMMEDIATE) {
 			e->packages = rmap[e->packages & RAZOR_ENTRY_MASK] |
 				RAZOR_IMMEDIATE;
 			r = &e->packages;
@@ -891,7 +895,6 @@ build_package_file_lists(struct razor_set *set, unsigned long *rmap)
 			if (*r++ & RAZOR_IMMEDIATE)
 				break;
 		}
-		e++;
 	}
 
 	packages = set->packages.data;
@@ -939,23 +942,43 @@ razor_importer_finish(struct razor_importer *importer)
 	return set;
 }
 
-void
-razor_set_list(struct razor_set *set, const char *pattern)
+struct razor_package_iterator {
+	struct razor_set *set;
+	struct razor_package *package, *end;
+};
+
+struct razor_package_iterator *
+razor_package_iterator_create(struct razor_set *set)
 {
-	struct razor_package *p, *end;
-	int with_version = 0;
+	struct razor_package_iterator *pi;
+
+	pi = zalloc(sizeof *pi);
+	pi->set = set;
+	pi->package = set->packages.data;
+	pi->end = set->packages.data + set->packages.size;
+
+	return pi;
+}
+
+int
+razor_package_iterator_next(struct razor_package_iterator *pi,
+			    struct razor_package **package,
+			    const char **name, const char **version)
+{
 	char *pool;
 
-	pool = set->string_pool.data;
-	end = set->packages.data + set->packages.size;
-	for (p = set->packages.data; p < end; p++) {
-		if (pattern && fnmatch(pattern, &pool[p->name], 0) != 0)
-		    continue;
-		if (with_version)
-			printf("%s-%s\n", &pool[p->name], &pool[p->version]);
-		else
-			printf("%s\n", &pool[p->name]);
-	}
+	pool = pi->set->string_pool.data;
+	*package = pi->package;
+	*name = &pool[pi->package->name];
+	*version = &pool[pi->package->version];
+
+	return pi->package++ < pi->end;
+}
+
+void
+razor_package_iterator_destroy(struct razor_package_iterator *pi)
+{
+	free(pi);
 }
 
 struct razor_set *bsearch_set;
@@ -1010,51 +1033,71 @@ razor_set_get_property(struct razor_set *set, const char *property)
 	return p;
 }
 
-void
-razor_set_list_properties(struct razor_set *set, const char *name,
-			  enum razor_property_type type)
+struct razor_property_iterator {
+	struct razor_set *set;
+	struct razor_property *property, *end;
+	unsigned long *index;
+	int last;
+};
+
+struct razor_property_iterator *
+razor_property_iterator_create(struct razor_set *set,
+			       struct razor_package *package)
 {
-	struct razor_property *p, *properties, *end;
-	struct razor_package *package;
-	unsigned long *r;
-	char *pool;
+	struct razor_property_iterator *pi;
 
-	pool = set->string_pool.data;
-
-	if (name) {
-		package = razor_set_get_package(set, name);
-		r = (unsigned long *) set->property_pool.data +
-			package->properties;
-		properties = set->properties.data;
-		while (1) {
-			p = &properties[*r & RAZOR_ENTRY_MASK];
-			if ((p->name >> 30) != type)
-				goto next;
-			if (pool[p->version] == '\0')
-				printf("%s\n",
-				       &pool[p->name & RAZOR_ENTRY_MASK]);
-			else
-				printf("%s-%s\n",
-				       &pool[p->name & RAZOR_ENTRY_MASK],
-				       &pool[p->version]);
-		next:
-			if (*r++ & RAZOR_IMMEDIATE)
-				break;
-		}
+	pi = zalloc(sizeof *pi);
+	pi->set = set;
+	pi->property = set->properties.data;
+	pi->end = set->properties.data + set->properties.size;
+	if (package) {
+		pi->index = (unsigned long *)
+			set->property_pool.data + package->properties;
+		pi->last = 0;
 	} else {
-		end = set->properties.data + set->properties.size;
-		for (p = set->properties.data; p < end; p++) {
-			if ((p->name >> 30) != type)
-				continue;
-			if (pool[p->version] == '\0')
-				printf("%s\n",
-				       &pool[p->name & RAZOR_ENTRY_MASK]);
-			else
-				printf("%s-%s\n",
-				       &pool[p->name & RAZOR_ENTRY_MASK],
-				       &pool[p->version]);
-		}
+		pi->index = NULL;
+		pi->last = 0;
 	}
+
+	return pi;
+}
+
+int
+razor_property_iterator_next(struct razor_property_iterator *pi,
+			     struct razor_property **property,
+			     const char **name, const char **version,
+			     enum razor_property_type *type)
+{
+	char *pool;
+	unsigned long flags, index;
+	int valid;
+	struct razor_property *p, *properties;
+
+	if (pi->index) {
+		properties = pi->set->properties.data;
+		p = &properties[*pi->index & RAZOR_ENTRY_MASK];
+		valid = !pi->last;
+		pi->last = (*pi->index++ & RAZOR_IMMEDIATE) != 0;
+		if (!valid)
+			return valid;
+	} else {
+		p = pi->property++;
+		valid = p < pi->end;
+	}			
+
+	pool = pi->set->string_pool.data;
+	*property = p;
+	*name = &pool[p->name & RAZOR_ENTRY_MASK];
+	*version = &pool[p->version];
+	*type = p->name >> 30;
+
+	return valid;
+}
+
+void
+razor_property_iterator_destroy(struct razor_property_iterator *pi)
+{
+	free(pi);
 }
 
 void

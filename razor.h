@@ -4,6 +4,8 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 struct razor_set;
+struct razor_package;
+struct razor_property;
 
 enum razor_property_type {
 	RAZOR_PROPERTY_REQUIRES,
@@ -17,7 +19,33 @@ struct razor_set *razor_set_open(const char *filename);
 void razor_set_destroy(struct razor_set *set);
 int razor_set_write(struct razor_set *set, const char *filename);
 
-void razor_set_list(struct razor_set *set, const char *pattern);
+struct razor_package *
+razor_set_get_package(struct razor_set *set, const char *package);
+
+struct razor_property *
+razor_set_get_property(struct razor_set *set, const char *property);
+
+struct razor_package_iterator;
+struct razor_package_iterator *
+razor_package_iterator_create(struct razor_set *set);
+
+int razor_package_iterator_next(struct razor_package_iterator *pi,
+				struct razor_package **package,
+				const char **name, const char **version);
+void razor_package_iterator_destroy(struct razor_package_iterator *pi);
+
+struct razor_property_iterator;
+struct razor_property_iterator *
+razor_property_iterator_create(struct razor_set *set,
+			       struct razor_package *package);
+int razor_property_iterator_next(struct razor_property_iterator *pi,
+				 struct razor_property **property,
+				 const char **name, const char **version,
+				 enum razor_property_type *type);
+void
+razor_property_iterator_destroy(struct razor_property_iterator *pi);
+
+
 void razor_set_list_properties(struct razor_set *set, const char *name,
 			       enum razor_property_type type);
 void razor_set_list_property_packages(struct razor_set *set,

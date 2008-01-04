@@ -17,9 +17,53 @@ static int
 command_list(int argc, const char *argv[])
 {
 	struct razor_set *set;
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *pattern = argv[0], *name, *version;
 
 	set = razor_set_open(repo_filename);
-	razor_set_list(set, argv[0]);
+	pi = razor_package_iterator_create(set);
+	while (razor_package_iterator_next(pi, &package, &name, &version)) {
+		if (pattern && fnmatch(pattern, name, 0) != 0)
+			continue;
+
+		printf("%s-%s\n", name, version);
+	}
+	razor_package_iterator_destroy(pi);
+	razor_set_destroy(set);
+
+	return 0;
+}
+
+static int
+list_properties(const char *package_name,
+		enum razor_property_type required_type)
+{
+	struct razor_set *set;
+	struct razor_property *property;
+	struct razor_package *package;
+	struct razor_property_iterator *pi;
+	const char *name, *version;
+	enum razor_property_type type;
+
+	set = razor_set_open(repo_filename);
+	if (package_name)
+		package = razor_set_get_package(set, package_name);
+	else
+		package = NULL;
+
+	pi = razor_property_iterator_create(set, package);
+	while (razor_property_iterator_next(pi, &property,
+					    &name, &version, &type)) {
+		if (type != required_type)
+			continue;
+		if (version[0] == '\0')
+			printf("%s\n", name);
+		else
+			printf("%s-%s\n", name, version);
+	}
+	razor_property_iterator_destroy(pi);
+
 	razor_set_destroy(set);
 
 	return 0;
@@ -28,49 +72,25 @@ command_list(int argc, const char *argv[])
 static int
 command_list_requires(int argc, const char *argv[])
 {
-	struct razor_set *set;
-
-	set = razor_set_open(repo_filename);
-	razor_set_list_properties(set, argv[0], RAZOR_PROPERTY_REQUIRES);
-	razor_set_destroy(set);
-
-	return 0;
+	return list_properties(argv[0], RAZOR_PROPERTY_REQUIRES);
 }
 
 static int
 command_list_provides(int argc, const char *argv[])
 {
-	struct razor_set *set;
-
-	set = razor_set_open(repo_filename);
-	razor_set_list_properties(set, argv[0], RAZOR_PROPERTY_PROVIDES);
-	razor_set_destroy(set);
-
-	return 0;
+	return list_properties(argv[0], RAZOR_PROPERTY_PROVIDES);
 }
 
 static int
 command_list_obsoletes(int argc, const char *argv[])
 {
-	struct razor_set *set;
-
-	set = razor_set_open(repo_filename);
-	razor_set_list_properties(set, argv[0], RAZOR_PROPERTY_OBSOLETES);
-	razor_set_destroy(set);
-
-	return 0;
+	return list_properties(argv[0], RAZOR_PROPERTY_OBSOLETES);
 }
 
 static int
 command_list_conflicts(int argc, const char *argv[])
 {
-	struct razor_set *set;
-
-	set = razor_set_open(repo_filename);
-	razor_set_list_properties(set, argv[0], RAZOR_PROPERTY_CONFLICTS);
-	razor_set_destroy(set);
-
-	return 0;
+	return list_properties(argv[0], RAZOR_PROPERTY_CONFLICTS);
 }
 
 static int
