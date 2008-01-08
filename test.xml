@@ -1,0 +1,16 @@
+<test title="gah">
+
+  <import file="sets.xml"/>
+
+  <update name="c" from="a" to="b"/>
+
+  <verify set="b" type="packages">
+    <package name="bash" version="3.2-18.fc8"/>
+  </verify>
+
+  <verify set="c" type="properties">
+    <provides name="nss" eq="1.8-fc10"/>
+    <conflicts name="y" eq="1.1"/>
+  </verify>
+
+</test>
