@@ -56,9 +56,6 @@ Misc ideas:
 - transactions, proper recovery, make sure we don't poop our package
   database (no more rm /var/lib/rpm/__cache*).
 
-- rewrite qsort and bsearch that doesn't require global context var
-  and can output a map describing the permutaion.
-
 - use hash table for package and property lists so we only store
   unique lists (like for string pool).
 

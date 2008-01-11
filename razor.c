@@ -975,26 +975,21 @@ razor_package_iterator_destroy(struct razor_package_iterator *pi)
 	free(pi);
 }
 
-struct razor_set *bsearch_set;
-
-static int
-compare_package_name(const void *key, const void *data)
-{
-	const struct razor_package *p = data;
-	char *pool;
-
-	pool = bsearch_set->string_pool.data;
-
-	return strcmp(key, &pool[p->name]);
-}
-
 struct razor_package *
 razor_set_get_package(struct razor_set *set, const char *package)
 {
-	bsearch_set = set;
-	return bsearch(package, set->packages.data,
-		       set->packages.size / sizeof(struct razor_package),
-		       sizeof(struct razor_package), compare_package_name);
+	struct razor_package_iterator *pi;
+	struct razor_package *p;
+	const char *name, *version;
+
+	pi = razor_package_iterator_create(set);
+	while (razor_package_iterator_next(pi, &p, &name, &version)) {
+		if (strcmp(package, name) == 0)
+			break;
+	}
+	razor_package_iterator_destroy(pi);
+
+	return p;
 }
 
 struct razor_property_iterator {
