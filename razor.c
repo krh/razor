@@ -411,12 +411,6 @@ hashtable_tokenize(struct hashtable *table, const char *string)
 	return hashtable_insert(table, string);
 }
 
-static unsigned long
-razor_importer_tokenize(struct razor_importer *importer, const char *string)
-{
-	return hashtable_tokenize(&importer->table, string);
-}
-
 void
 razor_importer_begin_package(struct razor_importer *importer,
 			     const char *name, const char *version)
@@ -424,8 +418,8 @@ razor_importer_begin_package(struct razor_importer *importer,
 	struct razor_package *p;
 
 	p = array_add(&importer->set->packages, sizeof *p);
-	p->name = razor_importer_tokenize(importer, name);
-	p->version = razor_importer_tokenize(importer, version);
+	p->name = hashtable_tokenize(&importer->table, name);
+	p->version = hashtable_tokenize(&importer->table, version);
 
 	importer->package = p;
 	array_init(&importer->properties);
@@ -452,8 +446,8 @@ razor_importer_add_property(struct razor_importer *importer,
 	unsigned long *r;
 
 	p = array_add(&importer->set->properties, sizeof *p);
-	p->name = razor_importer_tokenize(importer, name) | (type << 30);
-	p->version = razor_importer_tokenize(importer, version);
+	p->name = hashtable_tokenize(&importer->table, name) | (type << 30);
+	p->version = hashtable_tokenize(&importer->table, version);
 	p->packages = importer->package -
 		(struct razor_package *) importer->set->packages.data;
 
@@ -813,7 +807,7 @@ build_file_tree(struct razor_importer *importer)
 			compare_filenames,
 			NULL);
 
-	root.name = razor_importer_tokenize(importer, "");
+	root.name = hashtable_tokenize(&importer->table, "");
 	array_init(&root.files);
 	array_init(&root.packages);
 	root.last = NULL;
@@ -833,7 +827,7 @@ build_file_tree(struct razor_importer *importer)
 			length = end - f;
 			memcpy(dirname, f, length);
 			dirname[length] ='\0';
-			name = razor_importer_tokenize(importer, dirname);
+			name = hashtable_tokenize(&importer->table, dirname);
 			if (d->last == NULL || d->last->name != name) {
 				d->last = array_add(&d->files, sizeof *d);
 				d->last->name = name;
