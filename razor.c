@@ -997,36 +997,6 @@ razor_set_get_package(struct razor_set *set, const char *package)
 		       sizeof(struct razor_package), compare_package_name);
 }
 
-static int
-compare_property_name(const void *key, const void *data)
-{
-	const struct razor_property *p = data;
-	char *pool;
-
-	pool = bsearch_set->string_pool.data;
-
-	return strcmp(key, &pool[p->name & RAZOR_ENTRY_MASK]);
-}
-
-struct razor_property *
-razor_set_get_property(struct razor_set *set, const char *property)
-{
-	struct razor_property *p, *start;
-
-	bsearch_set = set;
-	p = bsearch(property, set->properties.data,
-		    set->properties.size / sizeof(struct razor_property),
-		    sizeof(struct razor_property), compare_property_name);
-
-	start = set->properties.data;
-	while (p > start &&
-	       ((p - 1)->name & RAZOR_ENTRY_MASK) ==
-	       (p->name & RAZOR_ENTRY_MASK))
-		p--;
-
-	return p;
-}
-
 struct razor_property_iterator {
 	struct razor_set *set;
 	struct razor_property *property, *end;
@@ -1071,18 +1041,20 @@ razor_property_iterator_next(struct razor_property_iterator *pi,
 		p = &properties[*pi->index & RAZOR_ENTRY_MASK];
 		valid = !pi->last;
 		pi->last = (*pi->index++ & RAZOR_IMMEDIATE) != 0;
-		if (!valid)
-			return valid;
 	} else {
 		p = pi->property++;
 		valid = p < pi->end;
 	}			
 
-	pool = pi->set->string_pool.data;
-	*property = p;
-	*name = &pool[p->name & RAZOR_ENTRY_MASK];
-	*version = &pool[p->version];
-	*type = p->name >> 30;
+	if (valid) {
+		pool = pi->set->string_pool.data;
+		*property = p;
+		*name = &pool[p->name & RAZOR_ENTRY_MASK];
+		*version = &pool[p->version];
+		*type = p->name >> 30;
+	} else {
+		*property = NULL;
+	}
 
 	return valid;
 }
@@ -1092,6 +1064,25 @@ razor_property_iterator_destroy(struct razor_property_iterator *pi)
 {
 	free(pi);
 }
+
+struct razor_property *
+razor_set_get_property(struct razor_set *set, const char *property)
+{
+	struct razor_property *p;
+	struct razor_property_iterator *pi;
+	const char *name, *version;
+	enum razor_property_type type;
+
+	pi = razor_property_iterator_create(set, NULL);
+	while (razor_property_iterator_next(pi, &p, &name, &version, &type)) {
+		if (strcmp(name, property) == 0)
+			break;
+	}
+	razor_property_iterator_destroy(pi);
+
+	return p;
+}
+
 
 void
 razor_set_list_property_packages(struct razor_set *set,
