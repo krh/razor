@@ -1007,16 +1007,13 @@ razor_property_iterator_create(struct razor_set *set,
 
 	pi = zalloc(sizeof *pi);
 	pi->set = set;
-	pi->property = set->properties.data;
 	pi->end = set->properties.data + set->properties.size;
-	if (package) {
+
+	if (package)
 		pi->index = (unsigned long *)
 			set->property_pool.data + package->properties;
-		pi->last = 0;
-	} else {
-		pi->index = NULL;
-		pi->last = 0;
-	}
+	else
+		pi->property = set->properties.data;
 
 	return pi;
 }
