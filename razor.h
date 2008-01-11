@@ -22,9 +22,6 @@ int razor_set_write(struct razor_set *set, const char *filename);
 struct razor_package *
 razor_set_get_package(struct razor_set *set, const char *package);
 
-struct razor_property *
-razor_set_get_property(struct razor_set *set, const char *property);
-
 struct razor_package_iterator;
 struct razor_package_iterator *
 razor_package_iterator_create(struct razor_set *set);

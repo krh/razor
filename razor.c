@@ -1057,50 +1057,34 @@ razor_property_iterator_destroy(struct razor_property_iterator *pi)
 	free(pi);
 }
 
-struct razor_property *
-razor_set_get_property(struct razor_set *set, const char *property)
-{
-	struct razor_property *p;
-	struct razor_property_iterator *pi;
-	const char *name, *version;
-	enum razor_property_type type;
-
-	pi = razor_property_iterator_create(set, NULL);
-	while (razor_property_iterator_next(pi, &p, &name, &version, &type)) {
-		if (strcmp(name, property) == 0)
-			break;
-	}
-	razor_property_iterator_destroy(pi);
-
-	return p;
-}
-
-
 void
 razor_set_list_property_packages(struct razor_set *set,
-				 const char *name,
-				 const char *version,
-				 enum razor_property_type type)
+				 const char *ref_name,
+				 const char *ref_version,
+				 enum razor_property_type ref_type)
 {
-	struct razor_property *property, *end;
+	struct razor_property *property;
+	struct razor_property_iterator *pi;
 	struct razor_package *p, *packages;
+	const char *name, *version, *pool;
+	enum razor_property_type type;
 	unsigned long *r;
-	char *pool;
 
-	if (name == NULL)
+	if (ref_name == NULL)
 		return;
 
-	property = razor_set_get_property(set, name);
 	packages = set->packages.data;
 	pool = set->string_pool.data;
-	end = set->properties.data + set->properties.size;
-	while (property < end &&
-	       strcmp(name, &pool[property->name & RAZOR_ENTRY_MASK]) == 0) {
-		if (version &&
-		    versioncmp(version, &pool[property->version]) != 0)
-			goto next;
-		if (type != (property->name >> 30))
-			goto next;
+
+	pi = razor_property_iterator_create(set, NULL);
+	while (razor_property_iterator_next(pi, &property,
+					    &name, &version, &type)) {
+		if (strcmp(ref_name, name) != 0)
+			continue;
+		if (ref_version && versioncmp(ref_version, version) != 0)
+			continue;
+		if (ref_type != type)
+			continue;
 		
 		if (property->packages & RAZOR_IMMEDIATE)
 			r = &property->packages;
@@ -1115,9 +1099,8 @@ razor_set_list_property_packages(struct razor_set *set,
 			if (*r++ & RAZOR_IMMEDIATE)
 				break;
 		}
-	next:
-		property++;
 	}
+	razor_property_iterator_destroy(pi);
 }
 
 static struct razor_entry *
