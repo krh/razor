@@ -188,7 +188,7 @@ verify_end(struct test_context *ctx)
 {
 	struct razor_package *package;
 	struct razor_property *property;
-	const char *name, *version, *ref_name, *ref_version;
+	const char *name, *version;
 	enum razor_property_type type;
 
 	if (ctx->package_iterator != NULL) {
@@ -287,7 +287,6 @@ static void
 start_test_element(void *data, const char *element, const char **atts)
 {
 	struct test_context *ctx = data;
-	struct razor_set *set;
 	const char *name;
 
 	if (strcmp(element, "import") == 0) {
@@ -322,7 +321,6 @@ end_test_element (void *data, const char *element)
 int main(int argc, char *argv[])
 {
 	struct test_context ctx;
-	struct test_set *set;
 
 	if (argc != 2) {
 		fprintf(stderr, "usage: %s TESTS-FILE\n", argv[0]);

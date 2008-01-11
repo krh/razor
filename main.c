@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <curl/curl.h>
+#include <fnmatch.h>
 #include "razor.h"
 
 static const char *repo_filename = "system.repo";

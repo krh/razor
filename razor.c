@@ -1069,7 +1069,6 @@ razor_property_iterator_next(struct razor_property_iterator *pi,
 			     enum razor_property_type *type)
 {
 	char *pool;
-	unsigned long flags, index;
 	int valid;
 	struct razor_property *p, *properties;
 
