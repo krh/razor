@@ -46,9 +46,8 @@ razor_property_iterator_destroy(struct razor_property_iterator *pi);
 void razor_set_list_properties(struct razor_set *set, const char *name,
 			       enum razor_property_type type);
 void razor_set_list_property_packages(struct razor_set *set,
-				      const char *name,
-				      const char *version,
-				      enum razor_property_type type);
+				      struct razor_property *property);
+
 void razor_set_list_files(struct razor_set *set, const char *prefix);
 void razor_set_list_file_packages(struct razor_set *set, const char *filename);
 void razor_set_list_package_files(struct razor_set *set, const char *name);

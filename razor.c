@@ -621,7 +621,6 @@ versioncmp(const char *s1, const char *s2)
 	return *p1 - *p2;
 }
 
-
 static int
 compare_packages(const void *p1, const void *p2, void *data)
 {
@@ -1059,48 +1058,28 @@ razor_property_iterator_destroy(struct razor_property_iterator *pi)
 
 void
 razor_set_list_property_packages(struct razor_set *set,
-				 const char *ref_name,
-				 const char *ref_version,
-				 enum razor_property_type ref_type)
+				 struct razor_property *property)
 {
-	struct razor_property *property;
-	struct razor_property_iterator *pi;
 	struct razor_package *p, *packages;
-	const char *name, *version, *pool;
-	enum razor_property_type type;
+	const char *pool;
 	unsigned long *r;
-
-	if (ref_name == NULL)
-		return;
 
 	packages = set->packages.data;
 	pool = set->string_pool.data;
 
-	pi = razor_property_iterator_create(set, NULL);
-	while (razor_property_iterator_next(pi, &property,
-					    &name, &version, &type)) {
-		if (strcmp(ref_name, name) != 0)
-			continue;
-		if (ref_version && versioncmp(ref_version, version) != 0)
-			continue;
-		if (ref_type != type)
-			continue;
-		
-		if (property->packages & RAZOR_IMMEDIATE)
-			r = &property->packages;
-		else
-			r = (unsigned long *)
-				set->package_pool.data + property->packages;
-		while (1) {
-			p = &packages[*r & RAZOR_ENTRY_MASK];
-			printf("%s-%s\n",
-			       &pool[p->name & RAZOR_ENTRY_MASK],
-			       &pool[p->version]);
-			if (*r++ & RAZOR_IMMEDIATE)
-				break;
-		}
+	if (property->packages & RAZOR_IMMEDIATE)
+		r = &property->packages;
+	else
+		r = (unsigned long *)
+			set->package_pool.data + property->packages;
+	while (1) {
+		p = &packages[*r & RAZOR_ENTRY_MASK];
+		printf("%s-%s\n",
+		       &pool[p->name & RAZOR_ENTRY_MASK],
+		       &pool[p->version]);
+		if (*r++ & RAZOR_IMMEDIATE)
+			break;
 	}
-	razor_property_iterator_destroy(pi);
 }
 
 static struct razor_entry *

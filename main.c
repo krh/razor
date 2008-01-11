@@ -137,29 +137,52 @@ command_list_package_files(int argc, const char *argv[])
 }
 
 static int
-command_what_requires(int argc, const char *argv[])
+list_property_packages(const char *ref_name,
+		       const char *ref_version,
+		       enum razor_property_type ref_type)
 {
 	struct razor_set *set;
+	struct razor_property *property;
+	struct razor_property_iterator *pi;
+	const char *name, *version;
+	enum razor_property_type type;
+
+	if (ref_name == NULL)
+		return 0;
 
 	set = razor_set_open(repo_filename);
-	razor_set_list_property_packages(set, argv[0], argv[1],
-					 RAZOR_PROPERTY_REQUIRES);
-	razor_set_destroy(set);
+	if (set == NULL)
+		return 1;
+
+	pi = razor_property_iterator_create(set, NULL);
+	while (razor_property_iterator_next(pi, &property,
+					    &name, &version, &type)) {
+		if (strcmp(ref_name, name) != 0)
+			continue;
+		if (ref_version && strcmp(ref_version, version) != 0)
+			continue;
+		if (ref_type != type)
+			continue;
+
+		razor_set_list_property_packages(set, property);
+	}
+	razor_property_iterator_destroy(pi);
 
 	return 0;
 }
 
 static int
+command_what_requires(int argc, const char *argv[])
+{
+	return list_property_packages(argv[0], argv[1],
+				      RAZOR_PROPERTY_REQUIRES);
+}
+
+static int
 command_what_provides(int argc, const char *argv[])
 {
-	struct razor_set *set;
-
-	set = razor_set_open(repo_filename);
-	razor_set_list_property_packages(set, argv[0], argv[1],
-					 RAZOR_PROPERTY_PROVIDES);
-	razor_set_destroy(set);
-
-	return 0;
+	return list_property_packages(argv[0], argv[1],
+				      RAZOR_PROPERTY_PROVIDES);
 }
 
 static int
