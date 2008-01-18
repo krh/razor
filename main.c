@@ -136,6 +136,20 @@ command_list_package_files(int argc, const char *argv[])
 	return 0;
 }
 
+static void
+list_packages_for_property(struct razor_set *set,
+			   struct razor_property *property)
+{
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *name, *version;
+
+	pi = razor_package_iterator_create_for_property(set, property);
+	while (razor_package_iterator_next(pi, &package, &name, &version))
+		printf("%s-%s\n", name, version);
+	razor_package_iterator_destroy(pi);
+}
+
 static int
 list_property_packages(const char *ref_name,
 		       const char *ref_version,
@@ -164,7 +178,7 @@ list_property_packages(const char *ref_name,
 		if (ref_type != type)
 			continue;
 
-		razor_set_list_property_packages(set, property);
+		list_packages_for_property(set, property);
 	}
 	razor_property_iterator_destroy(pi);
 

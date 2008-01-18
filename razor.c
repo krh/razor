@@ -938,19 +938,44 @@ razor_importer_finish(struct razor_importer *importer)
 struct razor_package_iterator {
 	struct razor_set *set;
 	struct razor_package *package, *end;
+	unsigned long *index;
+	int last;
 };
 
 struct razor_package_iterator *
-razor_package_iterator_create(struct razor_set *set)
+razor_package_iterator_create_with_index(struct razor_set *set,
+					 unsigned long *index)
 {
 	struct razor_package_iterator *pi;
 
 	pi = zalloc(sizeof *pi);
 	pi->set = set;
-	pi->package = set->packages.data;
 	pi->end = set->packages.data + set->packages.size;
+	pi->package = set->packages.data;
+	pi->index = index;
 
 	return pi;
+}
+
+struct razor_package_iterator *
+razor_package_iterator_create(struct razor_set *set)
+{
+	return razor_package_iterator_create_with_index(set, NULL);
+}
+
+struct razor_package_iterator *
+razor_package_iterator_create_for_property(struct razor_set *set,
+					   struct razor_property *property)
+{
+	unsigned long *index;
+
+	if (property->packages & RAZOR_IMMEDIATE)
+		index = &property->packages;
+	else
+		index = (unsigned long *)
+			set->package_pool.data + property->packages;
+
+	return razor_package_iterator_create_with_index(set, index);
 }
 
 int
@@ -959,13 +984,29 @@ razor_package_iterator_next(struct razor_package_iterator *pi,
 			    const char **name, const char **version)
 {
 	char *pool;
+	int valid;
+	struct razor_package *p, *packages;
 
-	pool = pi->set->string_pool.data;
-	*package = pi->package;
-	*name = &pool[pi->package->name];
-	*version = &pool[pi->package->version];
+	if (pi->index) {
+		packages = pi->set->packages.data;
+		p = &packages[*pi->index & RAZOR_ENTRY_MASK];
+		valid = !pi->last;
+		pi->last = (*pi->index++ & RAZOR_IMMEDIATE) != 0;
+	} else {
+		p = pi->package++;
+		valid = p < pi->end;
+	}			
 
-	return pi->package++ < pi->end;
+	if (valid) {
+		pool = pi->set->string_pool.data;
+		*package = p;
+		*name = &pool[p->name & RAZOR_ENTRY_MASK];
+		*version = &pool[p->version];
+	} else {
+		*package = NULL;
+	}
+
+	return valid;
 }
 
 void
@@ -1007,12 +1048,11 @@ razor_property_iterator_create(struct razor_set *set,
 	pi = zalloc(sizeof *pi);
 	pi->set = set;
 	pi->end = set->properties.data + set->properties.size;
+	pi->property = set->properties.data;
 
 	if (package)
 		pi->index = (unsigned long *)
 			set->property_pool.data + package->properties;
-	else
-		pi->property = set->properties.data;
 
 	return pi;
 }
@@ -1054,32 +1094,6 @@ void
 razor_property_iterator_destroy(struct razor_property_iterator *pi)
 {
 	free(pi);
-}
-
-void
-razor_set_list_property_packages(struct razor_set *set,
-				 struct razor_property *property)
-{
-	struct razor_package *p, *packages;
-	const char *pool;
-	unsigned long *r;
-
-	packages = set->packages.data;
-	pool = set->string_pool.data;
-
-	if (property->packages & RAZOR_IMMEDIATE)
-		r = &property->packages;
-	else
-		r = (unsigned long *)
-			set->package_pool.data + property->packages;
-	while (1) {
-		p = &packages[*r & RAZOR_ENTRY_MASK];
-		printf("%s-%s\n",
-		       &pool[p->name & RAZOR_ENTRY_MASK],
-		       &pool[p->version]);
-		if (*r++ & RAZOR_IMMEDIATE)
-			break;
-	}
 }
 
 static struct razor_entry *
