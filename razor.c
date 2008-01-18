@@ -1161,31 +1161,24 @@ razor_set_list_files(struct razor_set *set, const char *pattern)
 		list_dir(set, e, buffer, base);
 }
 
-void
-razor_set_list_file_packages(struct razor_set *set, const char *filename)
+struct razor_package_iterator *
+razor_package_iterator_create_for_file(struct razor_set *set,
+				       const char *filename)
 {
-	struct razor_entry *e;
-	struct razor_package *packages, *p;
-	const char *pool;
-	unsigned long *r;
+	struct razor_entry *entry;
+	unsigned long *index;
 
-	e = find_entry(set, set->files.data, filename);
-	if (e == NULL)
-		return;
+	entry = find_entry(set, set->files.data, filename);
+	if (entry == NULL)
+		return NULL;
 	
-	if (e->packages & RAZOR_IMMEDIATE)
-		r = &e->packages;
+	if (entry->packages & RAZOR_IMMEDIATE)
+		index = &entry->packages;
 	else
-		r = (unsigned long *) set->package_pool.data + e->packages;
+		index = (unsigned long *)
+			set->package_pool.data + entry->packages;
 
-	packages = set->packages.data;
-	pool = set->string_pool.data;
-	while (1) {
-		p = &packages[*r & RAZOR_ENTRY_MASK];
-		printf("%s-%s\n", &pool[p->name], &pool[p->version]);
-		if (*r++ & RAZOR_IMMEDIATE)
-			break;
-	}
+	return razor_package_iterator_create_with_index(set, index);
 }
 
 static unsigned long *

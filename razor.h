@@ -28,6 +28,9 @@ razor_package_iterator_create(struct razor_set *set);
 struct razor_package_iterator *
 razor_package_iterator_create_for_property(struct razor_set *set,
 					   struct razor_property *property);
+struct razor_package_iterator *
+razor_package_iterator_create_for_file(struct razor_set *set,
+				       const char *filename);
 
 int razor_package_iterator_next(struct razor_package_iterator *pi,
 				struct razor_package **package,
@@ -46,7 +49,6 @@ void
 razor_property_iterator_destroy(struct razor_property_iterator *pi);
 
 void razor_set_list_files(struct razor_set *set, const char *prefix);
-void razor_set_list_file_packages(struct razor_set *set, const char *filename);
 void razor_set_list_package_files(struct razor_set *set, const char *name);
 
 void razor_set_list_unsatisfied(struct razor_set *set);

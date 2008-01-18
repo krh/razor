@@ -112,11 +112,19 @@ static int
 command_list_file_packages(int argc, const char *argv[])
 {
 	struct razor_set *set;
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *name, *version;
 
 	set = razor_set_open(repo_filename);
 	if (set == NULL)
 		return 1;
-	razor_set_list_file_packages(set, argv[0]);
+
+	pi = razor_package_iterator_create_for_file(set, argv[0]);
+	while (razor_package_iterator_next(pi, &package, &name, &version))
+		printf("%s-%s\n", name, version);
+	razor_package_iterator_destroy(pi);
+
 	razor_set_destroy(set);
 
 	return 0;
