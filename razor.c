@@ -1784,39 +1784,37 @@ void
 razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 	       razor_package_callback_t callback, void *data)
 {
-	struct razor_package *p, *pend, *u, *uend;
-	char *ppool, *upool;
+	struct razor_package_iterator *pi1, *pi2;
+	struct razor_package *p1, *p2;
+	const char *name1, *name2, *version1, *version2;
 	int res = 0;
 
-	p = set->packages.data;
-	pend = set->packages.data + set->packages.size;
-	ppool = set->string_pool.data;
+	pi1 = razor_package_iterator_create(set);
+	pi2 = razor_package_iterator_create(upstream);
 
-	u = upstream->packages.data;
-	uend = upstream->packages.data + upstream->packages.size;
-	upool = upstream->string_pool.data;
+	razor_package_iterator_next(pi1, &p1, &name1, &version1);
+	razor_package_iterator_next(pi2, &p2, &name2, &version2);
 
-	while (p < pend || u < uend) {
-		if (p < pend && u < uend) {
-			res = strcmp(&ppool[p->name], &upool[u->name]);
+	while (p1 || p2) {
+		if (p1 && p2) {
+			res = strcmp(name1, name2);
 			if (res == 0)
-				res = versioncmp(&ppool[p->version],
-						 &upool[u->version]);
+				res = versioncmp(version1, version2);
 		}
 
-		if (u == uend || res < 0) {
-			callback(&ppool[p->name], &ppool[p->version],
-				 NULL, data);
-			p++;
-			continue;
-		} else if (p == pend || res > 0) {
-			callback(&upool[u->name], NULL, &upool[u->version],
-				 data);
-			u++;
-			continue;
-		} else {
-			p++;
-			u++;
-		}
+		if (p2 == NULL || res < 0)
+			callback(name1, version1, NULL, data);
+		else if (p1 == NULL || res > 0)
+			callback(name2, NULL, version2, data);
+
+		if (p1 != NULL && res <= 0)
+			razor_package_iterator_next(pi1, &p1,
+						    &name1, &version1);
+		if (p2 != NULL && res >= 0)
+			razor_package_iterator_next(pi2, &p2,
+						    &name2, &version2);
 	}
+
+	razor_package_iterator_destroy(pi1);
+	razor_package_iterator_destroy(pi2);
 }
