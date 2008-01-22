@@ -288,6 +288,25 @@ union rpm_entry {
 	unsigned int *flags;
 };
 
+static void
+add_properties(struct razor_importer *importer,
+	       enum razor_property_type property_type,
+	       Header h, int_32 name_tag, int_32 version_tag, int_32 flags_tag)
+{
+	union rpm_entry names, versions, flags;
+	int_32 i, type, count;
+
+	headerGetEntry(h, name_tag, &type, &names.p, &count);
+	headerGetEntry(h, version_tag, &type, &versions.p, &count);
+	headerGetEntry(h, flags_tag, &type, &flags.p, &count);
+
+	for (i = 0; i < count; i++)
+		razor_importer_add_property(importer,
+					    names.list[i],
+					    versions.list[i],
+					    property_type);
+}
+
 struct razor_set *
 razor_set_create_from_rpmdb(void)
 {
@@ -296,7 +315,6 @@ razor_set_create_from_rpmdb(void)
 	Header h;
 	int_32 type, count, i;
 	union rpm_entry name, version, release;
-	union rpm_entry property_names, property_versions, property_flags;
 	union rpm_entry basenames, dirnames, dirindexes;
 	char filename[PATH_MAX];
 	rpmdb db;
@@ -319,53 +337,25 @@ razor_set_create_from_rpmdb(void)
 			 version.string, release.string);
 		razor_importer_begin_package(importer, name.string, filename);
 
-		headerGetEntry(h, RPMTAG_REQUIRENAME, &type,
-			       &property_names.p, &count);
-		headerGetEntry(h, RPMTAG_REQUIREVERSION, &type,
-			       &property_versions.p, &count);
-		headerGetEntry(h, RPMTAG_REQUIREFLAGS, &type,
-			       &property_flags.p, &count);
-		for (i = 0; i < count; i++)
-			razor_importer_add_property(importer,
-						    property_names.list[i],
-						    property_versions.list[i],
-						    RAZOR_PROPERTY_REQUIRES);
+		add_properties(importer, RAZOR_PROPERTY_REQUIRES, h,
+			       RPMTAG_REQUIRENAME,
+			       RPMTAG_REQUIREVERSION,
+			       RPMTAG_REQUIREFLAGS);
 
-		headerGetEntry(h, RPMTAG_PROVIDENAME, &type,
-			       &property_names.p, &count);
-		headerGetEntry(h, RPMTAG_PROVIDEVERSION, &type,
-			       &property_versions.p, &count);
-		headerGetEntry(h, RPMTAG_PROVIDEFLAGS, &type,
-			       &property_flags.p, &count);
-		for (i = 0; i < count; i++)
-			razor_importer_add_property(importer,
-						    property_names.list[i],
-						    property_versions.list[i],
-						    RAZOR_PROPERTY_PROVIDES);
+		add_properties(importer, RAZOR_PROPERTY_PROVIDES, h,
+			       RPMTAG_PROVIDENAME,
+			       RPMTAG_PROVIDEVERSION,
+			       RPMTAG_PROVIDEFLAGS);
 
-		headerGetEntry(h, RPMTAG_OBSOLETENAME, &type,
-			       &property_names.p, &count);
-		headerGetEntry(h, RPMTAG_OBSOLETEVERSION, &type,
-			       &property_versions.p, &count);
-		headerGetEntry(h, RPMTAG_OBSOLETEFLAGS, &type,
-			       &property_flags.p, &count);
-		for (i = 0; i < count; i++)
-			razor_importer_add_property(importer,
-						    property_names.list[i],
-						    property_versions.list[i],
-						    RAZOR_PROPERTY_OBSOLETES);
+		add_properties(importer, RAZOR_PROPERTY_OBSOLETES, h,
+			       RPMTAG_OBSOLETENAME,
+			       RPMTAG_OBSOLETEVERSION,
+			       RPMTAG_OBSOLETEFLAGS);
 
-		headerGetEntry(h, RPMTAG_CONFLICTNAME, &type,
-			       &property_names.p, &count);
-		headerGetEntry(h, RPMTAG_CONFLICTVERSION, &type,
-			       &property_versions.p, &count);
-		headerGetEntry(h, RPMTAG_CONFLICTFLAGS, &type,
-			       &property_flags.p, &count);
-		for (i = 0; i < count; i++)
-			razor_importer_add_property(importer,
-						    property_names.list[i],
-						    property_versions.list[i],
-						    RAZOR_PROPERTY_CONFLICTS);
+		add_properties(importer, RAZOR_PROPERTY_CONFLICTS, h,
+			       RPMTAG_CONFLICTNAME,
+			       RPMTAG_CONFLICTVERSION,
+			       RPMTAG_CONFLICTFLAGS);
 
 		headerGetEntry(h, RPMTAG_BASENAMES, &type,
 			       &basenames.p, &count);
