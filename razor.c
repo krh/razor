@@ -1692,18 +1692,28 @@ razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
 
 static void
 find_packages(struct razor_set *set,
-	      int count, const char **packages, struct array *list)
+	      int count, const char **package_names, struct array *list)
 {
-	struct razor_package *p;
+	struct razor_package_iterator *pi;
+	struct razor_package *p, *packages;
+	const char *name, *version;
 	unsigned long *r;
 	int i;
 
-	/* FIXME: Sort the packages. */
-	for (i = 0; i < count; i++) {
-		p = razor_set_get_package(set, packages[i]);
-		r = array_add(list, sizeof *r);
-		*r = p - (struct razor_package *) set->packages.data;
+	packages = (struct razor_package *) set->packages.data;
+	pi = razor_package_iterator_create(set);
+
+	while (razor_package_iterator_next(pi, &p, &name, &version)) {
+		for (i = 0; i < count; i++) {
+			if (strcmp(name, package_names[i]) == 0) {
+				r = array_add(list, sizeof *r);
+				*r = p - packages;
+				break;
+			}
+		}
 	}
+
+	razor_package_iterator_destroy(pi);
 }
 
 static void
