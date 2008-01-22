@@ -1797,7 +1797,7 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 	struct razor_package_iterator *pi1, *pi2;
 	struct razor_package *p1, *p2;
 	const char *name1, *name2, *version1, *version2;
-	int res = 0;
+	int res;
 
 	pi1 = razor_package_iterator_create(set);
 	pi2 = razor_package_iterator_create(upstream);
@@ -1810,6 +1810,8 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 			res = strcmp(name1, name2);
 			if (res == 0)
 				res = versioncmp(version1, version2);
+		} else {
+			res = 0;
 		}
 
 		if (p2 == NULL || res < 0)
