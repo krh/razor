@@ -95,7 +95,8 @@ parse_property(struct test_context *ctx, const char **atts,
 		exit(-1);
 	}
 	
-	razor_importer_add_property(ctx->importer, name, version, type);
+	razor_importer_add_property(ctx->importer, name,
+				    RAZOR_VERSION_EQUAL, version, type);
 }
 
 static void
@@ -190,6 +191,7 @@ verify_end(struct test_context *ctx)
 	struct razor_property *property;
 	const char *name, *version;
 	enum razor_property_type type;
+	enum razor_version_relation relation;
 
 	if (ctx->package_iterator != NULL) {
 		if (razor_package_iterator_next(ctx->package_iterator,
@@ -206,7 +208,8 @@ verify_end(struct test_context *ctx)
 	if (ctx->property_iterator != NULL) {
 		if (razor_property_iterator_next(ctx->property_iterator,
 						 &property,
-						 &name, &version, &type)) {
+						 &name, &relation, &version,
+						 &type)) {
 			fprintf(stderr, "too few properties in set\n");
 			exit(-1);
 		}
@@ -251,6 +254,7 @@ verify_property(struct test_context *ctx,
 	struct razor_property *property;
 	const char *name, *version, *ref_name, *ref_version;
 	enum razor_property_type type;
+	enum razor_version_relation relation;
 	int same_version;
 
 	if (ctx->property_iterator == NULL) {
@@ -262,7 +266,7 @@ verify_property(struct test_context *ctx,
 
 	get_atts(atts, "name", &ref_name, "eq", &ref_version, NULL);
 	if (!razor_property_iterator_next(ctx->property_iterator, &property,
-					  &name, &version, &type)) {
+					  &name, &relation, &version, &type)) {
 		fprintf(stderr, "too many properties in set\n");
 		exit(-1);
 	}

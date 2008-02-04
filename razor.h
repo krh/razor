@@ -14,6 +14,14 @@ enum razor_property_type {
 	RAZOR_PROPERTY_OBSOLETES
 };
 
+enum razor_version_relation {
+	RAZOR_VERSION_LESS,
+	RAZOR_VERSION_LESS_OR_EQUAL,
+	RAZOR_VERSION_EQUAL,
+	RAZOR_VERSION_GREATER_OR_EQUAL,
+	RAZOR_VERSION_GREATER
+};
+
 struct razor_set *razor_set_create(void);
 struct razor_set *razor_set_open(const char *filename);
 void razor_set_destroy(struct razor_set *set);
@@ -43,7 +51,9 @@ razor_property_iterator_create(struct razor_set *set,
 			       struct razor_package *package);
 int razor_property_iterator_next(struct razor_property_iterator *pi,
 				 struct razor_property **property,
-				 const char **name, const char **version,
+				 const char **name,
+				 enum razor_version_relation *relation,
+				 const char **version,
 				 enum razor_property_type *type);
 void
 razor_property_iterator_destroy(struct razor_property_iterator *pi);
@@ -76,7 +86,9 @@ void razor_importer_destroy(struct razor_importer *importer);
 void razor_importer_begin_package(struct razor_importer *importer,
 				const char *name, const char *version);
 void razor_importer_add_property(struct razor_importer *importer,
-				 const char *name, const char *version,
+				 const char *name,
+				 enum razor_version_relation relation,
+				 const char *version,
 				 enum razor_property_type type);
 void razor_importer_add_file(struct razor_importer *importer,
 			     const char *name);

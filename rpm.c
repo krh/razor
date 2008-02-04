@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <rpm/rpmlib.h>
+#include <rpm/rpmdb.h>
 #include <zlib.h>
 
 #include "razor.h"
@@ -73,22 +74,47 @@ razor_rpm_get_indirect(struct razor_rpm *rpm,
 	return NULL;
 }
 
+static enum razor_version_relation
+rpm_to_razor_flags (uint_32 flags)
+{
+	switch (flags & (RPMSENSE_LESS | RPMSENSE_EQUAL | RPMSENSE_GREATER)) {
+	case RPMSENSE_LESS:
+		return RAZOR_VERSION_LESS;
+	case RPMSENSE_LESS|RPMSENSE_EQUAL:
+		return RAZOR_VERSION_LESS_OR_EQUAL;
+	case RPMSENSE_EQUAL:
+		return RAZOR_VERSION_EQUAL;
+	case RPMSENSE_GREATER|RPMSENSE_EQUAL:
+		return RAZOR_VERSION_GREATER_OR_EQUAL;
+	case RPMSENSE_GREATER:
+		return RAZOR_VERSION_GREATER;
+	}
+
+	/* FIXME? */
+	return RAZOR_VERSION_EQUAL;
+}
+
 static void
 import_properties(struct razor_importer *importer, unsigned long type,
 		  struct razor_rpm *rpm,
 		  int name_tag, int version_tag, int flags_tag)
 {
 	const char *name, *version;
+	uint_32 flags;
 	unsigned int i, count;
 
 	name = razor_rpm_get_indirect(rpm, name_tag, &count);
 	if (name == NULL)
 		return;
 
+	flags = *(uint_32 *)razor_rpm_get_indirect(rpm, flags_tag, &count);
+
 	/* FIXME: Concat version and release. */
 	version = razor_rpm_get_indirect(rpm, version_tag, &count);
 	for (i = 0; i < count; i++) {
-		razor_importer_add_property(importer, name, version, type);
+		razor_importer_add_property(importer, name,
+					    rpm_to_razor_flags (flags),
+					    version, type);
 		name += strlen(name) + 1;
 		version += strlen(version) + 1;
 	}
@@ -533,4 +559,102 @@ razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 	razor_importer_finish_package(importer);
 
 	return 0;
+}
+
+union rpm_entry {
+	void *p;
+	char *string;
+	char **list;
+	uint_32 *flags;
+};
+
+static void
+add_properties(struct razor_importer *importer,
+	       enum razor_property_type property_type,
+	       Header h, int_32 name_tag, int_32 version_tag, int_32 flags_tag)
+{
+	union rpm_entry names, versions, flags;
+	int_32 i, type, count;
+
+	headerGetEntry(h, name_tag, &type, &names.p, &count);
+	headerGetEntry(h, version_tag, &type, &versions.p, &count);
+	headerGetEntry(h, flags_tag, &type, &flags.p, &count);
+
+	for (i = 0; i < count; i++)
+		razor_importer_add_property(importer,
+					    names.list[i],
+					    rpm_to_razor_flags (flags.flags[i]),
+					    versions.list[i],
+					    property_type);
+}
+
+struct razor_set *
+razor_set_create_from_rpmdb(void)
+{
+	struct razor_importer *importer;
+	rpmdbMatchIterator iter;
+	Header h;
+	int_32 type, count, i;
+	union rpm_entry name, version, release;
+	union rpm_entry basenames, dirnames, dirindexes;
+	char filename[PATH_MAX];
+	rpmdb db;
+
+	rpmReadConfigFiles(NULL, NULL);
+
+	if (rpmdbOpen("", &db, O_RDONLY, 0644) != 0) {
+		fprintf(stderr, "cannot open rpm database\n");
+		exit(1);
+	}
+
+	importer = razor_importer_new();
+
+	iter = rpmdbInitIterator(db, 0, NULL, 0);
+	while (h = rpmdbNextIterator(iter), h != NULL) {
+		headerGetEntry(h, RPMTAG_NAME, &type, &name.p, &count);
+		headerGetEntry(h, RPMTAG_VERSION, &type, &version.p, &count);
+		headerGetEntry(h, RPMTAG_RELEASE, &type, &release.p, &count);
+		snprintf(filename, sizeof filename, "%s-%s",
+			 version.string, release.string);
+		razor_importer_begin_package(importer, name.string, filename);
+
+		add_properties(importer, RAZOR_PROPERTY_REQUIRES, h,
+			       RPMTAG_REQUIRENAME,
+			       RPMTAG_REQUIREVERSION,
+			       RPMTAG_REQUIREFLAGS);
+
+		add_properties(importer, RAZOR_PROPERTY_PROVIDES, h,
+			       RPMTAG_PROVIDENAME,
+			       RPMTAG_PROVIDEVERSION,
+			       RPMTAG_PROVIDEFLAGS);
+
+		add_properties(importer, RAZOR_PROPERTY_OBSOLETES, h,
+			       RPMTAG_OBSOLETENAME,
+			       RPMTAG_OBSOLETEVERSION,
+			       RPMTAG_OBSOLETEFLAGS);
+
+		add_properties(importer, RAZOR_PROPERTY_CONFLICTS, h,
+			       RPMTAG_CONFLICTNAME,
+			       RPMTAG_CONFLICTVERSION,
+			       RPMTAG_CONFLICTFLAGS);
+
+		headerGetEntry(h, RPMTAG_BASENAMES, &type,
+			       &basenames.p, &count);
+		headerGetEntry(h, RPMTAG_DIRNAMES, &type,
+			       &dirnames.p, &count);
+		headerGetEntry(h, RPMTAG_DIRINDEXES, &type,
+			       &dirindexes.p, &count);
+		for (i = 0; i < count; i++) {
+			snprintf(filename, sizeof filename, "%s%s",
+				 dirnames.list[dirindexes.flags[i]],
+				 basenames.list[i]);
+			razor_importer_add_file(importer, filename);
+		}
+
+		razor_importer_finish_package(importer);
+	}
+
+	rpmdbClose(db);
+
+	return razor_importer_finish(importer);
 }

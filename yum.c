@@ -10,8 +10,6 @@
 
 #include <expat.h>
 #include <zlib.h>
-#include <rpm/rpmlib.h>
-#include <rpm/rpmdb.h>
 #include "razor.h"
 
 /* Import a yum filelist as a razor package set. */
@@ -39,11 +37,32 @@ struct yum_context {
 	int state;
 };
 
+static enum razor_version_relation
+yum_to_razor_flags (const char *flags)
+{
+	/* FIXME? */
+	if (!flags)
+		return RAZOR_VERSION_EQUAL;
+
+	if (flags[0] == 'L') {
+		if (flags[1] == 'T')
+			return RAZOR_VERSION_LESS;
+		else
+			return RAZOR_VERSION_LESS_OR_EQUAL;
+	} else if (flags[0] == 'G') {
+		if (flags[1] == 'T')
+			return RAZOR_VERSION_GREATER;
+		else
+			return RAZOR_VERSION_GREATER_OR_EQUAL;
+	} else
+		return RAZOR_VERSION_EQUAL;
+}
+
 static void
 yum_primary_start_element(void *data, const char *name, const char **atts)
 {
 	struct yum_context *ctx = data;
-	const char *n, *version, *release;
+	const char *n, *version, *release, *flags;
 	char buffer[128];
 	int i;
 
@@ -83,6 +102,7 @@ yum_primary_start_element(void *data, const char *name, const char **atts)
 		n = NULL;
 		version = NULL;
 		release = NULL;
+		flags = NULL;
 		for (i = 0; atts[i]; i += 2) {
 			if (strcmp(atts[i], "name") == 0)
 				n = atts[i + 1];
@@ -90,6 +110,8 @@ yum_primary_start_element(void *data, const char *name, const char **atts)
 				version = atts[i + 1];
 			else if (strcmp(atts[i], "rel") == 0)
 				release = atts[i + 1];
+			else if (strcmp(atts[i], "flags") == 0)
+				flags = atts[i + 1];
 		}
 
 		if (n == NULL) {
@@ -108,19 +130,27 @@ yum_primary_start_element(void *data, const char *name, const char **atts)
 			
 		switch (ctx->state) {
 		case YUM_STATE_REQUIRES:
-			razor_importer_add_property(ctx->importer, n, buffer,
+			razor_importer_add_property(ctx->importer, n,
+						    yum_to_razor_flags (flags),
+						    buffer,
 						    RAZOR_PROPERTY_REQUIRES);
 			break;
 		case YUM_STATE_PROVIDES:
-			razor_importer_add_property(ctx->importer, n, buffer,
+			razor_importer_add_property(ctx->importer, n,
+						    yum_to_razor_flags (flags),
+						    buffer,
 						    RAZOR_PROPERTY_PROVIDES);
 			break;
 		case YUM_STATE_OBSOLETES:
-			razor_importer_add_property(ctx->importer, n, buffer,
+			razor_importer_add_property(ctx->importer, n,
+						    yum_to_razor_flags (flags),
+						    buffer,
 						    RAZOR_PROPERTY_OBSOLETES);
 			break;
 		case YUM_STATE_CONFLICTS:
-			razor_importer_add_property(ctx->importer, n, buffer,
+			razor_importer_add_property(ctx->importer, n,
+						    yum_to_razor_flags (flags),
+						    buffer,
 						    RAZOR_PROPERTY_CONFLICTS);
 			break;
 		}
@@ -279,101 +309,4 @@ razor_set_create_from_yum(void)
 	gzclose(filelists);
 
 	return razor_importer_finish(ctx.importer);
-}
-
-union rpm_entry {
-	void *p;
-	char *string;
-	char **list;
-	unsigned int *flags;
-};
-
-static void
-add_properties(struct razor_importer *importer,
-	       enum razor_property_type property_type,
-	       Header h, int_32 name_tag, int_32 version_tag, int_32 flags_tag)
-{
-	union rpm_entry names, versions, flags;
-	int_32 i, type, count;
-
-	headerGetEntry(h, name_tag, &type, &names.p, &count);
-	headerGetEntry(h, version_tag, &type, &versions.p, &count);
-	headerGetEntry(h, flags_tag, &type, &flags.p, &count);
-
-	for (i = 0; i < count; i++)
-		razor_importer_add_property(importer,
-					    names.list[i],
-					    versions.list[i],
-					    property_type);
-}
-
-struct razor_set *
-razor_set_create_from_rpmdb(void)
-{
-	struct razor_importer *importer;
-	rpmdbMatchIterator iter;
-	Header h;
-	int_32 type, count, i;
-	union rpm_entry name, version, release;
-	union rpm_entry basenames, dirnames, dirindexes;
-	char filename[PATH_MAX];
-	rpmdb db;
-
-	rpmReadConfigFiles(NULL, NULL);
-
-	if (rpmdbOpen("", &db, O_RDONLY, 0644) != 0) {
-		fprintf(stderr, "cannot open rpm database\n");
-		exit(1);
-	}
-
-	importer = razor_importer_new();
-
-	iter = rpmdbInitIterator(db, 0, NULL, 0);
-	while (h = rpmdbNextIterator(iter), h != NULL) {
-		headerGetEntry(h, RPMTAG_NAME, &type, &name.p, &count);
-		headerGetEntry(h, RPMTAG_VERSION, &type, &version.p, &count);
-		headerGetEntry(h, RPMTAG_RELEASE, &type, &release.p, &count);
-		snprintf(filename, sizeof filename, "%s-%s",
-			 version.string, release.string);
-		razor_importer_begin_package(importer, name.string, filename);
-
-		add_properties(importer, RAZOR_PROPERTY_REQUIRES, h,
-			       RPMTAG_REQUIRENAME,
-			       RPMTAG_REQUIREVERSION,
-			       RPMTAG_REQUIREFLAGS);
-
-		add_properties(importer, RAZOR_PROPERTY_PROVIDES, h,
-			       RPMTAG_PROVIDENAME,
-			       RPMTAG_PROVIDEVERSION,
-			       RPMTAG_PROVIDEFLAGS);
-
-		add_properties(importer, RAZOR_PROPERTY_OBSOLETES, h,
-			       RPMTAG_OBSOLETENAME,
-			       RPMTAG_OBSOLETEVERSION,
-			       RPMTAG_OBSOLETEFLAGS);
-
-		add_properties(importer, RAZOR_PROPERTY_CONFLICTS, h,
-			       RPMTAG_CONFLICTNAME,
-			       RPMTAG_CONFLICTVERSION,
-			       RPMTAG_CONFLICTFLAGS);
-
-		headerGetEntry(h, RPMTAG_BASENAMES, &type,
-			       &basenames.p, &count);
-		headerGetEntry(h, RPMTAG_DIRNAMES, &type,
-			       &dirnames.p, &count);
-		headerGetEntry(h, RPMTAG_DIRINDEXES, &type,
-			       &dirindexes.p, &count);
-		for (i = 0; i < count; i++) {
-			snprintf(filename, sizeof filename, "%s%s",
-				 dirnames.list[dirindexes.flags[i]],
-				 basenames.list[i]);
-			razor_importer_add_file(importer, filename);
-		}
-
-		razor_importer_finish_package(importer);
-	}
-
-	rpmdbClose(db);
-
-	return razor_importer_finish(importer);
 }

@@ -14,6 +14,10 @@ static const char *repo_filename = "system.repo";
 static const char *rawhide_repo_filename = "rawhide.repo";
 static const char *updated_repo_filename = "system-updated.repo";
 
+static const char *relations[] = {
+	"<", "<=", "=", ">=", ">"
+};
+
 static int
 command_list(int argc, const char *argv[])
 {
@@ -46,6 +50,7 @@ list_properties(const char *package_name,
 	struct razor_property_iterator *pi;
 	const char *name, *version;
 	enum razor_property_type type;
+	enum razor_version_relation relation;
 
 	set = razor_set_open(repo_filename);
 	if (package_name)
@@ -55,13 +60,15 @@ list_properties(const char *package_name,
 
 	pi = razor_property_iterator_create(set, package);
 	while (razor_property_iterator_next(pi, &property,
-					    &name, &version, &type)) {
+					    &name, &relation, &version,
+					    &type)) {
 		if (type != required_type)
 			continue;
 		if (version[0] == '\0')
 			printf("%s\n", name);
 		else
-			printf("%s-%s\n", name, version);
+			printf("%s %s %s\n", name, relations[relation],
+			       version);
 	}
 	razor_property_iterator_destroy(pi);
 
@@ -168,6 +175,7 @@ list_property_packages(const char *ref_name,
 	struct razor_property_iterator *pi;
 	const char *name, *version;
 	enum razor_property_type type;
+	enum razor_version_relation relation;
 
 	if (ref_name == NULL)
 		return 0;
@@ -178,10 +186,12 @@ list_property_packages(const char *ref_name,
 
 	pi = razor_property_iterator_create(set, NULL);
 	while (razor_property_iterator_next(pi, &property,
-					    &name, &version, &type)) {
+					    &name, &relation, &version,
+					    &type)) {
 		if (strcmp(ref_name, name) != 0)
 			continue;
-		if (ref_version && strcmp(ref_version, version) != 0)
+		if (ref_version && relation == RAZOR_VERSION_EQUAL &&
+		    strcmp(ref_version, version) != 0)
 			continue;
 		if (ref_type != type)
 			continue;

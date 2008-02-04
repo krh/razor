@@ -58,6 +58,7 @@ struct razor_package {
 
 struct razor_property {
 	uint32_t name;
+	uint32_t relation;
 	uint32_t version;
 	uint32_t packages;
 };
@@ -440,7 +441,9 @@ razor_importer_finish_package(struct razor_importer *importer)
 
 void
 razor_importer_add_property(struct razor_importer *importer,
-			    const char *name, const char *version,
+			    const char *name,
+			    enum razor_version_relation relation,
+			    const char *version,
 			    enum razor_property_type type)
 {
 	struct razor_property *p;
@@ -448,6 +451,7 @@ razor_importer_add_property(struct razor_importer *importer,
 
 	p = array_add(&importer->set->properties, sizeof *p);
 	p->name = hashtable_tokenize(&importer->table, name) | (type << 30);
+	p->relation = relation;
 	p->version = hashtable_tokenize(&importer->table, version);
 	p->packages = importer->package -
 		(struct razor_package *) importer->set->packages.data;
@@ -642,10 +646,13 @@ compare_properties(const void *p1, const void *p2, void *data)
 	struct razor_set *set = data;
 	char *pool = set->string_pool.data;
 
-	if (prop1->name == prop2->name)
-		return versioncmp(&pool[prop1->version],
-				  &pool[prop2->version]);
-	else if ((prop1->name & RAZOR_ENTRY_MASK) == (prop2->name & RAZOR_ENTRY_MASK))
+	if (prop1->name == prop2->name) {
+		if (prop1->relation == prop2->relation)
+			return versioncmp(&pool[prop1->version],
+					  &pool[prop2->version]);
+		else
+			return prop1->relation - prop2->relation;
+	} else if ((prop1->name & RAZOR_ENTRY_MASK) == (prop2->name & RAZOR_ENTRY_MASK))
 		return (prop1->name >> 30) - (prop2->name >> 30);
 	else
 		return strcmp(&pool[prop1->name & RAZOR_ENTRY_MASK],
@@ -671,9 +678,11 @@ uniqueify_properties(struct razor_set *set)
 	rmap = malloc(count * sizeof *map);
 	pkgs = zalloc(count * sizeof *pkgs);
 	for (rp = set->properties.data, up = rp, i = 0; rp < rp_end; rp++, i++) {
-		if (rp->name != up->name || rp->version != up->version) {
+		if (rp->name != up->name || rp->relation != up->relation ||
+		    rp->version != up->version) {
 			up++;
 			up->name = rp->name;
+			up->relation = rp->relation;
 			up->version = rp->version;
 		}
 
@@ -1061,7 +1070,9 @@ razor_property_iterator_create(struct razor_set *set,
 int
 razor_property_iterator_next(struct razor_property_iterator *pi,
 			     struct razor_property **property,
-			     const char **name, const char **version,
+			     const char **name,
+			     enum razor_version_relation *relation,
+			     const char **version,
 			     enum razor_property_type *type)
 {
 	char *pool;
@@ -1082,6 +1093,7 @@ razor_property_iterator_next(struct razor_property_iterator *pi,
 		pool = pi->set->string_pool.data;
 		*property = p;
 		*name = &pool[p->name & RAZOR_ENTRY_MASK];
+		*relation = p->relation;
 		*version = &pool[p->version];
 		*type = p->name >> 30;
 	} else {
@@ -1443,12 +1455,14 @@ merge_packages(struct razor_merger *merger, struct array *packages)
 
 static uint32_t
 add_property(struct razor_merger *merger,
-	     const char *name, const char *version, int type)
+	     const char *name, enum razor_version_relation relation,
+	     const char *version, int type)
 {
 	struct razor_property *p;
 
 	p = array_add(&merger->set->properties, sizeof *p);
 	p->name = hashtable_tokenize(&merger->table, name) | (type << 30);
+	p->relation = relation;
 	p->version = hashtable_tokenize(&merger->table, version);
 
 	return p - (struct razor_property *) merger->set->properties.data;
@@ -1494,21 +1508,26 @@ merge_properties(struct razor_merger *merger)
 		else
 			cmp = 1;
 		if (cmp == 0)
+			cmp = p1->relation - p2->relation;
+		if (cmp == 0)
 			cmp = versioncmp(&pool1[p1->version],
 					 &pool2[p2->version]);
 		if (cmp < 0) {
 			map1[i++] = add_property(merger,
 						 &pool1[p1->name & RAZOR_ENTRY_MASK],
+						 p1->relation,
 						 &pool1[p1->version],
 						 (p1->name >> 30));
 		} else if (cmp > 0) {
 			map2[j++] = add_property(merger,
 						 &pool2[p2->name & RAZOR_ENTRY_MASK],
+						 p2->relation,
 						 &pool2[p2->version],
 						 (p2->name >> 30));
 		} else  {
 			map1[i++] = map2[j++] = add_property(merger,
 							     &pool1[p1->name & RAZOR_ENTRY_MASK],
+							     p1->relation,
 							     &pool1[p1->version],
 							     (p1->name >> 30));
 		}
