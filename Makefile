@@ -1,4 +1,4 @@
-CFLAGS = -Wall -g -O2
+CFLAGS = -Wall -g
 LDLIBS = -lexpat -lz -g -lrpm -lcurl
 
 all : razor test-driver
