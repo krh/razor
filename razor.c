@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
@@ -22,14 +23,14 @@ struct array {
 };
 
 struct razor_set_section {
-	unsigned int type;
-	unsigned int offset;
-	unsigned int size;
+	uint32_t type;
+	uint32_t offset;
+	uint32_t size;
 };
 
 struct razor_set_header {
-	unsigned int magic;
-	unsigned int version;
+	uint32_t magic;
+	uint32_t version;
 	struct razor_set_section sections[0];
 };
 
@@ -49,22 +50,22 @@ struct razor_set_header {
 #define RAZOR_FILE_POOL		6
 
 struct razor_package {
-	unsigned long name;
-	unsigned long version;
-	unsigned long properties;
-	unsigned long files;
+	uint32_t name;
+	uint32_t version;
+	uint32_t properties;
+	uint32_t files;
 };
 
 struct razor_property {
-	unsigned long name;
-	unsigned long version;
-	unsigned long packages;
+	uint32_t name;
+	uint32_t version;
+	uint32_t packages;
 };
 
 struct razor_entry {
-	unsigned long name;
-	unsigned long start;
-	unsigned long packages;
+	uint32_t name;
+	uint32_t start;
+	uint32_t packages;
 };
 
 struct razor_set {
@@ -79,12 +80,12 @@ struct razor_set {
 };
 
 struct import_entry {
-	unsigned long package;
+	uint32_t package;
 	char *name;
 };
 
 struct import_directory {
-	unsigned long name, count;
+	uint32_t name, count;
 	struct array files;
 	struct array packages;
 	struct import_directory *last;
@@ -232,7 +233,7 @@ razor_set_write(struct razor_set *set, const char *filename)
 	char data[4096];
 	struct razor_set_header *header = (struct razor_set_header *) data;
 	struct array *a;
-	unsigned long offset;
+	uint32_t offset;
 	int i, fd;
 
 	memset(data, 0, sizeof data);
@@ -283,16 +284,16 @@ hash_string(const char *key)
 	return hash;
 }
 
-static unsigned long
+static uint32_t
 hashtable_lookup(struct hashtable *table, const char *key)
 {
 	unsigned int mask, start, i;
-	unsigned long *b;
+	uint32_t *b;
 	char *pool;
 
 	pool = table->pool->data;
 	mask = table->buckets.alloc - 1;
-	start = hash_string(key) * sizeof(unsigned long);
+	start = hash_string(key) * sizeof(uint32_t);
 
 	for (i = 0; i < table->buckets.alloc; i += sizeof *b) {
 		b = table->buckets.data + ((start + i) & mask);
@@ -307,7 +308,7 @@ hashtable_lookup(struct hashtable *table, const char *key)
 	return 0;
 }
 
-static unsigned long
+static uint32_t
 add_to_string_pool(struct hashtable *table, const char *key)
 {
 	int len;
@@ -320,33 +321,33 @@ add_to_string_pool(struct hashtable *table, const char *key)
 	return p - (char *) table->pool->data;
 }
 
-static unsigned long
+static uint32_t
 add_to_property_pool(struct array *pool, struct array *properties)
 {
-	unsigned long *p;
+	uint32_t *p;
 
 	if (properties->size == 0)
 		return ~0;
 	else if (properties->size == sizeof *p)
-		return *(unsigned long *) properties->data | RAZOR_IMMEDIATE;
+		return *(uint32_t *) properties->data | RAZOR_IMMEDIATE;
 
 	p = array_add(pool, properties->size);
 	memcpy(p, properties->data, properties->size);
 	p[properties->size / sizeof *p - 1] |= RAZOR_IMMEDIATE;
 
-	return p - (unsigned long *) pool->data;
+	return p - (uint32_t *) pool->data;
 }
 
 static void
-do_insert(struct hashtable *table, unsigned long value)
+do_insert(struct hashtable *table, uint32_t value)
 {
 	unsigned int mask, start, i;
-	unsigned long *b;
+	uint32_t *b;
 	const char *key;
 
 	key = (char *) table->pool->data + value;
 	mask = table->buckets.alloc - 1;
-	start = hash_string(key) * sizeof(unsigned long);
+	start = hash_string(key) * sizeof(uint32_t);
 
 	for (i = 0; i < table->buckets.alloc; i += sizeof *b) {
 		b = table->buckets.data + ((start + i) & mask);
@@ -357,10 +358,10 @@ do_insert(struct hashtable *table, unsigned long value)
 	}
 }
 
-static unsigned long
+static uint32_t
 hashtable_insert(struct hashtable *table, const char *key)
 {
-	unsigned long value, *buckets, *b, *end;
+	uint32_t value, *buckets, *b, *end;
 	int alloc;
 
 	alloc = table->buckets.alloc;
@@ -396,10 +397,10 @@ hashtable_release(struct hashtable *table)
 	array_release(&table->buckets);
 }
 
-static unsigned long
+static uint32_t
 hashtable_tokenize(struct hashtable *table, const char *string)
 {
-	unsigned long token;
+	uint32_t token;
 
 	if (string == NULL)
 		string = "";
@@ -443,7 +444,7 @@ razor_importer_add_property(struct razor_importer *importer,
 			    enum razor_property_type type)
 {
 	struct razor_property *p;
-	unsigned long *r;
+	uint32_t *r;
 
 	p = array_add(&importer->set->properties, sizeof *p);
 	p->name = hashtable_tokenize(&importer->table, name) | (type << 30);
@@ -508,11 +509,11 @@ qsort_swap(void *p1, void *p2, size_t size)
 }
 
 static void
-__qsort_with_data(void *base, size_t nelem, unsigned long *map,
+__qsort_with_data(void *base, size_t nelem, uint32_t *map,
 		  struct qsort_context *ctx)
 {
 	void *p, *start, *end, *pivot;
-	unsigned long *mp, *mstart, *mend, tmp;
+	uint32_t *mp, *mstart, *mend, tmp;
 	int left, right, result;
 	size_t size = ctx->size;
 
@@ -560,12 +561,12 @@ __qsort_with_data(void *base, size_t nelem, unsigned long *map,
 		__qsort_with_data(end, right, mend, ctx);
 }
 
-unsigned long *
+uint32_t *
 qsort_with_data(void *base, size_t nelem, size_t size,
 		compare_with_data_func_t compare, void *data)
 {
 	struct qsort_context ctx;
-	unsigned long *map;
+	uint32_t *map;
 	int i;
 
 	if (nelem == 0)
@@ -575,7 +576,7 @@ qsort_with_data(void *base, size_t nelem, size_t size,
 	ctx.compare = compare;
 	ctx.data = data;
 
-	map = malloc(nelem * sizeof (unsigned long));
+	map = malloc(nelem * sizeof (uint32_t));
 	for (i = 0; i < nelem; i++)
 		map[i] = i;
 
@@ -651,12 +652,12 @@ compare_properties(const void *p1, const void *p2, void *data)
 			      &pool[prop2->name & RAZOR_ENTRY_MASK]);
 }
 
-static unsigned long *
+static uint32_t *
 uniqueify_properties(struct razor_set *set)
 {
 	struct razor_property *rp, *up, *rp_end;
 	struct array *pkgs, *p;
-	unsigned long *map, *rmap, *r;
+	uint32_t *map, *rmap, *r;
 	int i, count, unique;
 
 	count = set->properties.size / sizeof(struct razor_property);
@@ -703,9 +704,9 @@ uniqueify_properties(struct razor_set *set)
 }
 
 static void
-remap_links(struct array *links, unsigned long *map)
+remap_links(struct array *links, uint32_t *map)
 {
-	unsigned long *p, *end;
+	uint32_t *p, *end;
 
 	end = links->data + links->size;
 	for (p = links->data; p < end; p++)
@@ -742,7 +743,7 @@ serialize_files(struct razor_set *set,
 {
 	struct import_directory *p, *end;
 	struct razor_entry *e = NULL;
-	unsigned long s, *r;
+	uint32_t s, *r;
 
 	p = d->files.data;
 	end = d->files.data + d->files.size;
@@ -777,7 +778,7 @@ serialize_files(struct razor_set *set,
 }
 
 static void
-remap_property_package_links(struct array *properties, unsigned long *rmap)
+remap_property_package_links(struct array *properties, uint32_t *rmap)
 {
 	struct razor_property *p, *end;
 
@@ -794,7 +795,7 @@ build_file_tree(struct razor_importer *importer)
 	int count, i, length;
 	struct import_entry *filenames;
 	char *f, *end;
-	unsigned long name, *r;
+	uint32_t name, *r;
 	char dirname[256];
 	struct import_directory *d, root;
 	struct razor_entry *e;
@@ -859,12 +860,12 @@ build_file_tree(struct razor_importer *importer)
 }
 
 static void
-build_package_file_lists(struct razor_set *set, unsigned long *rmap)
+build_package_file_lists(struct razor_set *set, uint32_t *rmap)
 {
 	struct razor_package *p, *packages;
 	struct array *pkgs;
 	struct razor_entry *e, *end;
-	unsigned long *r, *q;
+	uint32_t *r, *q;
 	int i, count;
 
 	count = set->packages.size / sizeof *p;
@@ -879,7 +880,7 @@ build_package_file_lists(struct razor_set *set, unsigned long *rmap)
 				RAZOR_IMMEDIATE;
 			r = &e->packages;
 		} else {
-			r = (unsigned long *) set->package_pool.data + e->packages;
+			r = (uint32_t *) set->package_pool.data + e->packages;
 		}
 
 		while (1) {
@@ -903,7 +904,7 @@ struct razor_set *
 razor_importer_finish(struct razor_importer *importer)
 {
 	struct razor_set *set;
-	unsigned long *map, *rmap;
+	uint32_t *map, *rmap;
 	int i, count;
 
 	map = uniqueify_properties(importer->set);
@@ -938,13 +939,13 @@ razor_importer_finish(struct razor_importer *importer)
 struct razor_package_iterator {
 	struct razor_set *set;
 	struct razor_package *package, *end;
-	unsigned long *index;
+	uint32_t *index;
 	int last;
 };
 
 struct razor_package_iterator *
 razor_package_iterator_create_with_index(struct razor_set *set,
-					 unsigned long *index)
+					 uint32_t *index)
 {
 	struct razor_package_iterator *pi;
 
@@ -967,12 +968,12 @@ struct razor_package_iterator *
 razor_package_iterator_create_for_property(struct razor_set *set,
 					   struct razor_property *property)
 {
-	unsigned long *index;
+	uint32_t *index;
 
 	if (property->packages & RAZOR_IMMEDIATE)
 		index = &property->packages;
 	else
-		index = (unsigned long *)
+		index = (uint32_t *)
 			set->package_pool.data + property->packages;
 
 	return razor_package_iterator_create_with_index(set, index);
@@ -1035,7 +1036,7 @@ razor_set_get_package(struct razor_set *set, const char *package)
 struct razor_property_iterator {
 	struct razor_set *set;
 	struct razor_property *property, *end;
-	unsigned long *index;
+	uint32_t *index;
 	int last;
 };
 
@@ -1051,7 +1052,7 @@ razor_property_iterator_create(struct razor_set *set,
 	pi->property = set->properties.data;
 
 	if (package)
-		pi->index = (unsigned long *)
+		pi->index = (uint32_t *)
 			set->property_pool.data + package->properties;
 
 	return pi;
@@ -1166,7 +1167,7 @@ razor_package_iterator_create_for_file(struct razor_set *set,
 				       const char *filename)
 {
 	struct razor_entry *entry;
-	unsigned long *index;
+	uint32_t *index;
 
 	entry = find_entry(set, set->files.data, filename);
 	if (entry == NULL)
@@ -1175,19 +1176,19 @@ razor_package_iterator_create_for_file(struct razor_set *set,
 	if (entry->packages & RAZOR_IMMEDIATE)
 		index = &entry->packages;
 	else
-		index = (unsigned long *)
+		index = (uint32_t *)
 			set->package_pool.data + entry->packages;
 
 	return razor_package_iterator_create_with_index(set, index);
 }
 
-static unsigned long *
-list_package_files(struct razor_set *set, unsigned long *r,
-		   struct razor_entry *dir, unsigned long end,
+static uint32_t *
+list_package_files(struct razor_set *set, uint32_t *r,
+		   struct razor_entry *dir, uint32_t end,
 		   char *prefix)
 {
 	struct razor_entry *e, *f, *entries;
-	unsigned long next, file;
+	uint32_t next, file;
 	char *pool;
 	int len;
 	
@@ -1242,12 +1243,12 @@ void
 razor_set_list_package_files(struct razor_set *set, const char *name)
 {
 	struct razor_package *package;
-	unsigned long *r, end;
+	uint32_t *r, end;
 	char buffer[512];
 
 	package = razor_set_get_package(set, name);
 
-	r = (unsigned long *) set->file_pool.data + package->files;
+	r = (uint32_t *) set->file_pool.data + package->files;
 	end = set->files.size / sizeof (struct razor_entry);
 	buffer[0] = '\0';
 	list_package_files(set, r, set->files.data, end, buffer);
@@ -1257,7 +1258,7 @@ static void
 razor_set_validate(struct razor_set *set, struct array *unsatisfied)
 {
 	struct razor_property *r, *p, *end;
-	unsigned long *u;
+	uint32_t *u;
 	char *pool;
 
 	end = set->properties.data + set->properties.size;
@@ -1305,7 +1306,7 @@ razor_set_list_unsatisfied(struct razor_set *set)
 {
 	struct array unsatisfied;
 	struct razor_property *properties, *r;
-	unsigned long *u, *end;
+	uint32_t *u, *end;
 	char *pool;
 
 	array_init(&unsatisfied);
@@ -1334,7 +1335,7 @@ razor_set_list_unsatisfied(struct razor_set *set)
 
 struct source {
 	struct razor_set *set;
-	unsigned long *property_map;
+	uint32_t *property_map;
 };
 
 struct razor_merger {
@@ -1371,10 +1372,10 @@ razor_merger_create(struct razor_set *set1, struct razor_set *set2)
 static void
 add_package(struct razor_merger *merger,
 	    struct razor_package *package, struct source *source,
-	    unsigned long flags)
+	    uint32_t flags)
 {
 	char *pool;
-	unsigned long *r;
+	uint32_t *r;
 	struct razor_package *p;
 
 	pool = source->set->string_pool.data;
@@ -1388,7 +1389,7 @@ add_package(struct razor_merger *merger,
 	if (package->properties & RAZOR_IMMEDIATE)
 		r = &package->properties;
 	else
-		r = (unsigned long *)
+		r = (uint32_t *)
 			source->set->property_pool.data + package->properties;
 	while (1) {
 		source->property_map[*r & RAZOR_ENTRY_MASK] = 1;
@@ -1406,7 +1407,7 @@ merge_packages(struct razor_merger *merger, struct array *packages)
 	struct razor_package *upstream_packages, *p, *s, *send;
 	struct source *source1, *source2;
 	char *spool, *upool;
-	unsigned long *u, *uend;
+	uint32_t *u, *uend;
 	int cmp;
 
 	source1 = &merger->source1;
@@ -1440,7 +1441,7 @@ merge_packages(struct razor_merger *merger, struct array *packages)
 	}
 }
 
-static unsigned long
+static uint32_t
 add_property(struct razor_merger *merger,
 	     const char *name, const char *version, int type)
 {
@@ -1458,7 +1459,7 @@ merge_properties(struct razor_merger *merger)
 {
 	struct razor_property *p1, *p2;
 	struct razor_set *set1, *set2;
-	unsigned long *map1, *map2;
+	uint32_t *map1, *map2;
 	int i, j, cmp, count1, count2;
 	char *pool1, *pool2;
 
@@ -1514,14 +1515,14 @@ merge_properties(struct razor_merger *merger)
 	}
 }
 
-static unsigned long
-emit_properties(struct array *source_pool, unsigned long index,
-		unsigned long *map, struct array *pool)
+static uint32_t
+emit_properties(struct array *source_pool, uint32_t index,
+		uint32_t *map, struct array *pool)
 {
-	unsigned long r, *p, *q;
+	uint32_t r, *p, *q;
 
 	r = pool->size / sizeof *q;
-	p = (unsigned long *) source_pool->data + index;
+	p = (uint32_t *) source_pool->data + index;
 	while (1) {
 		q = array_add(pool, sizeof *q);
 		*q = map[*p & RAZOR_ENTRY_MASK] | (*p & ~RAZOR_ENTRY_MASK);
@@ -1542,7 +1543,7 @@ rebuild_package_lists(struct razor_set *set)
 	struct array *pkgs, *a;
 	struct razor_package *pkg, *pkg_end;
 	struct razor_property *prop, *prop_end;
-	unsigned long *r, *q, *pool;
+	uint32_t *r, *q, *pool;
 	int count;
 
 	count = set->properties.size / sizeof (struct razor_property);
@@ -1647,7 +1648,7 @@ razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
 {
 	struct razor_property *requires, *r;
 	struct razor_property *p, *pend;
-	unsigned long *u, *end, *pkg, *package_pool;
+	uint32_t *u, *end, *pkg, *package_pool;
 	char *pool, *upool;
 
 	end = unsatisfied->data + unsatisfied->size;
@@ -1697,7 +1698,7 @@ find_packages(struct razor_set *set,
 	struct razor_package_iterator *pi;
 	struct razor_package *p, *packages;
 	const char *name, *version;
-	unsigned long *r;
+	uint32_t *r;
 	int i;
 
 	packages = (struct razor_package *) set->packages.data;
@@ -1721,7 +1722,7 @@ find_all_packages(struct razor_set *set,
 		  struct razor_set *upstream, struct array *list)
 {
 	struct razor_package *p, *u, *pend, *uend;
-	unsigned long *r;
+	uint32_t *r;
 	char *pool, *upool;
 
 	pend = set->packages.data + set->packages.size;
@@ -1748,7 +1749,7 @@ razor_set_update(struct razor_set *set, struct razor_set *upstream,
 	struct razor_package *upackages;
 	struct array list, unsatisfied;
 	char *pool;
-	unsigned long *u, *end;
+	uint32_t *u, *end;
 	int total = 0;
 
 	array_init(&list);
