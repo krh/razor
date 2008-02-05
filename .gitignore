@@ -3,6 +3,8 @@
 *~
 *.repo
 razor
+test-driver
 pkgs
 set
 primary.xml.gz
+filelists.xml.gz
