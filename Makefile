@@ -3,7 +3,7 @@ LDLIBS = -lexpat -lz -g -lrpm -lcurl
 
 all : razor test-driver
 
-razor : razor.o import.o main.o rpm.o util.o
+razor : razor.o yum.o main.o rpm.o util.o
 
 test-driver : razor.o util.o test-driver.o
 
