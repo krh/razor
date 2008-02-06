@@ -336,7 +336,7 @@ add_to_property_pool(struct array *pool, struct array *properties)
 
 	p = array_add(pool, properties->size);
 	memcpy(p, properties->data, properties->size);
-	p[properties->size / sizeof *p - 1] |= RAZOR_IMMEDIATE;
+	p[properties->size / sizeof *p - 1] |= RAZOR_ENTRY_LAST;
 
 	return p - (uint32_t *) pool->data;
 }
@@ -432,11 +432,9 @@ razor_importer_begin_package(struct razor_importer *importer,
 void
 razor_importer_finish_package(struct razor_importer *importer)
 {
-	struct razor_package *p;
-
-	p = importer->package;
-	p->properties = add_to_property_pool(&importer->set->property_pool,
-					     &importer->properties);
+	importer->package->properties =
+		add_to_property_pool(&importer->set->property_pool,
+				     &importer->properties);
 
 	array_release(&importer->properties);
 }
@@ -699,13 +697,8 @@ uniqueify_properties(struct razor_set *set)
 	set->properties.size = (void *) up - set->properties.data;
 	rp_end = up;
 	for (rp = set->properties.data, p = pkgs; rp < rp_end; rp++, p++) {
-		if (p->size / sizeof *r == 1) {
-			r = p->data;
-			rp->packages = *r | RAZOR_IMMEDIATE;
-		} else {
-			rp->packages =
-				add_to_property_pool(&set->package_pool, p);
-		}
+		rp->packages =
+			add_to_property_pool(&set->package_pool, p);
 		array_release(p);
 	}
 
@@ -754,7 +747,7 @@ serialize_files(struct razor_set *set,
 {
 	struct import_directory *p, *end;
 	struct razor_entry *e = NULL;
-	uint32_t s, *r;
+	uint32_t s;
 
 	p = d->files.data;
 	end = d->files.data + d->files.size;
@@ -765,15 +758,8 @@ serialize_files(struct razor_set *set,
 		e->start = p->count > 0 ? s : 0;
 		s += p->count;
 
-		if (p->packages.size == 0) {
-			e->packages = ~0;
-		} else if (p->packages.size / sizeof *r == 1) {
-			r = p->packages.data;
-			e->packages = *r | RAZOR_IMMEDIATE;
-		} else {
-			e->packages = add_to_property_pool(&set->package_pool,
-							   &p->packages);
-		}
+		e->packages = add_to_property_pool(&set->package_pool,
+						   &p->packages);
 		array_release(&p->packages);
 		p++;
 	}		
@@ -1584,13 +1570,8 @@ rebuild_package_lists(struct razor_set *set)
 	prop_end = set->properties.data + set->properties.size;
 	a = pkgs;
 	for (prop = set->properties.data; prop < prop_end; prop++, a++) {
-		if (a->size / sizeof *r == 1) {
-			r = a->data;
-			prop->packages = *r | RAZOR_IMMEDIATE;
-		} else {
-			prop->packages =
-				add_to_property_pool(&set->property_pool, a);
-		}
+		prop->packages =
+			add_to_property_pool(&set->property_pool, a);
 		array_release(a);
 	}
 	free(pkgs);
