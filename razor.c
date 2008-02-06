@@ -261,11 +261,13 @@ razor_set_write(struct razor_set *set, const char *filename)
 		return -1;
 
 	razor_write(fd, data, sizeof data);
+	memset(data, 0, sizeof data);
 	for (i = 0; i < ARRAY_SIZE(razor_sections); i++) {
 		if (razor_sections[i].type != i)
 			continue;
 		a = (void *) set + razor_sections[i].offset;
-		razor_write(fd, a->data, ALIGN(a->size, 4096));
+		razor_write(fd, a->data, a->size);
+		razor_write(fd, data, ALIGN(a->size, 4096) - a->size);
 	}
 
 	close(fd);
