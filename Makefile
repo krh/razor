@@ -5,6 +5,8 @@ all : razor test-driver
 
 razor : razor.o yum.o main.o rpm.o util.o
 
+*.o : razor.h razor-internal.h
+
 test-driver : razor.o util.o test-driver.o
 
 test : test-driver
