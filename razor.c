@@ -34,7 +34,6 @@ struct razor_set_header {
 #define RAZOR_VERSION 1
 
 #define RAZOR_ENTRY_LAST	0x80000000ul
-#define RAZOR_IMMEDIATE		0x80000000ul
 #define RAZOR_ENTRY_MASK	0x00fffffful
 
 #define RAZOR_STRING_POOL	0
@@ -226,23 +225,6 @@ razor_set_write(struct razor_set *set, const char *filename)
 	return 0;
 }
 
-static uint32_t
-add_to_property_pool(struct array *pool, struct array *properties)
-{
-	uint32_t *p;
-
-	if (properties->size == 0)
-		return ~0;
-	else if (properties->size == sizeof *p)
-		return *(uint32_t *) properties->data | RAZOR_IMMEDIATE;
-
-	p = array_add(pool, properties->size);
-	memcpy(p, properties->data, properties->size);
-	p[properties->size / sizeof *p - 1] |= RAZOR_ENTRY_LAST;
-
-	return p - (uint32_t *) pool->data;
-}
-
 void
 razor_importer_begin_package(struct razor_importer *importer,
 			     const char *name, const char *version)
@@ -260,9 +242,9 @@ razor_importer_begin_package(struct razor_importer *importer,
 void
 razor_importer_finish_package(struct razor_importer *importer)
 {
-	importer->package->properties =
-		add_to_property_pool(&importer->set->property_pool,
-				     &importer->properties);
+	list_set (&importer->package->properties,
+		  &importer->set->property_pool,
+		  &importer->properties);
 
 	array_release(&importer->properties);
 }
@@ -525,24 +507,13 @@ uniqueify_properties(struct razor_set *set)
 	set->properties.size = (void *) up - set->properties.data;
 	rp_end = up;
 	for (rp = set->properties.data, p = pkgs; rp < rp_end; rp++, p++) {
-		rp->packages =
-			add_to_property_pool(&set->package_pool, p);
+		list_set(&rp->packages, &set->package_pool, p);
 		array_release(p);
 	}
 
 	free(pkgs);
 
 	return rmap;
-}
-
-static void
-remap_links(struct array *links, uint32_t *map)
-{
-	uint32_t *p, *end;
-
-	end = links->data + links->size;
-	for (p = links->data; p < end; p++)
-		*p = map[*p & RAZOR_ENTRY_MASK] | (*p & ~RAZOR_ENTRY_MASK);
 }
 
 static int
@@ -586,8 +557,7 @@ serialize_files(struct razor_set *set,
 		e->start = p->count > 0 ? s : 0;
 		s += p->count;
 
-		e->packages = add_to_property_pool(&set->package_pool,
-						   &p->packages);
+		list_set(&e->packages, &set->package_pool, &p->packages);
 		array_release(&p->packages);
 		p++;
 	}		
@@ -609,9 +579,7 @@ remap_property_package_links(struct array *properties, uint32_t *rmap)
 
 	end = properties->data + properties->size;
 	for (p = properties->data; p < end; p++)
-		if (p->packages & RAZOR_IMMEDIATE)
-			p->packages = rmap[p->packages & RAZOR_ENTRY_MASK] |
-				RAZOR_IMMEDIATE;
+		list_remap_if_immediate(&p->packages, rmap);
 }
 
 static void
@@ -677,7 +645,7 @@ build_file_tree(struct razor_importer *importer)
 	e = array_add(&importer->set->files, sizeof *e);
 	e->name = root.name | RAZOR_ENTRY_LAST;
 	e->start = 1;
-	e->packages = ~0;
+	list_init(&e->packages);
 
 	serialize_files(importer->set, &root, &importer->set->files);
 
@@ -698,28 +666,18 @@ build_package_file_lists(struct razor_set *set, uint32_t *rmap)
 
 	end = set->files.data + set->files.size;
 	for (e = set->files.data; e < end; e++) {
-		if (e->packages == ~0) {
-			continue;
-		} else if (e->packages & RAZOR_IMMEDIATE) {
-			e->packages = rmap[e->packages & RAZOR_ENTRY_MASK] |
-				RAZOR_IMMEDIATE;
-			r = &e->packages;
-		} else {
-			r = (uint32_t *) set->package_pool.data + e->packages;
-		}
-
-		while (1) {
-			q = array_add(&pkgs[*r & RAZOR_ENTRY_MASK], sizeof *q);
+		list_remap_if_immediate(&e->packages, rmap);
+		r = list_first(&e->packages, &set->package_pool);
+		while (r) {
+			q = array_add(&pkgs[LIST_VALUE(r)], sizeof *q);
 			*q = e - (struct razor_entry *) set->files.data;
-			if (*r++ & RAZOR_IMMEDIATE)
-				break;
+			r = list_next(r);
 		}
 	}
 
 	packages = set->packages.data;
 	for (i = 0; i < count; i++) {
-		packages[i].files =
-			add_to_property_pool(&set->file_pool, &pkgs[i]);
+		list_set(&packages[i].files, &set->file_pool, &pkgs[i]);
 		array_release(&pkgs[i]);
 	}
 	free(pkgs);
@@ -733,7 +691,7 @@ razor_importer_finish(struct razor_importer *importer)
 	int i, count;
 
 	map = uniqueify_properties(importer->set);
-	remap_links(&importer->set->property_pool, map);
+	list_remap_pool(&importer->set->property_pool, map);
 	free(map);
 
 	count = importer->set->packages.size / sizeof(struct razor_package);
@@ -749,7 +707,7 @@ razor_importer_finish(struct razor_importer *importer)
 	free(map);
 
 	build_file_tree(importer);
-	remap_links(&importer->set->package_pool, rmap);
+	list_remap_pool(&importer->set->package_pool, rmap);
 	build_package_file_lists(importer->set, rmap);
 	remap_property_package_links(&importer->set->properties, rmap);
 	free(rmap);
@@ -765,7 +723,6 @@ struct razor_package_iterator {
 	struct razor_set *set;
 	struct razor_package *package, *end;
 	uint32_t *index;
-	int last;
 };
 
 struct razor_package_iterator *
@@ -776,8 +733,6 @@ razor_package_iterator_create_with_index(struct razor_set *set,
 
 	pi = zalloc(sizeof *pi);
 	pi->set = set;
-	pi->end = set->packages.data + set->packages.size;
-	pi->package = set->packages.data;
 	pi->index = index;
 
 	return pi;
@@ -786,7 +741,14 @@ razor_package_iterator_create_with_index(struct razor_set *set,
 struct razor_package_iterator *
 razor_package_iterator_create(struct razor_set *set)
 {
-	return razor_package_iterator_create_with_index(set, NULL);
+	struct razor_package_iterator *pi;
+
+	pi = zalloc(sizeof *pi);
+	pi->set = set;
+	pi->end = set->packages.data + set->packages.size;
+	pi->package = set->packages.data;
+
+	return pi;
 }
 
 struct razor_package_iterator *
@@ -795,12 +757,7 @@ razor_package_iterator_create_for_property(struct razor_set *set,
 {
 	uint32_t *index;
 
-	if (property->packages & RAZOR_IMMEDIATE)
-		index = &property->packages;
-	else
-		index = (uint32_t *)
-			set->package_pool.data + property->packages;
-
+	index = list_first(&property->packages, &set->package_pool);
 	return razor_package_iterator_create_with_index(set, index);
 }
 
@@ -813,15 +770,16 @@ razor_package_iterator_next(struct razor_package_iterator *pi,
 	int valid;
 	struct razor_package *p, *packages;
 
-	if (pi->index) {
-		packages = pi->set->packages.data;
-		p = &packages[*pi->index & RAZOR_ENTRY_MASK];
-		valid = !pi->last;
-		pi->last = (*pi->index++ & RAZOR_IMMEDIATE) != 0;
-	} else {
+	if (pi->package) {
 		p = pi->package++;
 		valid = p < pi->end;
-	}			
+	} else if (pi->index) {
+		packages = pi->set->packages.data;
+		p = &packages[LIST_VALUE(pi->index)];
+		pi->index = list_next(pi->index);
+		valid = 1;
+	} else
+		valid = 0;
 
 	if (valid) {
 		pool = pi->set->string_pool.data;
@@ -862,7 +820,6 @@ struct razor_property_iterator {
 	struct razor_set *set;
 	struct razor_property *property, *end;
 	uint32_t *index;
-	int last;
 };
 
 struct razor_property_iterator *
@@ -873,12 +830,14 @@ razor_property_iterator_create(struct razor_set *set,
 
 	pi = zalloc(sizeof *pi);
 	pi->set = set;
-	pi->end = set->properties.data + set->properties.size;
-	pi->property = set->properties.data;
 
-	if (package)
+	if (package) {
 		pi->index = (uint32_t *)
 			set->property_pool.data + package->properties;
+	} else {
+		pi->property = set->properties.data;
+		pi->end = set->properties.data + set->properties.size;
+	}
 
 	return pi;
 }
@@ -895,15 +854,16 @@ razor_property_iterator_next(struct razor_property_iterator *pi,
 	int valid;
 	struct razor_property *p, *properties;
 
-	if (pi->index) {
-		properties = pi->set->properties.data;
-		p = &properties[*pi->index & RAZOR_ENTRY_MASK];
-		valid = !pi->last;
-		pi->last = (*pi->index++ & RAZOR_IMMEDIATE) != 0;
-	} else {
+	if (pi->property) {
 		p = pi->property++;
 		valid = p < pi->end;
-	}			
+	} else if (pi->index) {
+		properties = pi->set->properties.data;
+		p = &properties[LIST_VALUE(pi->index)];
+		pi->index = list_next(pi->index);
+		valid = 1;
+	} else
+		valid = 0;
 
 	if (valid) {
 		pool = pi->set->string_pool.data;
@@ -1001,12 +961,7 @@ razor_package_iterator_create_for_file(struct razor_set *set,
 	if (entry == NULL)
 		return NULL;
 	
-	if (entry->packages & RAZOR_IMMEDIATE)
-		index = &entry->packages;
-	else
-		index = (uint32_t *)
-			set->package_pool.data + entry->packages;
-
+	index = list_first(&entry->packages, &set->package_pool);
 	return razor_package_iterator_create_with_index(set, index);
 }
 
@@ -1025,13 +980,13 @@ list_package_files(struct razor_set *set, uint32_t *r,
 
 	e = entries + dir->start;
 	do {
-		if (entries + (*r & RAZOR_ENTRY_MASK) == e) {
+		if (entries + LIST_VALUE(r) == e) {
 			printf("%s/%s\n", prefix,
 			       pool + (e->name & RAZOR_ENTRY_MASK));
-			if (*r & RAZOR_ENTRY_LAST)
+			r = list_next(r);
+			if (!r)
 				return NULL;
-			r++;
-			if ((*r & RAZOR_ENTRY_MASK) >= end)
+			if (LIST_VALUE(r) >= end)
 				return r;
 		}
 	} while (!((e++)->name & RAZOR_ENTRY_LAST));
@@ -1053,7 +1008,7 @@ list_package_files(struct razor_set *set, uint32_t *r,
 				next = f->start;
 		}
 
-		file = *r & RAZOR_ENTRY_MASK;
+		file = LIST_VALUE(r);
 		if (e->start <= file && file < next) {
 			len = strlen(prefix);
 			prefix[len] = '/';
@@ -1076,7 +1031,7 @@ razor_set_list_package_files(struct razor_set *set, const char *name)
 
 	package = razor_set_get_package(set, name);
 
-	r = (uint32_t *) set->file_pool.data + package->files;
+	r = list_first(&package->files, &set->file_pool);
 	end = set->files.size / sizeof (struct razor_entry);
 	buffer[0] = '\0';
 	list_package_files(set, r, set->files.data, end, buffer);
@@ -1214,15 +1169,10 @@ add_package(struct razor_merger *merger,
 					&pool[package->version]);
 	p->properties = package->properties;
 
-	if (package->properties & RAZOR_IMMEDIATE)
-		r = &package->properties;
-	else
-		r = (uint32_t *)
-			source->set->property_pool.data + package->properties;
-	while (1) {
-		source->property_map[*r & RAZOR_ENTRY_MASK] = 1;
-		if (*r++ & RAZOR_IMMEDIATE)
-			break;
+	r = list_first(&package->properties, &source->set->property_pool);
+	while (r) {
+		source->property_map[LIST_VALUE(r)] = 1;
+		r = list_next(r);
 	}
 }
 
@@ -1350,22 +1300,21 @@ merge_properties(struct razor_merger *merger)
 	}
 }
 
-static uint32_t
-emit_properties(struct array *source_pool, uint32_t index,
+static void
+emit_properties(uint32_t *properties, struct array *source_pool,
 		uint32_t *map, struct array *pool)
 {
 	uint32_t r, *p, *q;
 
 	r = pool->size / sizeof *q;
-	p = (uint32_t *) source_pool->data + index;
-	while (1) {
+	p = list_first(properties, source_pool);
+	while (p) {
 		q = array_add(pool, sizeof *q);
-		*q = map[*p & RAZOR_ENTRY_MASK] | (*p & ~RAZOR_ENTRY_MASK);
-		if (*p++ & RAZOR_ENTRY_LAST)
-			break;
+		*q = map[LIST_VALUE(p)] | LIST_FLAGS(p);
+		p = list_next(p);
 	}
 
-	return r;
+	*properties = r;
 }
 	
 /* Rebuild property->packages maps.  We can't just remap these, as a
@@ -1378,28 +1327,28 @@ rebuild_package_lists(struct razor_set *set)
 	struct array *pkgs, *a;
 	struct razor_package *pkg, *pkg_end;
 	struct razor_property *prop, *prop_end;
-	uint32_t *r, *q, *pool;
+	struct array *pool;
+	uint32_t *r, *q;
 	int count;
 
 	count = set->properties.size / sizeof (struct razor_property);
 	pkgs = zalloc(count * sizeof *pkgs);
 	pkg_end = set->packages.data + set->packages.size;
-	pool = set->property_pool.data;
+	pool = &set->property_pool;
 
 	for (pkg = set->packages.data; pkg < pkg_end; pkg++) {
-		for (r = &pool[pkg->properties]; ; r++) {
-			q = array_add(&pkgs[*r & RAZOR_ENTRY_MASK], sizeof *q);
+		r = list_first(&pkg->properties, pool);
+		while (r) {
+			q = array_add(&pkgs[LIST_VALUE(r)], sizeof *q);
 			*q = pkg - (struct razor_package *) set->packages.data;
-			if (*r & RAZOR_IMMEDIATE)
-				break;
+			r = list_next(r);
 		}
 	}
 
 	prop_end = set->properties.data + set->properties.size;
 	a = pkgs;
 	for (prop = set->properties.data; prop < prop_end; prop++, a++) {
-		prop->packages =
-			add_to_property_pool(&set->property_pool, a);
+		list_set(&prop->packages, pool, a);
 		array_release(a);
 	}
 	free(pkgs);
@@ -1460,10 +1409,10 @@ razor_set_add(struct razor_set *set, struct razor_set *upstream,
 		else
 			src = &merger->source1;
 
-		p->properties = emit_properties(&src->set->property_pool,
-						p->properties,
-						src->property_map,
-						&merger->set->property_pool);
+		emit_properties(&p->properties,
+				&src->set->property_pool,
+				src->property_map,
+				&merger->set->property_pool);
 		p->name &= INDEX_MASK;
 	}
 
@@ -1478,7 +1427,8 @@ razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
 {
 	struct razor_property *requires, *r;
 	struct razor_property *p, *pend;
-	uint32_t *u, *end, *pkg, *package_pool;
+	uint32_t *u, *end, *pkg;
+	struct array *package_pool;
 	char *pool, *upool;
 
 	end = unsatisfied->data + unsatisfied->size;
@@ -1488,7 +1438,7 @@ razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
 	p = upstream->properties.data;
 	pend = upstream->properties.data + upstream->properties.size;
 	upool = upstream->string_pool.data;
-	package_pool = upstream->package_pool.data;
+	package_pool = &upstream->package_pool;
 
 	for (u = unsatisfied->data; u < end; u++) {
 		r = requires + *u;
@@ -1513,10 +1463,7 @@ razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
 		} else {
 			pkg = array_add(list, sizeof *pkg);
 			/* We just pull in the first package that provides */
-			if (p->packages & RAZOR_IMMEDIATE)
-				*pkg = p->packages & RAZOR_ENTRY_MASK;
-			else
-				*pkg = package_pool[p->packages];
+			*pkg = LIST_VALUE(list_first(&p->packages, package_pool));
 		}
 	}	
 }

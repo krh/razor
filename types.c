@@ -43,6 +43,69 @@ array_add(struct array *array, int size)
 	return p;
 }
 
+#define RAZOR_ENTRY_LAST	0x80000000ul
+#define RAZOR_IMMEDIATE		0x80000000ul
+#define RAZOR_ENTRY_MASK	0x00fffffful
+
+void
+list_init(uint32_t *list)
+{
+	*list = ~0;
+}
+
+void
+list_set(uint32_t *list, struct array *pool, struct array *items)
+{
+	uint32_t *p;
+
+	if (items->size == 0) {
+		list_init(list);
+	} else if (items->size == sizeof (uint32_t)) {
+		*list = *(uint32_t *) items->data | RAZOR_IMMEDIATE;
+	} else {
+		p = array_add(pool, items->size);
+		memcpy(p, items->data, items->size);
+		p[items->size / sizeof *p - 1] |= RAZOR_ENTRY_LAST;
+		*list = p - (uint32_t *) pool->data;
+	}
+}
+
+uint32_t *
+list_first(uint32_t *list, struct array *pool)
+{
+	if (*list == ~0)
+		return NULL;
+	else if (*list & RAZOR_IMMEDIATE)
+		return list;
+	else
+		return (uint32_t *) pool->data + (*list & RAZOR_ENTRY_MASK);
+}
+
+uint32_t *
+list_next(uint32_t *list)
+{
+	if (*list & ~RAZOR_ENTRY_MASK)
+		return NULL;
+	return ++list;
+}
+
+void
+list_remap_pool(struct array *pool, uint32_t *map)
+{
+	uint32_t *p, *end;
+
+	end = pool->data + pool->size;
+	for (p = pool->data; p < end; p++)
+		*p = map[LIST_VALUE(p)] | LIST_FLAGS(p);
+}
+
+void
+list_remap_if_immediate(uint32_t *list, uint32_t *map)
+{
+	if ((*list & ~RAZOR_ENTRY_MASK) == RAZOR_IMMEDIATE)
+		*list = map[LIST_VALUE(list)] | LIST_FLAGS(list);
+}
+
 
 void
 hashtable_init(struct hashtable *table, struct array *pool)
