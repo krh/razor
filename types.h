@@ -13,14 +13,26 @@ void array_release(struct array *array);
 void *array_add(struct array *array, int size);
 
 
-void list_init(uint32_t *list);
-void list_set(uint32_t *list, struct array *pool, struct array *items);
-uint32_t *list_first(uint32_t *list, struct array *pool);
-uint32_t *list_next(uint32_t *list);
+struct list_head {
+	uint list_ptr : 30;
+	uint flags    : 2;
+};
+
+struct list {
+	uint data  : 30;
+	uint flags : 2;
+};
+
+void list_set_empty(struct list_head *head);
+void list_set_ptr(struct list_head *head, uint32_t ptr);
+void list_set_array(struct list_head *head, struct array *pool, struct array *items);
+
+struct list *list_first(struct list_head *head, struct array *pool);
+struct list *list_next(struct list *list);
+
 void list_remap_pool(struct array *pool, uint32_t *map);
-void list_remap_if_immediate(uint32_t *list, uint32_t *map);
-#define LIST_VALUE(list) (*(list) & RAZOR_ENTRY_MASK)
-#define LIST_FLAGS(list) (*(list) & ~RAZOR_ENTRY_MASK)
+void list_remap_head(struct list_head *list, uint32_t *map);
+
 
 struct hashtable {
 	struct array buckets;

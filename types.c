@@ -43,48 +43,58 @@ array_add(struct array *array, int size)
 	return p;
 }
 
-#define RAZOR_ENTRY_LAST	0x80000000ul
-#define RAZOR_IMMEDIATE		0x80000000ul
-#define RAZOR_ENTRY_MASK	0x00fffffful
+/* RAZOR_IMMEDIATE and RAZOR_ENTRY_LAST must have the same value */
+#define RAZOR_ENTRY_LAST 0x2
+#define RAZOR_IMMEDIATE  0x2
+#define RAZOR_EMPTY_LIST 0x3
 
 void
-list_init(uint32_t *list)
+list_set_empty(struct list_head *head)
 {
-	*list = ~0;
+	head->list_ptr = ~0;
+	head->flags = RAZOR_EMPTY_LIST;
 }
 
 void
-list_set(uint32_t *list, struct array *pool, struct array *items)
+list_set_ptr(struct list_head *head, uint32_t ptr)
 {
-	uint32_t *p;
+	head->list_ptr = ptr;
+	head->flags = 0;
+}
+
+void
+list_set_array(struct list_head *head, struct array *pool, struct array *items)
+{
+	struct list *p;
 
 	if (items->size == 0) {
-		list_init(list);
+		list_set_empty(head);
 	} else if (items->size == sizeof (uint32_t)) {
-		*list = *(uint32_t *) items->data | RAZOR_IMMEDIATE;
+		head->list_ptr = *(uint32_t *) items->data;
+		head->flags = RAZOR_IMMEDIATE;
 	} else {
 		p = array_add(pool, items->size);
 		memcpy(p, items->data, items->size);
-		p[items->size / sizeof *p - 1] |= RAZOR_ENTRY_LAST;
-		*list = p - (uint32_t *) pool->data;
+		p[items->size / sizeof *p - 1].flags = RAZOR_ENTRY_LAST;
+		list_set_ptr(head, p - (struct list *) pool->data);
 	}
 }
 
-uint32_t *
-list_first(uint32_t *list, struct array *pool)
+struct list *
+list_first(struct list_head *head, struct array *pool)
 {
-	if (*list == ~0)
+	if (head->flags == RAZOR_EMPTY_LIST)
 		return NULL;
-	else if (*list & RAZOR_IMMEDIATE)
-		return list;
+	else if (head->flags == RAZOR_IMMEDIATE)
+		return (struct list *) head;
 	else
-		return (uint32_t *) pool->data + (*list & RAZOR_ENTRY_MASK);
+		return (struct list *) pool->data + head->list_ptr;
 }
 
-uint32_t *
-list_next(uint32_t *list)
+struct list *
+list_next(struct list *list)
 {
-	if (*list & ~RAZOR_ENTRY_MASK)
+	if (list->flags)
 		return NULL;
 	return ++list;
 }
@@ -92,18 +102,18 @@ list_next(uint32_t *list)
 void
 list_remap_pool(struct array *pool, uint32_t *map)
 {
-	uint32_t *p, *end;
+	struct list *p, *end;
 
 	end = pool->data + pool->size;
 	for (p = pool->data; p < end; p++)
-		*p = map[LIST_VALUE(p)] | LIST_FLAGS(p);
+		p->data = map[p->data];
 }
 
 void
-list_remap_if_immediate(uint32_t *list, uint32_t *map)
+list_remap_head(struct list_head *head, uint32_t *map)
 {
-	if ((*list & ~RAZOR_ENTRY_MASK) == RAZOR_IMMEDIATE)
-		*list = map[LIST_VALUE(list)] | LIST_FLAGS(list);
+	if (head->flags == RAZOR_IMMEDIATE)
+		head->list_ptr = map[head->list_ptr];
 }
 
 
