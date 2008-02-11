@@ -52,7 +52,9 @@ struct razor_package {
 };
 
 struct razor_property {
-	uint32_t name;
+	uint name  : 24;
+	uint flags : 6;
+	uint type  : 2;
 	uint32_t relation;
 	uint32_t version;
 	struct list_head packages;
@@ -260,7 +262,9 @@ razor_importer_add_property(struct razor_importer *importer,
 	uint32_t *r;
 
 	p = array_add(&importer->set->properties, sizeof *p);
-	p->name = hashtable_tokenize(&importer->table, name) | (type << 30);
+	p->name = hashtable_tokenize(&importer->table, name);
+	p->flags = 0;
+	p->type = type;
 	p->relation = relation;
 	p->version = hashtable_tokenize(&importer->table, version);
 	list_set_ptr(&p->packages, importer->package -
@@ -456,17 +460,14 @@ compare_properties(const void *p1, const void *p2, void *data)
 	struct razor_set *set = data;
 	char *pool = set->string_pool.data;
 
-	if (prop1->name == prop2->name) {
-		if (prop1->relation == prop2->relation)
-			return versioncmp(&pool[prop1->version],
-					  &pool[prop2->version]);
-		else
-			return prop1->relation - prop2->relation;
-	} else if ((prop1->name & RAZOR_ENTRY_MASK) == (prop2->name & RAZOR_ENTRY_MASK))
-		return (prop1->name >> 30) - (prop2->name >> 30);
+	if (prop1->name != prop2->name) 
+		return strcmp(&pool[prop1->name], &pool[prop2->name]);
+	else if (prop1->type != prop2->type)
+		return prop1->type - prop2->type;
+	else if (prop1->relation != prop2->relation)
+		return prop1->relation - prop2->relation;
 	else
-		return strcmp(&pool[prop1->name & RAZOR_ENTRY_MASK],
-			      &pool[prop2->name & RAZOR_ENTRY_MASK]);
+		return versioncmp(&pool[prop1->version], &pool[prop2->version]);
 }
 
 static uint32_t *
@@ -489,10 +490,12 @@ uniqueify_properties(struct razor_set *set)
 	rmap = malloc(count * sizeof *map);
 	pkgs = zalloc(count * sizeof *pkgs);
 	for (rp = set->properties.data, up = rp, i = 0; rp < rp_end; rp++, i++) {
-		if (rp->name != up->name || rp->relation != up->relation ||
-		    rp->version != up->version) {
+		if (rp->name != up->name || rp->type != up->type ||
+		    rp->relation != up->relation || rp->version != up->version) {
 			up++;
 			up->name = rp->name;
+			up->flags = 0;
+			up->type = rp->type;
 			up->relation = rp->relation;
 			up->version = rp->version;
 		}
@@ -870,10 +873,10 @@ razor_property_iterator_next(struct razor_property_iterator *pi,
 	if (valid) {
 		pool = pi->set->string_pool.data;
 		*property = p;
-		*name = &pool[p->name & RAZOR_ENTRY_MASK];
+		*name = &pool[p->name];
 		*relation = p->relation;
 		*version = &pool[p->version];
-		*type = p->name >> 30;
+		*type = p->type;
 	} else {
 		*property = NULL;
 	}
@@ -1051,12 +1054,13 @@ razor_set_validate(struct razor_set *set, struct array *unsatisfied)
 	pool = set->string_pool.data;
 	
 	for (r = set->properties.data, p = r; r < end; r++) {
-		if (r->name >> 30 != RAZOR_PROPERTY_REQUIRES)
+		if (r->type != RAZOR_PROPERTY_REQUIRES)
 			continue;
 
-		if ((r->name & RAZOR_ENTRY_MASK) != (p->name & RAZOR_ENTRY_MASK)) {
+		if (r->name != p->name) {
 			p = r;
-			while (p < end && p->name == r->name)
+			while (p < end && p->name == r->name &&
+			       p->type == r->type)
 				p++;
 		}
 
@@ -1066,7 +1070,8 @@ razor_set_validate(struct razor_set *set, struct array *unsatisfied)
 		 * requires a = 1, provides a = 1, requires a = 2,
 		 * provides a = 2, as the kernel and kernel-devel
 		 * does.*/
-		while (p + 1 < end && p->name == (p + 1)->name)
+		while (p + 1 < end && p->name == (p + 1)->name &&
+		       p->type == (p + 1)->type)
 			p++;
 
 		/* FIXME: We need to track property flags (<, <=, =
@@ -1075,11 +1080,11 @@ razor_set_validate(struct razor_set *set, struct array *unsatisfied)
 		 * requires a = 1 isn't satisfied by a = 2 provides. */
 
 		if (p == end ||
-		    (p->name >> 30) != RAZOR_PROPERTY_PROVIDES ||
-		    (r->name & RAZOR_ENTRY_MASK) != (p->name & RAZOR_ENTRY_MASK) ||
+		    p->type != RAZOR_PROPERTY_PROVIDES ||
+		    r->name != p->name ||
 		    versioncmp(&pool[r->version], &pool[p->version]) > 0) {
 			/* FIXME: We ignore file requires for now. */
-			if (pool[r->name & RAZOR_ENTRY_MASK] == '/')
+			if (pool[r->name] == '/')
 				continue;
 			u = array_add(unsatisfied, sizeof *u);
 			*u = r - (struct razor_property *) set->properties.data;
@@ -1106,10 +1111,10 @@ razor_set_list_unsatisfied(struct razor_set *set)
 		r = properties + *u;
 		if (pool[r->version] == '\0')
 			printf("%ss not satisfied\n",
-			       &pool[r->name & RAZOR_ENTRY_MASK]);
+			       &pool[r->name]);
 		else
 			printf("%s-%s not satisfied\n",
-			       &pool[r->name & RAZOR_ENTRY_MASK],
+			       &pool[r->name],
 			       &pool[r->version]);
 	}
 
@@ -1230,7 +1235,9 @@ add_property(struct razor_merger *merger,
 	struct razor_property *p;
 
 	p = array_add(&merger->set->properties, sizeof *p);
-	p->name = hashtable_tokenize(&merger->table, name) | (type << 30);
+	p->name = hashtable_tokenize(&merger->table, name);
+	p->flags = 0;
+	p->type = type;
 	p->relation = relation;
 	p->version = hashtable_tokenize(&merger->table, version);
 
@@ -1270,8 +1277,7 @@ merge_properties(struct razor_merger *merger)
 		p1 = (struct razor_property *) set1->properties.data + i;
 		p2 = (struct razor_property *) set2->properties.data + j;
 		if (i < count1 && j < count2)
-			cmp = strcmp(&pool1[p1->name & RAZOR_ENTRY_MASK],
-				     &pool2[p2->name & RAZOR_ENTRY_MASK]);
+			cmp = strcmp(&pool1[p1->name], &pool2[p2->name]);
 		else if (i < count1)
 			cmp = -1;
 		else
@@ -1283,22 +1289,22 @@ merge_properties(struct razor_merger *merger)
 					 &pool2[p2->version]);
 		if (cmp < 0) {
 			map1[i++] = add_property(merger,
-						 &pool1[p1->name & RAZOR_ENTRY_MASK],
+						 &pool1[p1->name],
 						 p1->relation,
 						 &pool1[p1->version],
-						 (p1->name >> 30));
+						 p1->type);
 		} else if (cmp > 0) {
 			map2[j++] = add_property(merger,
-						 &pool2[p2->name & RAZOR_ENTRY_MASK],
+						 &pool2[p2->name],
 						 p2->relation,
 						 &pool2[p2->version],
-						 (p2->name >> 30));
+						 p2->type);
 		} else  {
 			map1[i++] = map2[j++] = add_property(merger,
-							     &pool1[p1->name & RAZOR_ENTRY_MASK],
+							     &pool1[p1->name],
 							     p1->relation,
 							     &pool1[p1->version],
-							     (p1->name >> 30));
+							     p1->type);
 		}
 	}
 }
@@ -1450,18 +1456,16 @@ razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
 		r = requires + *u;
 
 		while (p < pend &&
-		       strcmp(&pool[r->name & RAZOR_ENTRY_MASK],
-			      &upool[p->name & RAZOR_ENTRY_MASK]) > 0 &&
-		       (p->name >> 30) != RAZOR_PROPERTY_PROVIDES)
+		       strcmp(&pool[r->name], &upool[p->name]) > 0 &&
+		       p->type != RAZOR_PROPERTY_PROVIDES)
 			p++;
 		/* If there is more than one version of a provides,
 		 * seek to the end for the highest version. */
-		while (p + 1 < pend && p->name == (p + 1)->name)
+		while (p + 1 < pend && p->name == (p + 1)->name && p->type == (p + 1)->type)
 			p++;
 
 		if (p == pend ||
-		    strcmp(&pool[r->name & RAZOR_ENTRY_MASK],
-			   &upool[p->name & RAZOR_ENTRY_MASK]) != 0 ||
+		    strcmp(&pool[r->name], &upool[p->name]) != 0 ||
 		    versioncmp(&pool[r->version], &upool[p->version]) > 0) {
 			/* Do we need to track unsatisfiable requires
 			 * as we go, or should we just do a
