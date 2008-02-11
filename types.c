@@ -44,9 +44,9 @@ array_add(struct array *array, int size)
 }
 
 /* RAZOR_IMMEDIATE and RAZOR_ENTRY_LAST must have the same value */
-#define RAZOR_ENTRY_LAST 0x2
-#define RAZOR_IMMEDIATE  0x2
-#define RAZOR_EMPTY_LIST 0x3
+#define RAZOR_ENTRY_LAST 0x80
+#define RAZOR_IMMEDIATE  0x80
+#define RAZOR_EMPTY_LIST 0xff
 
 void
 list_set_empty(struct list_head *head)

@@ -14,13 +14,13 @@ void *array_add(struct array *array, int size);
 
 
 struct list_head {
-	uint list_ptr : 30;
-	uint flags    : 2;
+	uint list_ptr : 24;
+	uint flags    : 8;
 };
 
 struct list {
-	uint data  : 30;
-	uint flags : 2;
+	uint data  : 24;
+	uint flags : 8;
 };
 
 void list_set_empty(struct list_head *head);
