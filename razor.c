@@ -33,9 +33,6 @@ struct razor_set_header {
 #define RAZOR_MAGIC 0x7a7a7a7a
 #define RAZOR_VERSION 1
 
-#define RAZOR_ENTRY_LAST	0x80000000ul
-#define RAZOR_ENTRY_MASK	0x00fffffful
-
 #define RAZOR_STRING_POOL	0
 #define RAZOR_PACKAGES		1
 #define RAZOR_PROPERTIES	2
@@ -45,7 +42,8 @@ struct razor_set_header {
 #define RAZOR_FILE_POOL		6
 
 struct razor_package {
-	uint32_t name;
+	uint name  : 24;
+	uint flags : 8;
 	uint32_t version;
 	struct list_head properties;
 	struct list_head files;
@@ -61,10 +59,13 @@ struct razor_property {
 };
 
 struct razor_entry {
-	uint32_t name;
+	uint name  : 24;
+	uint flags : 8;
 	uint32_t start;
 	struct list_head packages;
 };
+
+#define RAZOR_ENTRY_LAST	0x80
 
 struct razor_set {
 	struct array string_pool;
@@ -235,6 +236,7 @@ razor_importer_begin_package(struct razor_importer *importer,
 
 	p = array_add(&importer->set->packages, sizeof *p);
 	p->name = hashtable_tokenize(&importer->table, name);
+	p->flags = 0;
 	p->version = hashtable_tokenize(&importer->table, version);
 
 	importer->package = p;
@@ -447,6 +449,7 @@ compare_packages(const void *p1, const void *p2, void *data)
 	struct razor_set *set = data;
 	char *pool = set->string_pool.data;
 
+	/* FIXME: what if the flags are different? */
 	if (pkg1->name == pkg2->name)
 		return versioncmp(&pool[pkg1->version], &pool[pkg2->version]);
 	else
@@ -558,6 +561,7 @@ serialize_files(struct razor_set *set,
 	while (p < end) {
 		e = array_add(array, sizeof *e);
 		e->name = p->name;
+		e->flags = 0;
 		e->start = p->count > 0 ? s : 0;
 		s += p->count;
 
@@ -566,7 +570,7 @@ serialize_files(struct razor_set *set,
 		p++;
 	}		
 	if (e != NULL)
-		e->name |= RAZOR_ENTRY_LAST;
+		e->flags |= RAZOR_ENTRY_LAST;
 
 	p = d->files.data;
 	end = d->files.data + d->files.size;
@@ -647,7 +651,8 @@ build_file_tree(struct razor_importer *importer)
 	array_init(&importer->set->files);
 
 	e = array_add(&importer->set->files, sizeof *e);
-	e->name = root.name | RAZOR_ENTRY_LAST;
+	e->name = root.name;
+	e->flags = RAZOR_ENTRY_LAST;
 	e->start = 1;
 	list_set_empty(&e->packages);
 
@@ -789,7 +794,7 @@ razor_package_iterator_next(struct razor_package_iterator *pi,
 	if (valid) {
 		pool = pi->set->string_pool.data;
 		*package = p;
-		*name = &pool[p->name & RAZOR_ENTRY_MASK];
+		*name = &pool[p->name];
 		*version = &pool[p->version];
 	} else {
 		*package = NULL;
@@ -899,7 +904,7 @@ find_entry(struct razor_set *set, struct razor_entry *dir, const char *pattern)
 
 	e = (struct razor_entry *) set->files.data + dir->start;
 	do {
-		n = pool + (e->name & RAZOR_ENTRY_MASK);
+		n = pool + e->name;
 		if (strcmp(pattern + 1, n) == 0)
 			return e;
 		len = strlen(n);
@@ -907,7 +912,7 @@ find_entry(struct razor_set *set, struct razor_entry *dir, const char *pattern)
 		    pattern[len + 1] == '/') {
 			return find_entry(set, e, pattern + len + 1);
 		}
-	} while (((e++)->name & RAZOR_ENTRY_LAST) == 0);
+	} while (!((e++)->flags & RAZOR_ENTRY_LAST));
 
 	return NULL;
 }
@@ -921,11 +926,11 @@ list_dir(struct razor_set *set, struct razor_entry *dir,
 
 	e = (struct razor_entry *) set->files.data + dir->start;
 	do {
-		n = pool + (e->name & RAZOR_ENTRY_MASK);
+		n = pool + e->name;
 		if (pattern && pattern[0] && fnmatch(pattern, n, 0) != 0)
 			continue;
 		printf("%s/%s%s\n", prefix, n, e->start > 0 ? "/" : "");
-	} while (((e++)->name & RAZOR_ENTRY_LAST) == 0);
+	} while (!((e++)->flags & RAZOR_ENTRY_LAST));
 }
 
 void
@@ -986,26 +991,25 @@ list_package_files(struct razor_set *set, struct list *r,
 	e = entries + dir->start;
 	do {
 		if (entries + r->data == e) {
-			printf("%s/%s\n", prefix,
-			       pool + (e->name & RAZOR_ENTRY_MASK));
+			printf("%s/%s\n", prefix, pool + e->name);
 			r = list_next(r);
 			if (!r)
 				return NULL;
 			if (r->data >= end)
 				return r;
 		}
-	} while (!((e++)->name & RAZOR_ENTRY_LAST));
+	} while (!((e++)->flags & RAZOR_ENTRY_LAST));
 
 	e = entries + dir->start;
 	do {
 		if (e->start == 0)
 			continue;
 
-		if (e->name & RAZOR_ENTRY_LAST)
+		if (e->flags & RAZOR_ENTRY_LAST)
 			next = end;
 		else {
 			f = e + 1; 
-			while (f->start == 0 && !(f->name & RAZOR_ENTRY_LAST))
+			while (f->start == 0 && !(f->flags & RAZOR_ENTRY_LAST))
 				f++;
 			if (f->start == 0)
 				next = end;
@@ -1017,12 +1021,11 @@ list_package_files(struct razor_set *set, struct list *r,
 		if (e->start <= file && file < next) {
 			len = strlen(prefix);
 			prefix[len] = '/';
-			strcpy(prefix + len + 1,
-			       pool + (e->name & RAZOR_ENTRY_MASK));
+			strcpy(prefix + len + 1, pool + e->name);
 			r = list_package_files(set, r, e, next, prefix);
 			prefix[len] = '\0';
 		}
-	} while (!((e++)->name & RAZOR_ENTRY_LAST) && r != NULL);
+	} while (!((e++)->flags & RAZOR_ENTRY_LAST) && r != NULL);
 
 	return r;
 }
@@ -1121,8 +1124,7 @@ razor_set_list_unsatisfied(struct razor_set *set)
 	array_release(&unsatisfied);
 }
 
-#define UPSTREAM_SOURCE 0x80000000ul
-#define INDEX_MASK 0x00fffffful
+#define UPSTREAM_SOURCE 0x80
 
 struct source {
 	struct razor_set *set;
@@ -1172,7 +1174,7 @@ add_package(struct razor_merger *merger,
 	pool = source->set->string_pool.data;
 	p = array_add(&merger->set->packages, sizeof *p);
 	p->name = hashtable_tokenize(&merger->table, &pool[package->name]);
-	p->name |= flags;
+	p->flags = flags;
 	p->version = hashtable_tokenize(&merger->table,
 					&pool[package->version]);
 	p->properties = package->properties;
@@ -1416,7 +1418,7 @@ razor_set_add(struct razor_set *set, struct razor_set *upstream,
 	for (p = merger->set->packages.data; p < pend; p++) {
 		struct source *src;
 
-		if (p->name & UPSTREAM_SOURCE)
+		if (p->flags & UPSTREAM_SOURCE)
 			src = &merger->source2;
 		else
 			src = &merger->source1;
@@ -1425,7 +1427,7 @@ razor_set_add(struct razor_set *set, struct razor_set *upstream,
 				&src->set->property_pool,
 				src->property_map,
 				&merger->set->property_pool);
-		p->name &= INDEX_MASK;
+		p->flags &= ~UPSTREAM_SOURCE;
 	}
 
 	rebuild_package_lists(merger->set);
