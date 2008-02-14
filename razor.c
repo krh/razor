@@ -1460,8 +1460,8 @@ razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
 		r = requires + *u;
 
 		while (p < pend &&
-		       strcmp(&pool[r->name], &upool[p->name]) > 0 &&
-		       p->type != RAZOR_PROPERTY_PROVIDES)
+		       p->type != RAZOR_PROPERTY_PROVIDES &&
+		       strcmp(&pool[r->name], &upool[p->name]) > 0)
 			p++;
 		/* If there is more than one version of a provides,
 		 * seek to the end for the highest version. */
