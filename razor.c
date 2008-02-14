@@ -1285,6 +1285,8 @@ merge_properties(struct razor_merger *merger)
 		else
 			cmp = 1;
 		if (cmp == 0)
+			cmp = p1->type - p2->type;
+		if (cmp == 0)
 			cmp = p1->relation - p2->relation;
 		if (cmp == 0)
 			cmp = versioncmp(&pool1[p1->version],
