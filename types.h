@@ -25,7 +25,7 @@ struct list {
 
 void list_set_empty(struct list_head *head);
 void list_set_ptr(struct list_head *head, uint32_t ptr);
-void list_set_array(struct list_head *head, struct array *pool, struct array *items);
+void list_set_array(struct list_head *head, struct array *pool, struct array *items, int force_indirect);
 
 struct list *list_first(struct list_head *head, struct array *pool);
 struct list *list_next(struct list *list);

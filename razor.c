@@ -248,7 +248,8 @@ razor_importer_finish_package(struct razor_importer *importer)
 {
 	list_set_array(&importer->package->properties,
 		       &importer->set->property_pool,
-		       &importer->properties);
+		       &importer->properties,
+		       1);
 
 	array_release(&importer->properties);
 }
@@ -510,11 +511,12 @@ uniqueify_properties(struct razor_set *set)
 	}
 	free(map);
 
-	up++;
+	if (up != rp)
+		up++;
 	set->properties.size = (void *) up - set->properties.data;
 	rp_end = up;
 	for (rp = set->properties.data, p = pkgs; rp < rp_end; rp++, p++) {
-		list_set_array(&rp->packages, &set->package_pool, p);
+		list_set_array(&rp->packages, &set->package_pool, p, 0);
 		array_release(p);
 	}
 
@@ -565,7 +567,7 @@ serialize_files(struct razor_set *set,
 		e->start = p->count > 0 ? s : 0;
 		s += p->count;
 
-		list_set_array(&e->packages, &set->package_pool, &p->packages);
+		list_set_array(&e->packages, &set->package_pool, &p->packages, 0);
 		array_release(&p->packages);
 		p++;
 	}		
@@ -687,7 +689,7 @@ build_package_file_lists(struct razor_set *set, uint32_t *rmap)
 
 	packages = set->packages.data;
 	for (i = 0; i < count; i++) {
-		list_set_array(&packages[i].files, &set->file_pool, &pkgs[i]);
+		list_set_array(&packages[i].files, &set->file_pool, &pkgs[i], 0);
 		array_release(&pkgs[i]);
 	}
 	free(pkgs);
@@ -1210,12 +1212,16 @@ merge_packages(struct razor_merger *merger, struct array *packages)
 	send = source1->set->packages.data + source1->set->packages.size;
 	spool = source1->set->string_pool.data;
 
-	while (s < send) {
+	while (s < send || u < uend) {
 		p = upstream_packages + *u;
 
-		if (u < uend)
+		if (s < send && u < uend)
 			cmp = strcmp(&spool[s->name], &upool[p->name]);
-		if (u >= uend || cmp < 0) {
+		else if (s < send)
+			cmp = -1;
+		else
+			cmp = 1;
+		if (cmp < 0) {
 			add_package(merger, s, source1, 0);
 			s++;
 		} else if (cmp == 0) {
@@ -1364,7 +1370,7 @@ rebuild_package_lists(struct razor_set *set)
 	prop_end = set->properties.data + set->properties.size;
 	a = pkgs;
 	for (prop = set->properties.data; prop < prop_end; prop++, a++) {
-		list_set_array(&prop->packages, pool, a);
+		list_set_array(&prop->packages, pool, a, 0);
 		array_release(a);
 	}
 	free(pkgs);

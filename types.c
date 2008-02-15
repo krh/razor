@@ -63,21 +63,26 @@ list_set_ptr(struct list_head *head, uint32_t ptr)
 }
 
 void
-list_set_array(struct list_head *head, struct array *pool, struct array *items)
+list_set_array(struct list_head *head, struct array *pool,
+	       struct array *items, int force_indirect)
 {
 	struct list *p;
 
-	if (items->size == 0) {
-		list_set_empty(head);
-	} else if (items->size == sizeof (uint32_t)) {
-		head->list_ptr = *(uint32_t *) items->data;
-		head->flags = RAZOR_IMMEDIATE;
-	} else {
-		p = array_add(pool, items->size);
-		memcpy(p, items->data, items->size);
-		p[items->size / sizeof *p - 1].flags = RAZOR_ENTRY_LAST;
-		list_set_ptr(head, p - (struct list *) pool->data);
+	if (!force_indirect) {
+		if (items->size == 0) {
+			list_set_empty(head);
+			return;
+		} else if (items->size == sizeof (uint32_t)) {
+			head->list_ptr = *(uint32_t *) items->data;
+			head->flags = RAZOR_IMMEDIATE;
+			return;
+		}
 	}
+
+	p = array_add(pool, items->size);
+	memcpy(p, items->data, items->size);
+	p[items->size / sizeof *p - 1].flags = RAZOR_ENTRY_LAST;
+	list_set_ptr(head, p - (struct list *) pool->data);
 }
 
 struct list *
