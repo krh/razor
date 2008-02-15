@@ -1537,22 +1537,13 @@ razor_set_update(struct razor_set *set, struct razor_set *upstream,
 		 int count, const char **packages)
 {
 	struct razor_set *new;
-	struct razor_package *upackages;
 	struct array list, unsatisfied;
-	char *pool;
-	uint32_t *u, *end;
-	int total = 0;
 
 	array_init(&list);
 	if (count > 0)
 		find_packages(upstream, count, packages, &list);
 	else
 		find_all_packages(set, upstream, &list);
-
-	end = list.data + list.size;
-	upackages = upstream->packages.data;
-	pool = upstream->string_pool.data;
-	total += list.size / sizeof *u;
 
 	while (list.size > 0) {
 		new = razor_set_add(set, upstream, &list);
@@ -1565,11 +1556,6 @@ razor_set_update(struct razor_set *set, struct razor_set *upstream,
 		array_init(&list);
 		razor_set_satisfy(new, &unsatisfied, upstream, &list);
 		array_release(&unsatisfied);
-
-		end = list.data + list.size;
-		upackages = upstream->packages.data;
-		pool = upstream->string_pool.data;
-		total += list.size / sizeof *u;
 	}
 
 	array_release(&list);
