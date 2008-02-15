@@ -1,16 +1,852 @@
-<test title="gah">
+<tests>
 
-  <import file="sets.xml"/>
+    <test name="testEmpty">
+	<set name="system"/>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	    <remove name="zsh"/>
+	</transaction>
+	<result>
+	    <set/>
+	</result>
+    </test>
 
-  <update name="c" from="a" to="b"/>
+    <test name="testInstallSinglePackageNoRequires">
+	<set name="system"/>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
 
-  <verify set="b" type="packages">
-    <package name="bash" version="3.2-18.fc8"/>
-  </verify>
+    <test name="testInstallSinglePackageRequireNotProvided">
+	<set name="system"/>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <unsatisfiable>
+		<requires name="zip"/>
+	    </unsatisfiable>
+	</result>
+    </test>
 
-  <verify set="c" type="properties">
-    <provides name="nss" eq="1.8-fc10"/>
-    <conflicts name="y" eq="1.1"/>
-  </verify>
+    <test name="testInstallSinglePackageRequireInstalled">
+	<set name="system">
+	    <package name="zip" version="1-1" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="1-1" arch="i386"/>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
 
-</test>
+    <test name="testInstallSinglePackageRequireInstalledRequireNotProvided">
+	<set name="system">
+	    <package name="zip" version="1-2" arch="i386">
+		<requires name="zap"/>
+	    </package>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <unsatisfiable>
+		<requires name="zap"/>
+	    </unsatisfiable>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireInstalledRequireInstall">
+	<set name="system">
+	    <package name="zip" version="1-3" arch="i386">
+		<requires name="zap"/>
+	    </package>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip"/>
+	    </package>
+	    <package name="zap" version="1-2" arch="i386"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	    <install name="zap"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zap" version="1-2" arch="i386"/>
+		<package name="zip" version="1-3" arch="i386"/>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireVer1NotProvided">
+	<set name="system">
+	    <package name="zip" version="1.0-2" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="EQ" version="1.3-2"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <unsatisfiable>
+		<requires name="zip" relation="EQ" version="1.3-2"/>
+	    </unsatisfiable>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireVer1Installed">
+	<set name="system">
+	    <package name="zip" version="1.3-2" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="EQ" version="1.3-2"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="1.3-2" arch="i386"/>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireVer2NotProvided">
+	<set name="system">
+	    <package name="zip" version="1.3-2" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="EQ" version="1.3-4"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <unsatisfiable>
+		<requires name="zip" relation="EQ" version="1.3-4"/>
+	    </unsatisfiable>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireVer2Installed">
+	<set name="system">
+	    <package name="zip" version="1.3-4" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="EQ" version="1.3-4"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="1.3-4" arch="i386"/>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireVer3NotProvided">
+	<set name="system">
+	    <package name="zip" version="0:1.3-4" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="GE" version="1:1.3-4"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <unsatisfiable>
+		<requires name="zip" relation="GE" version="1:1.3-4"/>
+	    </unsatisfiable>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireVer3Installed">
+	<set name="system">
+	    <package name="zip" version="2:1.3-4" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="GE" version="2:1.3-4"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="2:1.3-4" arch="i386"/>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireVer4NotProvided">
+	<set name="system">
+	    <package name="zip" version="2:1.3-4" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="LT" version="2:1.3-4"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <unsatisfiable>
+		<requires name="zip" relation="LT" version="2:1.3-4"/>
+	    </unsatisfiable>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireVer4_1Installed">
+	<set name="system">
+	    <package name="zip" version="2:1.0-4" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="LT" version="2:1.3-4"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="2:1.0-4" arch="i386"/>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireVer4_2Installed">
+	<set name="system">
+	    <package name="zip" version="2:1.3-3" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="LT" version="2:1.3-4"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="2:1.3-3" arch="i386"/>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireVer4_3Installed">
+	<set name="system">
+	    <package name="zip" version="1.3-4" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="LT" version="2:1.3-4"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="1.3-4" arch="i386"/>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireVer4_4Installed">
+	<set name="system">
+	    <package name="zip" version="1:1.3-4" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="LT" version="2:1.3-4"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="1:1.3-4" arch="i386"/>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireVer4_5Installed">
+	<set name="system">
+	    <package name="zip" version="2:0.3-4" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="LT" version="2:1.3-4"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="2:0.3-4" arch="i386"/>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireXtraBadVer">
+	<set name="system">
+	    <package name="zip" version="2:1.3-4" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="EQ" version="2:1.3-4"/>
+		<requires name="zap" relation="EQ" version="2:1.3-4"/>
+	    </package>
+	    <package name="zap" version="0:1.3-4" arch="i386"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <unsatisfiable>
+		<requires name="zap" relation="EQ" version="2:1.3-4"/>
+	    </unsatisfiable>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireXtra">
+	<set name="system">
+	    <package name="zip" version="2:1.3-4" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="EQ" version="2:1.3-4"/>
+		<requires name="zap" relation="EQ" version="4:2.6-8"/>
+	    </package>
+	    <package name="zap" version="4:2.6-8" arch="i386"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zap" version="4:2.6-8" arch="i386"/>
+		<package name="zip" version="2:1.3-4" arch="i386"/>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireInstalledRequireXtra">
+	<set name="system">
+	    <package name="zip" version="2:1.3-4" arch="i386">
+		<requires name="zap" relation="EQ" version="4:2.6-8"/>
+	    </package>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="EQ" version="2:1.3-4"/>
+	    </package>
+	    <package name="zap" version="4:2.6-8" arch="i386"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="2:1.3-4" arch="i386"/>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireUpgradeRequireXtraErr">
+	<set name="system">
+	    <package name="zip" version="2:1.3-4" arch="i386">
+		<requires name="zap" relation="EQ" version="2:1.3-3"/>
+	    </package>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="EQ" version="4:2.6-8"/>
+	    </package>
+	    <package name="zip" version="4:2.6-8" arch="i386">
+		<requires name="zap" relation="EQ" version="2:1.3-4"/>
+	    </package>
+	    <package name="zap" version="2:1.3-4" arch="i386">
+		<requires name="zsh" relation="EQ" version="2:4-8"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <unsatisfiable>
+		<requires name="zsh" relation="EQ" version="2:4-8"/>
+	    </unsatisfiable>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireUpgradeRequireXtraOk">
+	<set name="system">
+	    <package name="zip" version="2:1.3-4" arch="i386">
+		<requires name="zap" relation="EQ" version="2:1.3-3"/>
+	    </package>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="EQ" version="4:2.6-8"/>
+	    </package>
+	    <package name="zip" version="4:2.6-8" arch="i386">
+		<requires name="zap" relation="EQ" version="2:1.3-4"/>
+	    </package>
+	    <package name="zap" version="2:1.3-4" arch="i386"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zap" version="2:1.3-4" arch="i386"/>
+		<package name="zip" version="4:2.6-8" arch="i386"/>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireMultiXtra">
+	<set name="system"/>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip" relation="EQ" version="4:2.6-8"/>
+	    </package>
+	    <package name="zip" version="4:2.6-8" arch="i386">
+		<requires name="zap" relation="EQ" version="2:1.3-4"/>
+	    </package>
+	    <package name="zap" version="2:1.3-4" arch="i386"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zap" version="2:1.3-4" arch="i386"/>
+		<package name="zip" version="4:2.6-8" arch="i386"/>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireInstalledMultiLib">
+	<set name="system">
+	    <package name="zip" version="1-3" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="x86_64">
+		<requires name="zip"/>
+	    </package>
+	    <package name="zip" version="1-3" arch="x86_64"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="1-3" arch="i386"/>
+		<package name="zsh" version="1-1" arch="x86_64"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireXtra1MultiLib">
+	<set name="system"/>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="x86_64">
+		<requires name="zip"/>
+	    </package>
+	    <package name="zip" version="1-3" arch="i386"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="1-3" arch="i386"/>
+		<package name="zsh" version="1-1" arch="x86_64"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireXtra2_64MultiLib">
+	<set name="system"/>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="x86_64">
+		<requires name="zip"/>
+	    </package>
+	    <package name="zip" version="1-3" arch="i386"/>
+	    <package name="zip" version="1-3" arch="x86_64"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zsh" version="1-1" arch="x86_64"/>
+		<package name="zip" version="1-3" arch="x86_64"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testInstallSinglePackageRequireXtra2_32MultiLib">
+	<set name="system"/>
+	<set name="repo">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip"/>
+	    </package>
+	    <package name="zip" version="1-3" arch="i386"/>
+	    <package name="zip" version="1-3" arch="x86_64"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="1-3" arch="i386"/>
+		<package name="zsh" version="1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testUpdateSinglePackage">
+	<set name="system">
+	    <package name="zsh" version="1-1" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-3" arch="i386"/>
+	</set>
+	<transaction>
+	    <update name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zsh" version="1-3" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testUpdateForDependency">
+	<set name="system">
+	    <package name="zip" version="0:1-1" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="0:1-1" arch="i386">
+		<requires name="zip" relation="EQ" version="0:2-1"/>
+	    </package>
+	    <package name="zip" version="0:2-1" arch="i386"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="0:2-1" arch="i386"/>
+		<package name="zsh" version="0:1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testUpdateSplitPackage">
+	<set name="system">
+	    <package name="zip" version="0:1-1" arch="i386">
+		<provides name="libzip" relation="EQ" version="0:1-1"/>
+	    </package>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="0:1-1" arch="i386">
+		<requires name="libzip" relation="EQ" version="0:2-1"/>
+	    </package>
+	    <package name="zip" version="0:2-1" arch="i386">
+		<requires name="zip-libs" relation="EQ" version="0:2-1"/>
+	    </package>
+	    <package name="zip-libs" version="0:2-1" arch="i386">
+		<provides name="libzip" relation="EQ" version="0:2-1"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="0:1-1" arch="i386"/>
+		<package name="zip-libs" version="0:2-1" arch="i386"/>
+		<package name="zsh" version="0:1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testUpdateSinglePackageNewRequires">
+	<set name="system">
+	    <package name="zsh" version="1-1" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-3" arch="i386">
+		<requires name="zip"/>
+	    </package>
+	    <package name="zip" version="1-3" arch="x86_64"/>
+	</set>
+	<transaction>
+	    <update name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zsh" version="1-3" arch="i386"/>
+		<package name="zip" version="1-3" arch="x86_64"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testUpdateSinglePackageOldRequires">
+	<set name="system">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip"/>
+	    </package>
+	    <package name="zip" version="1-3" arch="x86_64"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-3" arch="i386">
+		<requires name="zip"/>
+	    </package>
+	</set>
+	<transaction>
+	    <update name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="1-3" arch="x86_64"/>
+		<package name="zsh" version="1-3" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testUpdateSinglePackageOldRequiresGone">
+	<set name="system">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip"/>
+	    </package>
+	    <package name="zip" version="1-3" arch="x86_64"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-3" arch="i386"/>
+	</set>
+	<transaction>
+	    <update name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="1-3" arch="x86_64"/>
+		<package name="zsh" version="1-3" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testUpdateSinglePackageObsoletesOldRequirement">
+	<set name="system">
+	    <package name="zsh" version="1-1" arch="i386">
+		<requires name="zip"/>
+	    </package>
+	    <package name="zip" version="1-1" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="1-3" arch="i386">
+		<!-- depsolvetests.py actually adds the obsoletes
+		     to the installed zsh rather than the new zsh,
+		     but I'm assuming that's a bug -->
+		<obsoletes name="zip"/>
+	    </package>
+	</set>
+	<transaction>
+	    <update name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zsh" version="1-3" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testUpdateForConflict">
+	<set name="system">
+	    <package name="zip" version="0:1-1" arch="i386"/>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="0:1-1" arch="i386">
+		<conflicts name="zip" relation="LE" version="0:1-1"/>
+	    </package>
+	    <package name="zip" version="0:2-1" arch="i386"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="0:2-1" arch="i386"/>
+		<package name="zsh" version="0:1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testUpdateForConflict2">
+	<set name="system">
+	    <package name="zip" version="0:1-1" arch="i386">
+		<conflicts name="zsh" relation="LE" version="0:1-1"/>
+	    </package>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="0:1-1" arch="i386"/>
+	    <package name="zip" version="0:2-1" arch="i386"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zsh" version="0:1-1" arch="i386"/>
+		<package name="zip" version="0:2-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testUpdateForConflictProvide">
+	<set name="system">
+	    <package name="zip" version="0:1-1" arch="i386">
+		<provides name="zippy" relation="EQ" version="0:1-1"/>
+	    </package>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="0:1-1" arch="i386">
+		<conflicts name="zippy" relation="LE" version="0:1-1"/>
+	    </package>
+	    <package name="zip" version="0:2-1" arch="i386"/>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="0:2-1" arch="i386"/>
+		<package name="zsh" version="0:1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testUpdateForConflictProvide2">
+	<set name="system">
+	    <package name="zip" version="0:1-1" arch="i386">
+		<conflicts name="zippy" relation="GT" version="0:1-1"/>
+		<conflicts name="zippy" relation="LT" version="0:1-1"/>
+	    </package>
+	</set>
+	<set name="repo">
+	    <package name="zsh" version="0:1-1" arch="i386">
+		<provides name="zippy" relation="EQ" version="0:2-1"/>
+	    </package>
+	    <package name="zip" version="0:2-1" arch="i386">
+		<conflicts name="zippy" relation="GT" version="0:2-1"/>
+		<conflicts name="zippy" relation="LT" version="0:2-1"/>
+	    </package>
+	</set>
+	<transaction>
+	    <install name="zsh"/>
+	</transaction>
+	<result>
+	    <set>
+		<package name="zip" version="0:2-1" arch="i386"/>
+		<package name="zsh" version="0:1-1" arch="i386"/>
+	    </set>
+	</result>
+    </test>
+
+    <test name="testEraseSinglePackage">
+	<set name="system">
+	    <package name="zsh" version="0:1-1" arch="i386"/>
+	</set>
+	<set name="repo"/>
+	<transaction>
+	    <remove name="zsh"/>
+	</transaction>
+	<result>
+	    <set/>
+	</result>
+    </test>
+
+    <test name="testEraseSinglePackageRequiredByOneInstalled">
+	<set name="system">
+	    <package name="zippy" version="0:1-1" arch="i386">
+		<requires name="zsh"/>
+	    </package>
+	    <package name="zsh" version="0:1-1" arch="i386"/>
+	</set>
+	<set name="repo"/>
+	<transaction>
+	    <remove name="zsh"/>
+	</transaction>
+	<result>
+	    <set/>
+	</result>
+    </test>
+</tests>

@@ -50,17 +50,16 @@ parse_xml_file(const char *filename,
 	close(fd);
 }
 
-struct test_set {
-	char *name;
-	struct razor_set *set;
-	struct test_set *next;
-};
-
 struct test_context {
+	struct razor_set *system_set, *repo_set, *result_set;
+
 	struct razor_importer *importer;
-	struct test_set *sets;
-	struct razor_package_iterator *package_iterator;
-	struct razor_property_iterator *property_iterator;
+	struct razor_set **importer_set;
+
+	char *install_pkgs[3], *remove_pkgs[3];
+	int n_install_pkgs, n_remove_pkgs;
+
+	int in_result, result_errors;
 };
 
 static void
@@ -82,234 +81,267 @@ get_atts(const char **atts, ...)
 	va_end(ap);
 }
 
-static void
-parse_property(struct test_context *ctx, const char **atts,
-	       enum razor_property_type type)
+static enum razor_version_relation
+parse_relation (const char *rel_str)
 {
-	const char *name = NULL, *version = NULL;
+	if (!rel_str)
+		return -1;
+	if (rel_str[0] == 'l')
+		return rel_str[1] == 'e' ? RAZOR_VERSION_LESS_OR_EQUAL : RAZOR_VERSION_LESS;
+	else if (rel_str[0] == 'g')
+		return rel_str[1] == 'e' ? RAZOR_VERSION_GREATER_OR_EQUAL : RAZOR_VERSION_GREATER;
+	else if (rel_str[0] == 'e' || rel_str[1] == 'q')
+		return RAZOR_VERSION_EQUAL;
+	else
+		return -1;
+}
 
-	get_atts(atts, "name", &name, "eq", &version, NULL);
+static void
+start_test(struct test_context *ctx, const char **atts)
+{
+	const char *name = NULL;
 
-	if (name == NULL) {
-		fprintf(stderr, "no name specified for property\n");
-		exit(-1);
+	get_atts(atts, "name", &name, NULL);
+	if (!name) {
+		fprintf(stderr, "Test with no name\n");
+		exit(1);
 	}
+	printf("%s\n", name);
+}
+
+static void
+end_test(struct test_context *ctx)
+{
+	if (ctx->system_set) {
+		razor_set_destroy(ctx->system_set);
+		ctx->system_set = NULL;
+	}
+	if (ctx->repo_set) {
+		razor_set_destroy(ctx->repo_set);
+		ctx->repo_set = NULL;
+	}
+	if (ctx->result_set) {
+		razor_set_destroy(ctx->result_set);
+		ctx->result_set = NULL;
+	}
+}
+
+static void
+start_set(struct test_context *ctx, const char **atts)
+{
+	const char *name = NULL;
+
+	ctx->importer = razor_importer_new();
+	get_atts(atts, "name", &name, NULL);
+	if (!name)
+		ctx->importer_set = &ctx->result_set;
+	else if (!strcmp(name, "system"))
+		ctx->importer_set = &ctx->system_set;
+	else if (!strcmp(name, "repo"))
+		ctx->importer_set = &ctx->repo_set;
+	else {
+		fprintf(stderr, "  bad set name '%s'\n", name);
+		exit(1);
+	}
+}
+
+static void
+end_set(struct test_context *ctx)
+{
+	*ctx->importer_set = razor_importer_finish(ctx->importer);
+	ctx->importer = NULL;
+}
+
+static void
+start_package(struct test_context *ctx, const char **atts)
+{
+	const char *name = NULL, *version = NULL, *arch = NULL;
+
+	get_atts(atts, "name", &name, "version", &version, "arch", &arch, NULL);
+	if (!name) {
+		fprintf(stderr, "  package with no name\n");
+		exit(1);
+	}
+
+	razor_importer_begin_package(ctx->importer, name, version);
+	razor_importer_add_property(ctx->importer, name,
+				    RAZOR_VERSION_EQUAL, version,
+				    RAZOR_PROPERTY_PROVIDES);
+}
+
+static void
+end_package(struct test_context *ctx)
+{
+	razor_importer_finish_package(ctx->importer);
+}
+
+static void
+start_property(struct test_context *ctx, enum razor_property_type type, const char **atts)
+{
+	const char *name = NULL, *rel_str = NULL, *version = NULL;
+	enum razor_version_relation rel;
+
+	get_atts(atts, "name", &name, "rel", &rel_str, "version", &version, NULL);
+	if (name == NULL) {
+		fprintf(stderr, "  no name specified for property\n");
+		exit(1);
+	}
+	if (version) {
+		rel = parse_relation(rel_str);
+		if (rel == -1) {
+			fprintf(stderr, "  bad or missing version relation for property %s\n", name);
+			exit(1);
+		}
+	} else
+		rel = RAZOR_VERSION_EQUAL;
 	
 	razor_importer_add_property(ctx->importer, name,
-				    RAZOR_VERSION_EQUAL, version, type);
+				    rel, version, type);
 }
 
 static void
-start_set_element(void *data, const char *element, const char **atts)
+start_transaction(struct test_context *ctx, const char **atts)
+{
+	ctx->n_install_pkgs = 0;
+	ctx->n_remove_pkgs = 0;
+}
+
+static void
+end_transaction(struct test_context *ctx)
+{
+	/* FIXME: removes */
+	ctx->system_set = razor_set_update(ctx->system_set,
+					   ctx->repo_set,
+					   ctx->n_install_pkgs,
+					   (const char **)ctx->install_pkgs);
+
+	while (ctx->n_install_pkgs--)
+		free(ctx->install_pkgs[ctx->n_install_pkgs]);
+	while (ctx->n_remove_pkgs--)
+		free(ctx->remove_pkgs[ctx->n_remove_pkgs]);
+}
+
+static void
+start_install_or_update(struct test_context *ctx, const char **atts)
+{
+	const char *name = NULL;
+
+	get_atts(atts, "name", &name, NULL);
+	if (!name) {
+		fprintf(stderr, "  install/update with no name\n");
+		exit(1);
+	}
+
+	ctx->install_pkgs[ctx->n_install_pkgs++] = strdup(name);
+}
+
+static void
+start_remove(struct test_context *ctx, const char **atts)
+{
+	const char *name = NULL;
+
+	get_atts(atts, "name", &name, NULL);
+	if (!name) {
+		fprintf(stderr, "  remove with no name\n");
+		exit(1);
+	}
+
+	ctx->remove_pkgs[ctx->n_remove_pkgs++] = strdup(name);
+}
+
+static void
+start_result(struct test_context *ctx, const char **atts)
+{
+	ctx->in_result = 1;
+}
+
+static void
+diff_callback(const char *name,
+	      const char *old_version, const char *new_version,
+	      void *data)
 {
 	struct test_context *ctx = data;
-	struct test_set *set;
-	const char *name, *version;
 
-	if (strcmp(element, "set") == 0) {
-		get_atts(atts, "name", &name, NULL);
-		ctx->importer = razor_importer_new();	
-		set = malloc(sizeof *set);
-		set->name = strdup(name);
-		set->next = ctx->sets;
-		ctx->sets = set;
-	} else if (strcmp(element, "package") == 0) {
-		get_atts(atts, "name", &name, "version", &version, NULL);
-		razor_importer_begin_package(ctx->importer, name, version);
-	} else if (strcmp(element, "requires") == 0) {
-		parse_property(ctx, atts, RAZOR_PROPERTY_REQUIRES);
-	} else if (strcmp(element, "provides") == 0) {
-		parse_property(ctx, atts, RAZOR_PROPERTY_PROVIDES);
-	} else if (strcmp(element, "obsoletes") == 0) {
-		parse_property(ctx, atts, RAZOR_PROPERTY_OBSOLETES);
-	} else if (strcmp(element, "conflicts") == 0) {
-		parse_property(ctx, atts, RAZOR_PROPERTY_CONFLICTS);
-	} else if (strcmp(element, "file") == 0) {
-		get_atts(atts, "name", &name, NULL);
-		razor_importer_add_file(ctx->importer, name);		
-	} else if (strcmp(element, "dir") == 0) {
-		get_atts(atts, "name", &name, NULL);
-		razor_importer_add_file(ctx->importer, name);		
-	}
-}
-
-static void
-end_set_element (void *data, const char *name)
-{
-	struct test_context *ctx = data;
-
-	if (strcmp(name, "set") == 0) {
-		ctx->sets->set = razor_importer_finish(ctx->importer);
-	} else if (strcmp(name, "package") == 0) {
-		razor_importer_finish_package(ctx->importer);
-	}
-}
-
-static struct razor_set *
-lookup_set(struct test_context *ctx, const char *name)
-{
-	struct test_set *set;
-
-	for (set = ctx->sets; set != NULL; set = set->next) {
-		if (strcmp(set->name, name) == 0)
-			return set->set;
-	}
-
-	return NULL;
-}
-
-static void
-verify_begin(struct test_context *ctx, const char **atts)
-{
-	struct razor_set *set;
-	const char *type, *name;
-
-	get_atts(atts, "type", &type, "set", &name, NULL);
-	set = lookup_set(ctx, name);
-	if (set == NULL) {
-		fprintf(stderr, "set %s not found\n", name);
-		exit(-1);
-	}
-
-	if (strcmp(type, "packages") == 0) {
-		ctx->package_iterator =
-			razor_package_iterator_create(set);
-	} else if (strcmp(type, "properties") == 0) {
-		ctx->property_iterator =
-			razor_property_iterator_create(set, NULL);
+	ctx->result_errors++;
+	if (old_version) {
+		fprintf(stderr, "  result set should not contain %s %s\n",
+			name, old_version);
 	} else {
-		fprintf(stderr,
-			"unknown compare type \"%s\"\n", type);
-		exit(-1);
+		fprintf(stderr, "  result set should contain %s %s\n",
+			name, new_version);
 	}
 }
 
 static void
-verify_end(struct test_context *ctx)
+end_result(struct test_context *ctx)
 {
-	struct razor_package *package;
-	struct razor_property *property;
-	const char *name, *version;
-	enum razor_property_type type;
-	enum razor_version_relation relation;
+	ctx->in_result = 0;
 
-	if (ctx->package_iterator != NULL) {
-		if (razor_package_iterator_next(ctx->package_iterator,
-						&package,
-						&name, &version)) {
-			fprintf(stderr, "too few packages in set\n");
-			exit(-1);
-		}
-				
-		razor_package_iterator_destroy(ctx->package_iterator);
-		ctx->package_iterator = NULL;
+	/* FIXME */
+	if (ctx->n_remove_pkgs) {
+		printf ("  (ignoring because of unimplemented remove)\n");
+		return;
 	}
 
-	if (ctx->property_iterator != NULL) {
-		if (razor_property_iterator_next(ctx->property_iterator,
-						 &property,
-						 &name, &relation, &version,
-						 &type)) {
-			fprintf(stderr, "too few properties in set\n");
-			exit(-1);
-		}
-
-		razor_property_iterator_destroy(ctx->property_iterator);
-		ctx->property_iterator = NULL;
+	if (ctx->system_set && ctx->result_set) {
+		ctx->result_errors = 0;
+		razor_set_diff(ctx->system_set, ctx->result_set,
+			       diff_callback, ctx);
+		if (ctx->result_errors)
+			exit(1);
 	}
+
 }
 
 static void
-verify_package(struct test_context *ctx, const char **atts)
+start_unsatisfied(struct test_context *ctx, const char **atts)
 {
-	struct razor_package *package;
-	const char *name, *version, *ref_name, *ref_version;
-
-	if (ctx->package_iterator == NULL) {
-		fprintf(stderr,
-			"\"package\" element seen, "
-			"but not in package verify mode\n");
-		exit(-1);
-	}
-
-	get_atts(atts, "name", &ref_name, "version", &ref_version, NULL);
-	if (!razor_package_iterator_next(ctx->package_iterator,
-					 &package, &name, &version)) {
-		fprintf(stderr, "too many packages in set\n");
-		exit(-1);
-	}
-			
-	if (strcmp(name, ref_name) != 0 || strcmp(version, ref_version) != 0) {
-		fprintf(stderr,
-			"package mismatch; expected %s-%s, got %s-%s\n",
-			ref_name, ref_version, name, version);
-		exit(-1);
-	}
+	/* FIXME */
+	fprintf(stderr, "Can't handle <unsatisfied>\n");
+	exit(1);
 }
 
 static void
-verify_property(struct test_context *ctx,
-		enum razor_property_type ref_type, const char **atts)
+end_unsatisfied(struct test_context *ctx)
 {
-	struct razor_property *property;
-	const char *name, *version, *ref_name, *ref_version;
-	enum razor_property_type type;
-	enum razor_version_relation relation;
-	int same_version;
-
-	if (ctx->property_iterator == NULL) {
-		fprintf(stderr,
-			"\"requires/provides\" element seen, "
-			"but not in property verify mode\n");
-		exit(-1);
-	}
-
-	get_atts(atts, "name", &ref_name, "eq", &ref_version, NULL);
-	if (!razor_property_iterator_next(ctx->property_iterator, &property,
-					  &name, &relation, &version, &type)) {
-		fprintf(stderr, "too many properties in set\n");
-		exit(-1);
-	}
-			
-	if (version != NULL && ref_version != NULL)
-		same_version = strcmp(version, ref_version) == 0;
-	else if (version == NULL && ref_version == NULL)
-		same_version = 1;
-	else
-		same_version = 0;
-
-	if (strcmp(name, ref_name) != 0 || !same_version || type != ref_type) {
-		fprintf(stderr,
-			"property mismatch; expected %s-%s/%d, got %s-%s/%d\n",
-			ref_name, ref_version, ref_type,
-			name, version, type);
-		exit(-1);
-	}
 }
 
 static void
 start_test_element(void *data, const char *element, const char **atts)
 {
 	struct test_context *ctx = data;
-	const char *name;
 
-	if (strcmp(element, "import") == 0) {
-		get_atts(atts, "file", &name, NULL);
-		parse_xml_file(name, start_set_element, end_set_element, ctx);
-	} else if (strcmp(element, "update") == 0) {
-		/* run update to create new set */
-	} else if (strcmp(element, "verify") == 0) {
-		verify_begin(ctx, atts);
+	if (strcmp(element, "tests") == 0) {
+		;
+	} else if (strcmp(element, "test") == 0) {
+		start_test(ctx, atts);
+	} else if (strcmp(element, "set") == 0) {
+		start_set(ctx, atts);
+	} else if (strcmp(element, "transaction") == 0) {
+		start_transaction(ctx, atts);
+	} else if (strcmp(element, "install") == 0) {
+		start_install_or_update(ctx, atts);
+	} else if (strcmp(element, "install") == 0) {
+		start_install_or_update(ctx, atts);
+	} else if (strcmp(element, "remove") == 0) {
+		start_remove(ctx, atts);
+	} else if (strcmp(element, "result") == 0) {
+		start_result(ctx, atts);
+	} else if (strcmp(element, "unsatisfied") == 0) {
+		start_unsatisfied(ctx, atts);
 	} else if (strcmp(element, "package") == 0) {
-		verify_package(ctx, atts);
+		start_package(ctx, atts);
 	} else if (strcmp(element, "requires") == 0) {
-		verify_property(ctx, RAZOR_PROPERTY_REQUIRES, atts);
+		start_property(ctx, RAZOR_PROPERTY_REQUIRES, atts);
 	} else if (strcmp(element, "provides") == 0) {
-		verify_property(ctx, RAZOR_PROPERTY_PROVIDES, atts);
+		start_property(ctx, RAZOR_PROPERTY_PROVIDES, atts);
 	} else if (strcmp(element, "conflicts") == 0) {
-		verify_property(ctx, RAZOR_PROPERTY_CONFLICTS, atts);
+		start_property(ctx, RAZOR_PROPERTY_CONFLICTS, atts);
 	} else if (strcmp(element, "obsoletes") == 0) {
-		verify_property(ctx, RAZOR_PROPERTY_OBSOLETES, atts);
+		start_property(ctx, RAZOR_PROPERTY_OBSOLETES, atts);
+	} else {
+		fprintf(stderr, "Unrecognized element '%s'\n", element);
+		exit(1);
 	}
 }
 
@@ -318,8 +350,19 @@ end_test_element (void *data, const char *element)
 {
 	struct test_context *ctx = data;
 
-	if (strcmp(element, "verify") == 0)
-		verify_end(ctx);
+	if (strcmp(element, "test") == 0) {
+		end_test(ctx);
+	} else if (strcmp(element, "set") == 0) {
+		end_set(ctx);
+	} else if (strcmp(element, "package") == 0) {
+		end_package(ctx);
+	} else if (strcmp(element, "transaction") == 0) {
+		end_transaction(ctx);
+	} else if (strcmp(element, "result") == 0) {
+		end_result(ctx);
+	} else if (strcmp(element, "unsatisfied") == 0) {
+		end_unsatisfied(ctx);
+	}
 }
 
 int main(int argc, char *argv[])
