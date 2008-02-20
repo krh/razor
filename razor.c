@@ -1582,7 +1582,6 @@ rebuild_property_package_lists(struct razor_set *set)
 	struct array *pkgs, *a;
 	struct razor_package *pkg, *pkg_end;
 	struct razor_property *prop, *prop_end;
-	struct array *pool;
 	struct list *r;
 	uint32_t *q;
 	int count;
@@ -1590,10 +1589,9 @@ rebuild_property_package_lists(struct razor_set *set)
 	count = set->properties.size / sizeof (struct razor_property);
 	pkgs = zalloc(count * sizeof *pkgs);
 	pkg_end = set->packages.data + set->packages.size;
-	pool = &set->property_pool;
 
 	for (pkg = set->packages.data; pkg < pkg_end; pkg++) {
-		r = list_first(&pkg->properties, pool);
+		r = list_first(&pkg->properties, &set->property_pool);
 		while (r) {
 			q = array_add(&pkgs[r->data], sizeof *q);
 			*q = pkg - (struct razor_package *) set->packages.data;
@@ -1604,7 +1602,7 @@ rebuild_property_package_lists(struct razor_set *set)
 	prop_end = set->properties.data + set->properties.size;
 	a = pkgs;
 	for (prop = set->properties.data; prop < prop_end; prop++, a++) {
-		list_set_array(&prop->packages, pool, a, 0);
+		list_set_array(&prop->packages, &set->package_pool, a, 0);
 		array_release(a);
 	}
 	free(pkgs);
@@ -1616,7 +1614,6 @@ rebuild_file_package_lists(struct razor_set *set)
 	struct array *pkgs, *a;
 	struct razor_package *pkg, *pkg_end;
 	struct razor_entry *entry, *entry_end;
-	struct array *pool;
 	struct list *r;
 	uint32_t *q;
 	int count;
@@ -1624,10 +1621,9 @@ rebuild_file_package_lists(struct razor_set *set)
 	count = set->files.size / sizeof (struct razor_entry);
 	pkgs = zalloc(count * sizeof *pkgs);
 	pkg_end = set->packages.data + set->packages.size;
-	pool = &set->file_pool;
 
 	for (pkg = set->packages.data; pkg < pkg_end; pkg++) {
-		r = list_first(&pkg->files, pool);
+		r = list_first(&pkg->files, &set->file_pool);
 		while (r) {
 			q = array_add(&pkgs[r->data], sizeof *q);
 			*q = pkg - (struct razor_package *) set->packages.data;
@@ -1638,7 +1634,7 @@ rebuild_file_package_lists(struct razor_set *set)
 	entry_end = set->files.data + set->files.size;
 	a = pkgs;
 	for (entry = set->files.data; entry < entry_end; entry++, a++) {
-		list_set_array(&entry->packages, pool, a, 0);
+		list_set_array(&entry->packages, &set->package_pool, a, 0);
 		array_release(a);
 	}
 	free(pkgs);
