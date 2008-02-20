@@ -942,7 +942,7 @@ find_entry(struct razor_set *set, struct razor_entry *dir, const char *pattern)
 
 static void
 list_dir(struct razor_set *set, struct razor_entry *dir,
-	 const char *prefix, const char *pattern)
+	 char *prefix, const char *pattern)
 {
 	struct razor_entry *e;
 	const char *n, *pool = set->string_pool.data;
@@ -952,7 +952,14 @@ list_dir(struct razor_set *set, struct razor_entry *dir,
 		n = pool + e->name;
 		if (pattern && pattern[0] && fnmatch(pattern, n, 0) != 0)
 			continue;
-		printf("%s/%s%s\n", prefix, n, e->start > 0 ? "/" : "");
+		printf("%s/%s\n", prefix, n);
+		if (e->start) {
+			char *sub = prefix + strlen (prefix);
+			*sub = '/';
+			strcpy (sub + 1, n);
+			list_dir(set, e, prefix, pattern);
+			*sub = '\0';
+		}
 	} while (!((e++)->flags & RAZOR_ENTRY_LAST));
 }
 
@@ -962,8 +969,11 @@ razor_set_list_files(struct razor_set *set, const char *pattern)
 	struct razor_entry *e;
 	char buffer[512], *p, *base;
 
-	if (pattern == NULL)
-		pattern = "/";
+	if (pattern == NULL || !strcmp (pattern, "/")) {
+		buffer[0] = '\0';
+		list_dir(set, set->files.data, buffer, NULL);
+		return;
+	}
 
 	strcpy(buffer, pattern);
 	e = find_entry(set, set->files.data, buffer);
@@ -1152,6 +1162,7 @@ razor_set_list_unsatisfied(struct razor_set *set)
 struct source {
 	struct razor_set *set;
 	uint32_t *property_map;
+	uint32_t *file_map;
 };
 
 struct razor_merger {
@@ -1172,15 +1183,21 @@ razor_merger_create(struct razor_set *set1, struct razor_set *set2)
 	merger->set = razor_set_create();
 	hashtable_init(&merger->table, &merger->set->string_pool);
 
+	merger->source1.set = set1;
 	count = set1->properties.size / sizeof (struct razor_property);
 	size = count * sizeof merger->source1.property_map[0];
 	merger->source1.property_map = zalloc(size);
-	merger->source1.set = set1;
+	count = set1->files.size / sizeof (struct razor_entry);
+	size = count * sizeof merger->source1.file_map[0];
+	merger->source1.file_map = zalloc(size);
 
+	merger->source2.set = set2;
 	count = set2->properties.size / sizeof (struct razor_property);
 	size = count * sizeof merger->source2.property_map[0];
 	merger->source2.property_map = zalloc(size);
-	merger->source2.set = set2;
+	count = set2->files.size / sizeof (struct razor_entry);
+	size = count * sizeof merger->source2.file_map[0];
+	merger->source2.file_map = zalloc(size);
 
 	return merger;
 }
@@ -1200,11 +1217,18 @@ add_package(struct razor_merger *merger,
 	p->flags = flags;
 	p->version = hashtable_tokenize(&merger->table,
 					&pool[package->version]);
-	p->properties = package->properties;
 
+	p->properties = package->properties;
 	r = list_first(&package->properties, &source->set->property_pool);
 	while (r) {
 		source->property_map[r->data] = 1;
+		r = list_next(r);
+	}
+
+	p->files = package->files;
+	r = list_first(&package->files, &source->set->file_pool);
+	while (r) {
+		source->file_map[r->data] = 1;
 		r = list_next(r);
 	}
 }
@@ -1358,13 +1382,202 @@ emit_properties(struct list_head *properties, struct array *source_pool,
 
 	list_set_ptr(properties, r);
 }
-	
+
+static uint32_t
+add_file(struct razor_merger *merger, const char *name)
+{
+	struct razor_entry *e;
+
+	e = array_add(&merger->set->files, sizeof *e);
+	e->name = hashtable_tokenize(&merger->table, name);
+	e->flags = 0;
+	e->start = 0;
+
+	return e - (struct razor_entry *)merger->set->files.data;
+}
+
+static int
+fix_file_map(uint32_t *map,
+	     struct razor_entry *files,
+	     struct razor_entry *top)
+{
+	uint32_t e;
+	int found_file = 0;
+
+	e = top->start;
+	do {
+		if (files[e].start)
+			fix_file_map(map, files, &files[e]);
+		if (map[e])
+			found_file = 1;
+	} while (!(files[e++].flags & RAZOR_ENTRY_LAST));
+
+	if (found_file)
+		map[top - files] = 1;
+	return found_file;
+}
+
+struct merge_directory {
+	uint32_t merged, dir1, dir2;
+};
+
+static void
+merge_one_directory(struct razor_merger *merger, struct merge_directory *md)
+{
+	struct razor_entry *root1, *root2, *mroot, *e1, *e2;
+	struct razor_set *set1, *set2;
+	struct array merge_stack;
+	struct merge_directory *child_md, *end_md;
+	uint32_t *map1, *map2, start, last;
+	int cmp;
+	char *pool1, *pool2;
+
+	set1 = merger->source1.set;
+	set2 = merger->source2.set;
+	map1 = merger->source1.file_map;
+	map2 = merger->source2.file_map;
+	pool1 = set1->string_pool.data;
+	pool2 = set2->string_pool.data;
+	root1 = (struct razor_entry *) set1->files.data;
+	root2 = (struct razor_entry *) set2->files.data;
+
+	array_init(&merge_stack);
+
+	start = merger->set->files.size / sizeof (struct razor_entry);
+	last = 0;
+	e1 = md->dir1 ? root1 + md->dir1 : NULL;
+	e2 = md->dir2 ? root2 + md->dir2 : NULL;
+	while (e1 || e2) {
+		if (!e2 && !map1[e1 - root1]) {
+			if ((e1++)->flags & RAZOR_ENTRY_LAST)
+				e1 = NULL;
+			continue;
+		}
+		if (!e1 && !map2[e2 - root2]) {
+			if ((e2++)->flags & RAZOR_ENTRY_LAST)
+				e2 = NULL;
+			continue;
+		}
+		if (e1 && !map1[e1 - root1] &&
+		    e2 && !map1[e2 - root2]) {
+			if ((e1++)->flags & RAZOR_ENTRY_LAST)
+				e1 = NULL;
+			if ((e2++)->flags & RAZOR_ENTRY_LAST)
+				e2 = NULL;
+			continue;
+		}
+
+		if (!e1)
+			cmp = 1;
+		else if (!e2)
+			cmp = -1;
+		else {
+			cmp = strcmp (&pool1[e1->name],
+				      &pool2[e2->name]);
+		}
+
+		if (cmp < 0) {
+			if (map1[e1 - root1]) {
+				map1[e1 - root1] = last =
+					add_file(merger, &pool1[e1->name]);
+				if (e1->start) {
+					child_md = array_add(&merge_stack, sizeof (struct merge_directory));
+					child_md->merged = last;
+					child_md->dir1 = e1->start;
+					child_md->dir2 = 0;
+				}
+			}
+			if ((e1++)->flags & RAZOR_ENTRY_LAST)
+				e1 = NULL;
+		} else if (cmp > 0) {
+			if (map2[e2 - root2]) {
+				map2[e2 - root2] = last =
+					add_file(merger, &pool2[e2->name]);
+				if (e2->start) {
+					child_md = array_add(&merge_stack, sizeof (struct merge_directory));
+					child_md->merged = last;
+					child_md->dir1 = 0;
+					child_md->dir2 = e2->start;
+				}
+			}
+			if ((e2++)->flags & RAZOR_ENTRY_LAST)
+				e2 = NULL;
+		} else {
+			map1[e1 - root1] = map2[e2- root2] = last =
+				add_file(merger, &pool1[e1->name]);
+			if (e1->start || e2->start) {
+				child_md = array_add(&merge_stack, sizeof (struct merge_directory));
+				child_md->merged = last;
+				child_md->dir1 = e1->start;
+				child_md->dir2 = e2->start;
+			}
+			if ((e1++)->flags & RAZOR_ENTRY_LAST)
+				e1 = NULL;
+			if ((e2++)->flags & RAZOR_ENTRY_LAST)
+				e2 = NULL;
+		}
+	}
+
+	mroot = (struct razor_entry *)merger->set->files.data;
+	if (last) {
+		mroot[last].flags = RAZOR_ENTRY_LAST;
+		mroot[md->merged].start = start;
+	} else
+		mroot[md->merged].start = 0;
+
+	end_md = merge_stack.data + merge_stack.size;
+	for (child_md = merge_stack.data; child_md < end_md; child_md++)
+		merge_one_directory(merger, child_md);
+	array_release(&merge_stack);
+}
+
+static void
+merge_files(struct razor_merger *merger)
+{
+	struct razor_entry *root1, *root2;
+	struct merge_directory md;
+	uint32_t *map1, *map2;
+
+	map1 = merger->source1.file_map;
+	map2 = merger->source2.file_map;
+	root1 = (struct razor_entry *) merger->source1.set->files.data;
+	root2 = (struct razor_entry *) merger->source2.set->files.data;
+
+	/* FIXME. Blah */
+	fix_file_map(map1, root1, root1);
+	fix_file_map(map2, root2, root2);
+
+	md.merged = add_file(merger, "");
+	md.dir1 = root1->start;
+	md.dir2 = root2->start;
+	merge_one_directory(merger, &md);
+}
+
+static void
+emit_files(struct list_head *files, struct array *source_pool,
+	   uint32_t *map, struct array *pool)
+{
+	uint32_t r;
+	struct list *p, *q;
+
+	r = pool->size / sizeof *q;
+	p = list_first(files, source_pool);
+	while (p) {
+		q = array_add(pool, sizeof *q);
+		q->data = map[p->data];
+		q->flags = p->flags;
+		p = list_next(p);
+	}
+
+	list_set_ptr(files, r);
+}
+
 /* Rebuild property->packages maps.  We can't just remap these, as a
  * property may have lost or gained a number of packages.  Allocate an
  * array per property and loop through the packages and add them to
  * the arrays for their properties. */
 static void
-rebuild_package_lists(struct razor_set *set)
+rebuild_property_package_lists(struct razor_set *set)
 {
 	struct array *pkgs, *a;
 	struct razor_package *pkg, *pkg_end;
@@ -1392,6 +1605,40 @@ rebuild_package_lists(struct razor_set *set)
 	a = pkgs;
 	for (prop = set->properties.data; prop < prop_end; prop++, a++) {
 		list_set_array(&prop->packages, pool, a, 0);
+		array_release(a);
+	}
+	free(pkgs);
+}
+
+static void
+rebuild_file_package_lists(struct razor_set *set)
+{
+	struct array *pkgs, *a;
+	struct razor_package *pkg, *pkg_end;
+	struct razor_entry *entry, *entry_end;
+	struct array *pool;
+	struct list *r;
+	uint32_t *q;
+	int count;
+
+	count = set->files.size / sizeof (struct razor_entry);
+	pkgs = zalloc(count * sizeof *pkgs);
+	pkg_end = set->packages.data + set->packages.size;
+	pool = &set->file_pool;
+
+	for (pkg = set->packages.data; pkg < pkg_end; pkg++) {
+		r = list_first(&pkg->files, pool);
+		while (r) {
+			q = array_add(&pkgs[r->data], sizeof *q);
+			*q = pkg - (struct razor_package *) set->packages.data;
+			r = list_next(r);
+		}
+	}
+
+	entry_end = set->files.data + set->files.size;
+	a = pkgs;
+	for (entry = set->files.data; entry < entry_end; entry++, a++) {
+		list_set_array(&entry->packages, pool, a, 0);
 		array_release(a);
 	}
 	free(pkgs);
@@ -1439,6 +1686,7 @@ razor_set_add(struct razor_set *set, struct razor_set *upstream,
 	 * property list for both sets. */
 
 	merge_properties(merger);
+	merge_files(merger);
 
 	/* Now we loop through the packages again and emit the
 	 * property lists, remapped to point to the new properties. */
@@ -1456,10 +1704,15 @@ razor_set_add(struct razor_set *set, struct razor_set *upstream,
 				&src->set->property_pool,
 				src->property_map,
 				&merger->set->property_pool);
+		emit_files(&p->files,
+			   &src->set->file_pool,
+			   src->file_map,
+			   &merger->set->file_pool);
 		p->flags &= ~UPSTREAM_SOURCE;
 	}
 
-	rebuild_package_lists(merger->set);
+	rebuild_property_package_lists(merger->set);
+	rebuild_file_package_lists(merger->set);
 
 	return razor_merger_finish(merger);
 }
