@@ -530,8 +530,29 @@ compare_filenames(const void *p1, const void *p2, void *data)
 {
 	const struct import_entry *e1 = p1;
 	const struct import_entry *e2 = p2;
+	const char *n1 = e1->name;
+	const char *n2 = e2->name;
 
-	return strcmp(e1->name, e2->name);
+	/* Need to make sure that the contents of a directory
+	 * are sorted immediately after it. So "foo/bar" has to
+	 * sort before "foo.conf"
+	 *
+	 * FIXME: this is about 60% slower than strcmp
+	 */
+	while (*n1 && *n2) {
+		if (*n1 < *n2)
+			return *n2 == '/' ? 1 : -1;
+		else if (*n1 > *n2)
+			return *n1 == '/' ? -1 : 1;
+		n1++;
+		n2++;
+	}
+	if (*n1)
+		return 1;
+	else if (*n2)
+		return -1;
+	else
+		return 0;
 }
 
 static void
