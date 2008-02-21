@@ -65,6 +65,8 @@ void razor_set_list_unsatisfied(struct razor_set *set);
 struct razor_set *razor_set_update(struct razor_set *set,
 				   struct razor_set *upstream,
 				   int count, const char **packages);
+struct razor_set *razor_set_remove(struct razor_set *set,
+				   int count, const char **packages);
 
 typedef void (*razor_package_callback_t)(const char *name,
 					 const char *old_version,

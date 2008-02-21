@@ -676,7 +676,7 @@ build_file_tree(struct razor_importer *importer)
 	e = array_add(&importer->set->files, sizeof *e);
 	e->name = root.name;
 	e->flags = RAZOR_ENTRY_LAST;
-	e->start = 1;
+	e->start = importer->files.size ? 1 : 0;
 	list_set_empty(&e->packages);
 
 	serialize_files(importer->set, &root, &importer->set->files);
@@ -1093,12 +1093,10 @@ razor_set_validate(struct razor_set *set, struct array *unsatisfied)
 		if (r->type != RAZOR_PROPERTY_REQUIRES)
 			continue;
 
-		if (r->name != p->name) {
-			p = r;
-			while (p < end && p->name == r->name &&
-			       p->type == r->type)
-				p++;
-		}
+		p = r;
+		while (p < end && p->name == r->name &&
+		       p->type == r->type)
+			p++;
 
 		/* If there is more than one version of a provides,
 		 * seek to the end for the highest version. */
@@ -1396,6 +1394,7 @@ add_file(struct razor_merger *merger, const char *name)
 	return e - (struct razor_entry *)merger->set->files.data;
 }
 
+/* FIXME. Blah */
 static int
 fix_file_map(uint32_t *map,
 	     struct razor_entry *files,
@@ -1534,22 +1533,31 @@ merge_one_directory(struct razor_merger *merger, struct merge_directory *md)
 static void
 merge_files(struct razor_merger *merger)
 {
-	struct razor_entry *root1, *root2;
+	struct razor_entry *root;
 	struct merge_directory md;
 	uint32_t *map1, *map2;
 
 	map1 = merger->source1.file_map;
 	map2 = merger->source2.file_map;
-	root1 = (struct razor_entry *) merger->source1.set->files.data;
-	root2 = (struct razor_entry *) merger->source2.set->files.data;
-
-	/* FIXME. Blah */
-	fix_file_map(map1, root1, root1);
-	fix_file_map(map2, root2, root2);
 
 	md.merged = add_file(merger, "");
-	md.dir1 = root1->start;
-	md.dir2 = root2->start;
+
+	if (merger->source1.set->files.size) {
+		root = (struct razor_entry *) merger->source1.set->files.data;
+		if (root->start)
+			fix_file_map(map1, root, root);
+		md.dir1 = root->start;
+	} else
+		md.dir1 = 0;
+
+	if (merger->source2.set->files.size) {
+		root = (struct razor_entry *) merger->source2.set->files.data;
+		if (root->start)
+			fix_file_map(map2, root, root);
+		md.dir2 = root->start;
+	} else
+		md.dir2 = 0;
+
 	merge_one_directory(merger, &md);
 }
 
@@ -1644,34 +1652,7 @@ struct razor_set *
 razor_merger_finish(struct razor_merger *merger)
 {
 	struct razor_set *result;
-
-	result = merger->set;
-	hashtable_release(&merger->table);
-	free(merger);
-
-	return result;
-}
-
-/* Add packages from 'upstream' to 'set'.  The packages to add are
- * specified by the 'packages' array, which is a sorted list of
- * package indexes.  Returns a newly allocated package set.  Does not
- * enforce validity of the resulting package set.
- *
- * This looks more complicated than it is.  An easy way to merge two
- * package sets would be to just use a razor_importer, but that
- * requires resorting, and is thus O(n log n).  We can do this in a
- * linear sweep, but it gets a little more complicated.
- */
-struct razor_set *
-razor_set_add(struct razor_set *set, struct razor_set *upstream,
-	      struct array *packages)
-{
-	struct razor_merger *merger;
 	struct razor_package *p, *pend;
-
-	merger = razor_merger_create(set, upstream);
-
-	merge_packages(merger, packages);
 
 	/* As we built the package list, we filled out a bitvector of
 	 * the properties that are referenced by the packages in the
@@ -1709,6 +1690,33 @@ razor_set_add(struct razor_set *set, struct razor_set *upstream,
 
 	rebuild_property_package_lists(merger->set);
 	rebuild_file_package_lists(merger->set);
+
+	result = merger->set;
+	hashtable_release(&merger->table);
+	free(merger);
+
+	return result;
+}
+
+/* Add packages from 'upstream' to 'set'.  The packages to add are
+ * specified by the 'packages' array, which is a sorted list of
+ * package indexes.  Returns a newly allocated package set.  Does not
+ * enforce validity of the resulting package set.
+ *
+ * This looks more complicated than it is.  An easy way to merge two
+ * package sets would be to just use a razor_importer, but that
+ * requires resorting, and is thus O(n log n).  We can do this in a
+ * linear sweep, but it gets a little more complicated.
+ */
+struct razor_set *
+razor_set_add(struct razor_set *set, struct razor_set *upstream,
+	      struct array *packages)
+{
+	struct razor_merger *merger;
+
+	merger = razor_merger_create(set, upstream);
+
+	merge_packages(merger, packages);
 
 	return razor_merger_finish(merger);
 }
@@ -1836,6 +1844,108 @@ razor_set_update(struct razor_set *set, struct razor_set *upstream,
 
 	array_release(&list);
 
+	return set;
+}
+
+static struct razor_set *
+razor_set_remove_internal(struct razor_set *set, struct array *list,
+			  struct array *unsatisfied)
+{
+	struct razor_set *empty, *new;
+	struct razor_merger *merger;
+	struct razor_package *pkgs;
+	int pkg_count, remove_count, p, r;
+	struct array unsatisfied_before;
+	uint32_t *u, *uend, *ub, *ubend;
+	struct razor_property *props, *propsb;
+	char *pool, *poolb;
+
+	array_init(&unsatisfied_before);
+	razor_set_validate(set, &unsatisfied_before);
+
+	empty = razor_set_create();
+	merger = razor_merger_create(set, empty);
+
+	remove_count = list->size / sizeof (uint32_t);
+	pkg_count = set->packages.size / sizeof (struct razor_package);
+	pkgs = set->packages.data;
+
+	for (p = 0; p < pkg_count; p++) {
+		for (r = 0; r < remove_count; r++) {
+			if (p == ((uint32_t *)list->data)[r])
+				goto skip;
+		}
+
+		add_package(merger, &pkgs[p], &merger->source1, 0);
+	skip:
+		;
+	}
+
+	new = razor_merger_finish(merger);
+
+	razor_set_validate(new, unsatisfied);
+
+	ubend = unsatisfied_before.data + unsatisfied_before.size;
+	uend = unsatisfied->data + unsatisfied->size;
+	props = new->properties.data;
+	propsb = set->properties.data;
+	pool = new->string_pool.data;
+	poolb = set->string_pool.data;
+
+	for (u = unsatisfied->data; u < uend; u++) {
+		for (ub = unsatisfied_before.data; ub < ubend; ub++) {
+			if (!strcmp (&pool[props[*u].name],
+				     &poolb[propsb[*ub].name]) &&
+			    props[*u].relation == propsb[*ub].relation &&
+			    !strcmp (&pool[props[*u].version],
+				     &poolb[propsb[*ub].version])) {
+				*(u--) = *(--uend);
+				break;
+			}
+		}
+	}
+
+	unsatisfied->size = (void *)uend - unsatisfied->data;
+	return new;
+}
+
+struct razor_set *
+razor_set_remove(struct razor_set *set, int count, const char **packages)
+{
+	struct razor_set *new;
+	struct array list, unsatisfied;
+	struct razor_property *props;
+	uint32_t *u, *uend, *p;
+	struct list *r;
+
+	array_init(&list);
+	find_packages(set, count, packages, &list);
+
+	while (list.size > 0) {
+		array_init(&unsatisfied);
+		new = razor_set_remove_internal(set, &list, &unsatisfied);
+		array_release(&list);
+		razor_set_destroy(set);
+		set = new;
+
+		props = set->properties.data;
+		array_init(&list);
+		uend = unsatisfied.data + unsatisfied.size;
+		for (u = unsatisfied.data; u < uend; u++) {
+			if (props[*u].type == RAZOR_PROPERTY_REQUIRES) {
+				r = list_first(&props[*u].packages, &set->package_pool);
+				while (r) {
+					p = array_add(&list, sizeof *p);
+					*p = r->data;
+					r = list_next(r);
+				}
+			}
+		}
+
+		array_release(&unsatisfied);
+	}
+
+	array_release(&list);
 	return set;
 }
 

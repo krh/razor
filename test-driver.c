@@ -209,11 +209,13 @@ start_transaction(struct test_context *ctx, const char **atts)
 static void
 end_transaction(struct test_context *ctx)
 {
-	/* FIXME: removes */
 	ctx->system_set = razor_set_update(ctx->system_set,
 					   ctx->repo_set,
 					   ctx->n_install_pkgs,
 					   (const char **)ctx->install_pkgs);
+	ctx->system_set = razor_set_remove(ctx->system_set,
+					   ctx->n_remove_pkgs,
+					   (const char **)ctx->remove_pkgs);
 
 	while (ctx->n_install_pkgs--)
 		free(ctx->install_pkgs[ctx->n_install_pkgs]);
@@ -276,12 +278,6 @@ static void
 end_result(struct test_context *ctx)
 {
 	ctx->in_result = 0;
-
-	/* FIXME */
-	if (ctx->n_remove_pkgs) {
-		printf ("  (ignoring because of unimplemented remove)\n");
-		return;
-	}
 
 	if (ctx->system_set && ctx->result_set) {
 		ctx->result_errors = 0;

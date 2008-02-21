@@ -339,6 +339,22 @@ command_update(int argc, const char *argv[])
 	return 0;
 }
 
+static int
+command_remove(int argc, const char *argv[])
+{
+	struct razor_set *set;
+
+	set = razor_set_open(repo_filename);
+	if (set == NULL)
+		return 1;
+	set = razor_set_remove(set, argc, argv);
+	razor_set_write(set, updated_repo_filename);
+	razor_set_destroy(set);
+	printf("wrote system-updated.repo\n");
+
+	return 0;
+}
+
 static void
 print_diff(const char *name,
 	   const char *old_version, const char *new_version, void *data)
@@ -483,6 +499,7 @@ static struct {
 	{ "import-rpms", "import rpms from the given directory", command_import_rpms },
 	{ "validate", "validate a package set", command_validate },
 	{ "update", "update all or specified packages", command_update },
+	{ "remove", "remove specified packages", command_remove },
 	{ "diff", "show diff between two package sets", command_diff },
 	{ "install", "install rpm", command_install }
 };
