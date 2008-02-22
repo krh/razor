@@ -1847,65 +1847,110 @@ razor_set_update(struct razor_set *set, struct razor_set *upstream,
 	return set;
 }
 
+/* Look through pkg's PROVIDES, and for each one that no other package
+ * provides, add its property index to lost_provides.
+ */
+static void
+gather_lost_provides(struct razor_set *set, struct razor_package *pkg,
+		     struct array *lost_provides)
+{
+	struct razor_property *props = set->properties.data, *prop;
+	struct list *p, *providers;
+	uint32_t *lost;
+
+	for (p = list_first(&pkg->properties, &set->property_pool); p; p = list_next(p)) {
+		prop = &props[p->data];
+		if (prop->type != RAZOR_PROPERTY_PROVIDES)
+			continue;
+
+		providers = list_first(&prop->packages, &set->package_pool);
+		if (providers && !list_next(providers)) {
+			lost = array_add(lost_provides, sizeof *lost);
+			*lost = p->data;
+		}
+	}
+}
+
+/* Add the index of each package required by req that isn't already in
+ * lost_requires, to lost_requires
+ */
+static void
+gather_lost_requires(struct razor_set *set, struct razor_property *req,
+		     struct array *lost_requires)
+{
+	struct list *p;
+	uint32_t *lost, *already_lost, *already_end;
+
+	for (p = list_first(&req->packages, &set->package_pool); p; p = list_next(p)) {
+		already_end = lost_requires->data + lost_requires->size;
+		for (already_lost = lost_requires->data; already_lost < already_end; already_lost++) {
+			if (*already_lost == p->data)
+				break;
+		}
+
+		if (already_lost == already_end) {
+			lost = array_add(lost_requires, sizeof *lost);
+			*lost = p->data;
+		}
+	}
+}
+
 static struct razor_set *
-razor_set_remove_internal(struct razor_set *set, struct array *list,
-			  struct array *unsatisfied)
+razor_set_remove_internal(struct razor_set *set, struct array *list)
 {
 	struct razor_set *empty, *new;
 	struct razor_merger *merger;
 	struct razor_package *pkgs;
 	int pkg_count, remove_count, p, r;
-	struct array unsatisfied_before;
-	uint32_t *u, *uend, *ub, *ubend;
-	struct razor_property *props, *propsb;
-	char *pool, *poolb;
+	uint32_t *remove, *lost, *lost_end;
+	struct razor_property *props, *prop_end, *req;
+	struct array lost_provides;
 
-	array_init(&unsatisfied_before);
-	razor_set_validate(set, &unsatisfied_before);
+	pkgs = set->packages.data;
+	pkg_count = set->packages.size / sizeof (struct razor_package);
+	props = set->properties.data;
+	prop_end = set->properties.data + set->properties.size;
+
+	remove = list->data;
+	remove_count = list->size / sizeof (uint32_t);
+	r = 0;
+	while (r < remove_count) {
+		array_init(&lost_provides);
+		for (; r < remove_count; r++)
+			gather_lost_provides(set, &pkgs[remove[r]], &lost_provides);
+
+		lost_end = lost_provides.data + lost_provides.size;
+		for (lost = lost_provides.data; lost < lost_end; lost++) {
+			/* Requires FOO will appear before Provides FOO */
+			for (req = &props[*lost]; req > props && req->name == props[*lost].name && req->type != RAZOR_PROPERTY_REQUIRES; req--)
+				;
+			/* FIXME: versioned deps... */
+			while (req > props && req->name == props[*lost].name) {
+				gather_lost_requires(set, req, list);
+				req--;
+			}
+		}
+		array_release(&lost_provides);
+
+		remove = list->data;
+		remove_count = list->size / sizeof (uint32_t);
+	}
 
 	empty = razor_set_create();
 	merger = razor_merger_create(set, empty);
 
-	remove_count = list->size / sizeof (uint32_t);
-	pkg_count = set->packages.size / sizeof (struct razor_package);
-	pkgs = set->packages.data;
-
 	for (p = 0; p < pkg_count; p++) {
 		for (r = 0; r < remove_count; r++) {
-			if (p == ((uint32_t *)list->data)[r])
+			if (p == remove[r])
 				goto skip;
 		}
-
 		add_package(merger, &pkgs[p], &merger->source1, 0);
 	skip:
 		;
 	}
 
 	new = razor_merger_finish(merger);
-
-	razor_set_validate(new, unsatisfied);
-
-	ubend = unsatisfied_before.data + unsatisfied_before.size;
-	uend = unsatisfied->data + unsatisfied->size;
-	props = new->properties.data;
-	propsb = set->properties.data;
-	pool = new->string_pool.data;
-	poolb = set->string_pool.data;
-
-	for (u = unsatisfied->data; u < uend; u++) {
-		for (ub = unsatisfied_before.data; ub < ubend; ub++) {
-			if (!strcmp (&pool[props[*u].name],
-				     &poolb[propsb[*ub].name]) &&
-			    props[*u].relation == propsb[*ub].relation &&
-			    !strcmp (&pool[props[*u].version],
-				     &poolb[propsb[*ub].version])) {
-				*(u--) = *(--uend);
-				break;
-			}
-		}
-	}
-
-	unsatisfied->size = (void *)uend - unsatisfied->data;
+	razor_set_destroy(empty);
 	return new;
 }
 
@@ -1913,40 +1958,14 @@ struct razor_set *
 razor_set_remove(struct razor_set *set, int count, const char **packages)
 {
 	struct razor_set *new;
-	struct array list, unsatisfied;
-	struct razor_property *props;
-	uint32_t *u, *uend, *p;
-	struct list *r;
+	struct array list;
 
 	array_init(&list);
 	find_packages(set, count, packages, &list);
-
-	while (list.size > 0) {
-		array_init(&unsatisfied);
-		new = razor_set_remove_internal(set, &list, &unsatisfied);
-		array_release(&list);
-		razor_set_destroy(set);
-		set = new;
-
-		props = set->properties.data;
-		array_init(&list);
-		uend = unsatisfied.data + unsatisfied.size;
-		for (u = unsatisfied.data; u < uend; u++) {
-			if (props[*u].type == RAZOR_PROPERTY_REQUIRES) {
-				r = list_first(&props[*u].packages, &set->package_pool);
-				while (r) {
-					p = array_add(&list, sizeof *p);
-					*p = r->data;
-					r = list_next(r);
-				}
-			}
-		}
-
-		array_release(&unsatisfied);
-	}
-
+	new = razor_set_remove_internal(set, &list);
 	array_release(&list);
-	return set;
+	razor_set_destroy(set);
+	return new;
 }
 
 /* The diff order matters.  We should sort the packages so that a
