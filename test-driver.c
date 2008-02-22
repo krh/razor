@@ -60,6 +60,7 @@ struct test_context {
 	int n_install_pkgs, n_remove_pkgs;
 
 	int in_result, result_errors;
+	int in_unsatisfiable;
 };
 
 static void
@@ -181,6 +182,9 @@ start_property(struct test_context *ctx, enum razor_property_type type, const ch
 	const char *name = NULL, *rel_str = NULL, *version = NULL;
 	enum razor_version_relation rel;
 
+	if (ctx->in_unsatisfiable)
+		return;
+
 	get_atts(atts, "name", &name, "rel", &rel_str, "version", &version, NULL);
 	if (name == NULL) {
 		fprintf(stderr, "  no name specified for property\n");
@@ -209,13 +213,17 @@ start_transaction(struct test_context *ctx, const char **atts)
 static void
 end_transaction(struct test_context *ctx)
 {
-	ctx->system_set = razor_set_update(ctx->system_set,
-					   ctx->repo_set,
-					   ctx->n_install_pkgs,
-					   (const char **)ctx->install_pkgs);
-	ctx->system_set = razor_set_remove(ctx->system_set,
-					   ctx->n_remove_pkgs,
-					   (const char **)ctx->remove_pkgs);
+	if (ctx->n_install_pkgs) {
+		ctx->system_set = razor_set_update(ctx->system_set,
+						   ctx->repo_set,
+						   ctx->n_install_pkgs,
+						   (const char **)ctx->install_pkgs);
+	}
+	if (ctx->n_remove_pkgs && ctx->system_set) {
+		ctx->system_set = razor_set_remove(ctx->system_set,
+						   ctx->n_remove_pkgs,
+						   (const char **)ctx->remove_pkgs);
+	}
 
 	while (ctx->n_install_pkgs--)
 		free(ctx->install_pkgs[ctx->n_install_pkgs]);
@@ -279,27 +287,34 @@ end_result(struct test_context *ctx)
 {
 	ctx->in_result = 0;
 
-	if (ctx->system_set && ctx->result_set) {
+	if (ctx->result_set) {
+		if (!ctx->system_set)
+			ctx->system_set = razor_set_create();
 		ctx->result_errors = 0;
 		razor_set_diff(ctx->system_set, ctx->result_set,
 			       diff_callback, ctx);
 		if (ctx->result_errors)
 			exit(1);
 	}
-
 }
 
 static void
-start_unsatisfied(struct test_context *ctx, const char **atts)
+start_unsatisfiable(struct test_context *ctx, const char **atts)
 {
+	if (ctx->system_set) {
+		fprintf(stderr, "Expected to fail, but didn't\n");
+		exit(1);
+	}
+
 	/* FIXME */
-	fprintf(stderr, "Can't handle <unsatisfied>\n");
-	exit(1);
+	fprintf(stderr, "  Not actually checking <unsatisfiable>\n");
+	ctx->in_unsatisfiable = 1;
 }
 
 static void
-end_unsatisfied(struct test_context *ctx)
+end_unsatisfiable(struct test_context *ctx)
 {
+	ctx->in_unsatisfiable = 0;
 }
 
 static void
@@ -323,8 +338,8 @@ start_test_element(void *data, const char *element, const char **atts)
 		start_remove(ctx, atts);
 	} else if (strcmp(element, "result") == 0) {
 		start_result(ctx, atts);
-	} else if (strcmp(element, "unsatisfied") == 0) {
-		start_unsatisfied(ctx, atts);
+	} else if (strcmp(element, "unsatisfiable") == 0) {
+		start_unsatisfiable(ctx, atts);
 	} else if (strcmp(element, "package") == 0) {
 		start_package(ctx, atts);
 	} else if (strcmp(element, "requires") == 0) {
@@ -356,8 +371,8 @@ end_test_element (void *data, const char *element)
 		end_transaction(ctx);
 	} else if (strcmp(element, "result") == 0) {
 		end_result(ctx);
-	} else if (strcmp(element, "unsatisfied") == 0) {
-		end_unsatisfied(ctx);
+	} else if (strcmp(element, "unsatisfiable") == 0) {
+		end_unsatisfiable(ctx);
 	}
 }
 

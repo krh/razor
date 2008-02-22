@@ -1740,7 +1740,8 @@ razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
 	upool = upstream->string_pool.data;
 	package_pool = &upstream->package_pool;
 
-	for (u = unsatisfied->data; u < end; u++) {
+	u = unsatisfied->data;
+	while (u < end) {
 		r = requires + *u;
 
 		while (p < pend &&
@@ -1752,18 +1753,23 @@ razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
 		while (p + 1 < pend && p->name == (p + 1)->name && p->type == (p + 1)->type)
 			p++;
 
-		if (p == pend ||
-		    strcmp(&pool[r->name], &upool[p->name]) != 0 ||
-		    versioncmp(&pool[r->version], &upool[p->version]) > 0) {
-			/* Do we need to track unsatisfiable requires
-			 * as we go, or should we just do a
-			 * razor_set_validate() at the end? */
-		} else {
+		if (p != pend &&
+		    p->type == RAZOR_PROPERTY_PROVIDES &&
+		    strcmp(&pool[r->name], &upool[p->name]) == 0 &&
+		    versioncmp(&pool[r->version], &upool[p->version]) <= 0) {
 			pkg = array_add(list, sizeof *pkg);
 			/* We just pull in the first package that provides */
 			*pkg = list_first(&p->packages, package_pool)->data;
+
+			/* Remove this from the unsatisfied list */
+			memmove (u, u + 1, end - (u + 1));
+			end--;
+		} else {
+			/* Leave this in the unsatisfied list */
+			u++;
 		}
-	}	
+	}
+	unsatisfied->size = (void *)end - unsatisfied->data;
 }
 
 static void
@@ -1816,12 +1822,50 @@ find_all_packages(struct razor_set *set,
 	}
 }
 
+/* FIXME: this is all wrong anyway; we should recompute the new_unsatisfied
+ * set as we add and remove packages...
+ */
+static void
+razor_set_revalidate(struct razor_set *orig_set,
+		     struct array *orig_unsatisfied,
+		     struct razor_set *new_set,
+		     struct array *new_unsatisfied)
+{
+	uint32_t *nu, *nuend, *ou, *ouend;
+	struct razor_property *new_props, *orig_props;
+	char *new_pool, *orig_pool;
+
+	razor_set_validate(new_set, new_unsatisfied);
+
+	ouend = orig_unsatisfied->data + orig_unsatisfied->size;
+	nuend = new_unsatisfied->data + new_unsatisfied->size;
+	new_props = new_set->properties.data;
+	orig_props = orig_set->properties.data;
+	new_pool = new_set->string_pool.data;
+	orig_pool = orig_set->string_pool.data;
+
+	for (nu = new_unsatisfied->data; nu < nuend; nu++) {
+		for (ou = orig_unsatisfied->data; ou < ouend; ou++) {
+			if (!strcmp (&new_pool[new_props[*nu].name],
+				     &orig_pool[orig_props[*ou].name]) &&
+			    new_props[*nu].relation == orig_props[*ou].relation &&
+			    !strcmp (&new_pool[new_props[*nu].version],
+				     &orig_pool[orig_props[*ou].version])) {
+				*(nu--) = *(--nuend);
+				break;
+			}
+		}
+	}
+
+	new_unsatisfied->size = (void *)nuend - new_unsatisfied->data;
+}
+
 struct razor_set *
 razor_set_update(struct razor_set *set, struct razor_set *upstream,
 		 int count, const char **packages)
 {
 	struct razor_set *new;
-	struct array list, unsatisfied;
+	struct array list, unsatisfied_before, unsatisfied;
 
 	array_init(&list);
 	if (count > 0)
@@ -1829,20 +1873,35 @@ razor_set_update(struct razor_set *set, struct razor_set *upstream,
 	else
 		find_all_packages(set, upstream, &list);
 
+	array_init(&unsatisfied_before);
+	razor_set_validate(set, &unsatisfied_before);
+
 	while (list.size > 0) {
 		new = razor_set_add(set, upstream, &list);
 		array_release(&list);
-		razor_set_destroy(set);
-		set = new;
 
 		array_init(&unsatisfied);
-		razor_set_validate(new, &unsatisfied);
+		razor_set_revalidate(set, &unsatisfied_before,
+				     new, &unsatisfied);
+
 		array_init(&list);
 		razor_set_satisfy(new, &unsatisfied, upstream, &list);
-		array_release(&unsatisfied);
+
+		if (unsatisfied.size) {
+			/* FIXME: need to return this list */
+			array_release(&unsatisfied);
+			razor_set_destroy(new);
+			razor_set_destroy(set);
+			set = NULL;
+			break;
+		}
+
+		razor_set_destroy(set);
+		set = new;
 	}
 
 	array_release(&list);
+	array_release(&unsatisfied_before);
 
 	return set;
 }
