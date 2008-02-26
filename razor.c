@@ -1822,50 +1822,130 @@ find_all_packages(struct razor_set *set,
 	}
 }
 
-/* FIXME: this is all wrong anyway; we should recompute the new_unsatisfied
- * set as we add and remove packages...
- */
-static void
-razor_set_revalidate(struct razor_set *orig_set,
-		     struct array *orig_unsatisfied,
-		     struct razor_set *new_set,
-		     struct array *new_unsatisfied)
+static int
+find_provider(struct razor_set *set, const char *req_name,
+	      enum razor_version_relation relation, const char *version)
 {
-	uint32_t *nu, *nuend, *ou, *ouend;
-	struct razor_property *new_props, *orig_props;
-	char *new_pool, *orig_pool;
+	struct razor_property *props = set->properties.data;
+	int p, hi, lo, cmp, pkg;
+	char *pool = set->string_pool.data;
 
-	razor_set_validate(new_set, new_unsatisfied);
+	lo = 0;
+	hi = set->properties.size / sizeof *props;
+	while (lo < hi) {
+		p = (lo + hi) / 2;
+		cmp = strcmp(&pool[props[p].name], req_name);
+		if (cmp < 0)
+			lo = p + 1;
+		else if (cmp > 0)
+			hi = p;
+		else
+			break;
+	}
+	if (lo >= hi)
+		return -1;
 
-	ouend = orig_unsatisfied->data + orig_unsatisfied->size;
-	nuend = new_unsatisfied->data + new_unsatisfied->size;
-	new_props = new_set->properties.data;
-	orig_props = orig_set->properties.data;
-	new_pool = new_set->string_pool.data;
-	orig_pool = orig_set->string_pool.data;
+	/* Seek to the last (ie, highest version number) PROVIDES
+	 * entry for this name.
+	 */
+	if (props[p].type < RAZOR_PROPERTY_PROVIDES) {
+		while (p < hi &&
+		       props[p].type != RAZOR_PROPERTY_PROVIDES &&
+		       props[p + 1].name == props[p].name)
+			p++;
+	} else if (props[p].type > RAZOR_PROPERTY_PROVIDES) {
+		while (p > lo &&
+		       props[p].type != RAZOR_PROPERTY_PROVIDES &&
+		       props[p - 1].name == props[p].name)
+			p--;
+	}
+	while (p < hi &&
+	       props[p + 1].type == RAZOR_PROPERTY_PROVIDES &&
+	       props[p + 1].name == props[p].name)
+		p++;
 
-	for (nu = new_unsatisfied->data; nu < nuend; nu++) {
-		for (ou = orig_unsatisfied->data; ou < ouend; ou++) {
-			if (!strcmp (&new_pool[new_props[*nu].name],
-				     &orig_pool[orig_props[*ou].name]) &&
-			    new_props[*nu].relation == orig_props[*ou].relation &&
-			    !strcmp (&new_pool[new_props[*nu].version],
-				     &orig_pool[orig_props[*ou].version])) {
-				*(nu--) = *(--nuend);
-				break;
+	if (props[p].type != RAZOR_PROPERTY_PROVIDES)
+		return -1;
+
+	do {
+		pkg = list_first(&props[p].packages, &set->package_pool)->data;
+		if (!*version)
+			return pkg;
+
+		cmp = versioncmp(&pool[props[p].version], version);
+
+		switch (relation) {
+		case RAZOR_VERSION_EQUAL:
+		case RAZOR_VERSION_GREATER_OR_EQUAL:
+		case RAZOR_VERSION_GREATER:
+			if (cmp >= 0)
+				return pkg;
+			else {
+				/* If the highest version doesn't pass,
+				 * none of the others will either.
+				 */
+				return -1;
 			}
+
+		case RAZOR_VERSION_LESS_OR_EQUAL:
+			if (cmp <= 0)
+				return pkg;
+			break;
+
+		case RAZOR_VERSION_LESS:
+			if (cmp < 0)
+				return pkg;
+			break;
+		}
+
+		p--;
+	} while (p > lo && props[p].name == props[p + 1].name &&
+		 props[p].type == RAZOR_PROPERTY_PROVIDES);
+
+	return -1;
+}
+
+static void
+gather_new_requires(struct razor_set *system, struct razor_set *upstream,
+		    struct razor_package *pkg, struct array *new_requires)
+{
+	struct razor_property *uprops = upstream->properties.data, *prop;
+	char *upool = upstream->string_pool.data;
+	struct list *p;
+	uint32_t *new;
+
+	for (p = list_first(&pkg->properties, &upstream->property_pool); p; p = list_next(p)) {
+		prop = &uprops[p->data];
+		if (prop->type != RAZOR_PROPERTY_REQUIRES)
+			continue;
+		if (!strncmp(&upool[prop->name], "rpmlib(", 7))
+			continue;
+
+		if (find_provider(system, &upool[prop->name],
+				  prop->relation, &upool[prop->version]) == -1) {
+			new = array_add(new_requires, sizeof *new);
+			*new = p->data;
 		}
 	}
-
-	new_unsatisfied->size = (void *)nuend - new_unsatisfied->data;
 }
 
 struct razor_set *
 razor_set_update(struct razor_set *set, struct razor_set *upstream,
 		 int count, const char **packages)
 {
-	struct razor_set *new;
-	struct array list, unsatisfied_before, unsatisfied;
+	struct razor_set *new_set;
+	struct array list;
+	struct razor_package *pkgs;
+	int update_count, u, provider, already;
+	uint32_t *update, *new, *new_end, *required;
+	struct razor_property *props, *prop_end;
+	struct array new_requires;
+	char *pool;
+
+	pkgs = upstream->packages.data;
+	props = upstream->properties.data;
+	prop_end = upstream->properties.data + set->properties.size;
+	pool = upstream->string_pool.data;
 
 	array_init(&list);
 	if (count > 0)
@@ -1873,37 +1953,46 @@ razor_set_update(struct razor_set *set, struct razor_set *upstream,
 	else
 		find_all_packages(set, upstream, &list);
 
-	array_init(&unsatisfied_before);
-	razor_set_validate(set, &unsatisfied_before);
+	update = list.data;
+	update_count = list.size / sizeof (uint32_t);
+	u = 0;
+	while (u < update_count) {
+		array_init(&new_requires);
+		for (; u < update_count; u++)
+			gather_new_requires(set, upstream, &pkgs[update[u]], &new_requires);
 
-	while (list.size > 0) {
-		new = razor_set_add(set, upstream, &list);
-		array_release(&list);
+		new_end = new_requires.data + new_requires.size;
+		for (new = new_requires.data; new < new_end; new++) {
+			provider = find_provider(upstream, &pool[props[*new].name],
+						 props[*new].relation,
+						 &pool[props[*new].version]);
 
-		array_init(&unsatisfied);
-		razor_set_revalidate(set, &unsatisfied_before,
-				     new, &unsatisfied);
+			/* FIXME */
+			if (provider == -1)
+				continue;
 
-		array_init(&list);
-		razor_set_satisfy(new, &unsatisfied, upstream, &list);
+			update = list.data;
+			update_count = list.size / sizeof (uint32_t);
+			for (already = 0; already < update_count; already++) {
+				if (provider == update[already])
+					break;
+			}
+			if (already < update_count)
+				continue;
 
-		if (unsatisfied.size) {
-			/* FIXME: need to return this list */
-			array_release(&unsatisfied);
-			razor_set_destroy(new);
-			razor_set_destroy(set);
-			set = NULL;
-			break;
+			required = array_add(&list, sizeof *required);
+			*required = provider;
 		}
+		array_release(&new_requires);
 
-		razor_set_destroy(set);
-		set = new;
+		update = list.data;
+		update_count = list.size / sizeof (uint32_t);
 	}
 
+	new_set = razor_set_add(set, upstream, &list);
 	array_release(&list);
-	array_release(&unsatisfied_before);
-
-	return set;
+	razor_set_destroy(set);
+	return new_set;
 }
 
 /* Look through pkg's PROVIDES, and for each one that no other package
