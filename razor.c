@@ -1785,8 +1785,9 @@ provider_satisfies_requirement(struct razor_property *provider,
 }
 
 static int
-find_provider(struct razor_set *set, struct razor_property *requirement,
-	      const char *requirement_strings)
+find_property_provider(struct razor_set *set,
+		       struct razor_property *requirement,
+		       const char *requirement_strings)
 {
 	struct razor_property *props = set->properties.data;
 	int p, hi, lo, cmp;
@@ -1842,6 +1843,29 @@ find_provider(struct razor_set *set, struct razor_property *requirement,
 	return -1;
 }
 
+static int
+find_file_provider(struct razor_set *set, const char *filename)
+{
+	struct razor_entry *entry;
+
+	entry = find_entry(set, set->files.data, filename);
+	if (entry)
+		return list_first(&entry->packages, &set->package_pool)->data;
+	else
+		return -1;
+}
+
+static int
+find_provider(struct razor_set *set, struct razor_property *requirement,
+	      const char *requirement_strings)
+{
+	const char *name = &requirement_strings[requirement->name];
+	if (*name == '/')
+		return find_file_provider(set, name);
+	else
+		return find_property_provider(set, requirement, requirement_strings);
+}
+
 static void
 gather_new_requires(struct razor_set *system, struct razor_set *upstream,
 		    struct razor_package *pkg, struct array *new_requires)
@@ -1894,10 +1918,6 @@ razor_transaction_satisfy_installs(struct razor_transaction *trans,
 
 		new_end = new_requires.data + new_requires.size;
 		for (new = new_requires.data; new < new_end; new++) {
-			/* FIXME */
-			if (pool[props[*new].name] == '/')
-				continue;
-
 			provider = find_provider(trans->upstream,
 						 &props[*new], pool);
 			already = find_transaction_package(package_array,
