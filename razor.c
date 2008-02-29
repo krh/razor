@@ -1978,19 +1978,70 @@ gather_lost_provides(struct razor_set *set, struct razor_package *pkg,
 }
 
 static void
-lose_requirement(struct razor_transaction *trans, struct array *package_array,
-		 const char *req_package, struct razor_property *req,
-		 struct razor_property *lost_provider,
-		 struct razor_property *first_provider)
+gather_lost_files(struct razor_set *set, struct razor_package *pkg,
+		  struct array *lost_files)
 {
-	struct razor_property *provider, *prop_end;
-	struct razor_package *pkgs;
+	struct razor_entry *entries = set->files.data, *entry, **lost;
+	struct list *e, *providers;
+
+	for (e = list_first(&pkg->files, &set->file_pool); e; e = list_next(e)) {
+		entry = &entries[e->data];
+		providers = list_first(&entry->packages, &set->package_pool);
+		if (providers && !list_next(providers)) {
+			lost = array_add(lost_files, sizeof *lost);
+			*lost = entry;
+		}
+	}
+}
+
+static void
+lose_required_package(struct razor_transaction *trans,
+		      struct array *package_array,
+		      struct razor_property *req,
+		      struct list_head *lost_package_list)
+{
+	struct razor_package *pkgs, *lost_package;
 	char *pool = trans->system->string_pool.data;
 	struct list *p;
 	struct razor_transaction_package *tp, *packages;;
 	int already;
 
 	pkgs = trans->system->packages.data;
+	lost_package = &pkgs[list_first(lost_package_list, &trans->system->package_pool)->data];
+
+	for (p = list_first(&req->packages, &trans->system->package_pool); p; p = list_next(p)) {
+		packages = package_array->data;
+		already = find_transaction_package(package_array, &pkgs[p->data]);
+		if (already != -1 &&
+		    (packages[already].state & RAZOR_PACKAGE_REMOVE))
+			continue;
+
+		tp = array_add(package_array, sizeof *tp);
+		memset(tp, 0, sizeof *tp);
+		tp->package = &pkgs[p->data];
+		tp->name = &pool[tp->package->name];
+		tp->version = &pool[tp->package->version];
+		tp->req_package = &pool[lost_package->name];
+		tp->req_property = &pool[req->name];
+		tp->req_relation = req->relation;
+		tp->req_version = &pool[req->version];
+		if (already != -1) {
+			tp->state = RAZOR_PACKAGE_REMOVE_BLOCKED;
+			trans->errors++;
+		} else
+			tp->state = RAZOR_PACKAGE_REMOVE;
+	}
+}
+
+static void
+lose_requirement(struct razor_transaction *trans, struct array *package_array,
+		 struct razor_property *req,
+		 struct razor_property *lost_provider,
+		 struct razor_property *first_provider)
+{
+	struct razor_property *provider, *prop_end;
+	char *pool = trans->system->string_pool.data;
+
 	prop_end = trans->system->properties.data + trans->system->properties.size;
 
 	/* See if any other provider satisfies req */
@@ -2004,29 +2055,8 @@ lose_requirement(struct razor_transaction *trans, struct array *package_array,
 			return;
 	}
 
-	/* Remove each of the packages requiring req */
-	for (p = list_first(&req->packages, &trans->system->package_pool); p; p = list_next(p)) {
-		packages = package_array->data;
-		already = find_transaction_package(package_array, &pkgs[p->data]);
-		if (already != -1 &&
-		    (packages[already].state & RAZOR_PACKAGE_REMOVE))
-			continue;
-
-		tp = array_add(package_array, sizeof *tp);
-		memset(tp, 0, sizeof *tp);
-		tp->package = &pkgs[p->data];
-		tp->name = &pool[tp->package->name];
-		tp->version = &pool[tp->package->version];
-		tp->req_package = req_package;
-		tp->req_property = &pool[req->name];
-		tp->req_relation = req->relation;
-		tp->req_version = &pool[req->version];
-		if (already != -1) {
-			tp->state = RAZOR_PACKAGE_REMOVE_BLOCKED;
-			trans->errors++;
-		} else
-			tp->state = RAZOR_PACKAGE_REMOVE;
-	}
+	lose_required_package(trans, package_array, req,
+			      &lost_provider->packages);
 }
 
 static void
@@ -2038,41 +2068,74 @@ razor_transaction_satisfy_removes(struct razor_transaction *trans,
 	struct razor_package *pkgs;
 	int pkg_count, r;
 	uint32_t *lost, *lost_end;
+	struct razor_entry *entry, **lostf, **lostf_end;
 	struct razor_property *props, *prop_end, *req, *first_provider;
-	struct array lost_provides;
-	const char *req_package;
+	struct array lost_provides, lost_files;
+	char *pool;
 
 	pkgs = trans->system->packages.data;
 	pkg_count = trans->system->packages.size / sizeof (struct razor_package);
 	props = trans->system->properties.data;
 	prop_end = trans->system->properties.data + trans->system->properties.size;
+	pool = trans->system->string_pool.data;
 
+	array_init(&lost_files);
+	array_init(&lost_provides);
 	for (r = start; r < end; r++) {
 		packages = package_array->data;
 		if (packages[r].state != RAZOR_PACKAGE_REMOVE)
 			continue;
 
-		array_init(&lost_provides);
-		req_package = packages[r].name;
 		gather_lost_provides(trans->system, packages[r].package,
 				     &lost_provides);
-
-		lost_end = lost_provides.data + lost_provides.size;
-		for (lost = lost_provides.data; lost < lost_end; lost++) {
-			/* Requires FOO will appear before Provides FOO */
-			for (req = &props[*lost]; req > props && req->name == props[*lost].name && req->type != RAZOR_PROPERTY_REQUIRES; req--)
-				;
-			first_provider = req + 1;
-
-			while (req > props && req->name == props[*lost].name) {
-				lose_requirement(trans, package_array,
-						 req_package, req,
-						 &props[*lost], first_provider);
-				req--;
-			}
-		}
-		array_release(&lost_provides);
+		gather_lost_files(trans->system, packages[r].package,
+				  &lost_files);
 	}
+
+	/* Handle lost_provides */
+	lost_end = lost_provides.data + lost_provides.size;
+	for (lost = lost_provides.data; lost < lost_end; lost++) {
+		/* Requires FOO will appear before Provides FOO */
+		for (req = &props[*lost]; req > props && req->name == props[*lost].name && req->type != RAZOR_PROPERTY_REQUIRES; req--)
+			;
+		first_provider = req + 1;
+
+		while (req > props && req->name == props[*lost].name) {
+			lose_requirement(trans, package_array, req,
+					 &props[*lost], first_provider);
+			req--;
+		}
+	}
+	array_release(&lost_provides);
+
+	/* And now lost_files. FIXME, inefficient */
+	lostf_end = lost_files.data + lost_files.size;
+
+	req = props;
+	/* Due to the sorting of props, this loop is likely a no-op */
+	while (pool[req->name] != '/')
+		req++;
+
+	for (; req < prop_end && pool[req->name] == '/'; req++) {
+		if (req->type != RAZOR_PROPERTY_REQUIRES)
+			continue;
+
+		entry = find_entry(trans->system, trans->system->files.data,
+				   &pool[req->name]);
+		if (!entry)
+			continue;
+
+		for (lostf = lost_files.data; lostf < lostf_end; lostf++) {
+			if (*lostf == entry)
+				break;
+		}
+		if (lostf == lostf_end)
+			continue;
+
+		lose_required_package(trans, package_array, req,
+				      &(entry)->packages);
+	}
+	array_release(&lost_files);
 }
 
 /* The diff order matters.  We should sort the packages so that a
