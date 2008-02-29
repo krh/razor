@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include "razor-internal.h"
+
 int
 razor_create_dir(const char *root, const char *path)
 {

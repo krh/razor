@@ -1,4 +1,4 @@
-CFLAGS = -Wall -g
+CFLAGS = -Wall -Wstrict-prototypes -Wmissing-prototypes -g
 LDLIBS = -lexpat -lz -g -lrpm -lcurl
 
 all : razor test-driver
