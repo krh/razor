@@ -14,10 +14,6 @@ static const char *repo_filename = "system.repo";
 static const char *rawhide_repo_filename = "rawhide.repo";
 static const char *updated_repo_filename = "system-updated.repo";
 
-static const char *relations[] = {
-	"<", "<=", "=", ">=", ">"
-};
-
 static int
 command_list(int argc, const char *argv[])
 {
@@ -67,8 +63,8 @@ list_properties(const char *package_name,
 		if (version[0] == '\0')
 			printf("%s\n", name);
 		else
-			printf("%s %s %s\n", name, relations[relation],
-			       version);
+			printf("%s %s %s\n", name,
+			       razor_version_relations[relation], version);
 	}
 	razor_property_iterator_destroy(pi);
 
@@ -325,12 +321,19 @@ static int
 command_update(int argc, const char *argv[])
 {
 	struct razor_set *set, *upstream;
+	struct razor_transaction *trans;
 
 	set = razor_set_open(repo_filename);
 	upstream = razor_set_open(rawhide_repo_filename);
 	if (set == NULL || upstream == NULL)
 		return 1;
-	set = razor_set_update(set, upstream, argc, argv);
+	trans = razor_transaction_create(set, upstream, argc, argv, 0, NULL);
+	razor_transaction_describe(trans);
+	if (trans->errors)
+		return 1;
+
+	set = razor_transaction_run(trans);
+	razor_transaction_destroy(trans);
 	razor_set_write(set, updated_repo_filename);
 	razor_set_destroy(set);
 	razor_set_destroy(upstream);
@@ -343,11 +346,18 @@ static int
 command_remove(int argc, const char *argv[])
 {
 	struct razor_set *set;
+	struct razor_transaction *trans;
 
 	set = razor_set_open(repo_filename);
 	if (set == NULL)
 		return 1;
-	set = razor_set_remove(set, argc, argv);
+	trans = razor_transaction_create(set, NULL, 0, NULL, argc, argv);
+	razor_transaction_describe(trans);
+	if (trans->errors)
+		return 1;
+
+	set = razor_transaction_run(trans);
+	razor_transaction_destroy(trans);
 	razor_set_write(set, updated_repo_filename);
 	razor_set_destroy(set);
 	printf("wrote system-updated.repo\n");

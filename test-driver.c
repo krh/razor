@@ -24,15 +24,17 @@ parse_xml_file(const char *filename,
 	XML_SetElementHandler(parser, start, end);
 	XML_SetUserData(parser, data);
 
-	buffer = XML_GetBuffer(parser, XML_BUFFER_SIZE);
-
 	fd = open(filename, O_RDONLY);
 	if (fd < 0) {
 		fprintf(stderr, "failed to open %s: %m\n", filename);
 		exit(-1);
 	}
 
-	while (len = read(fd, buffer, XML_BUFFER_SIZE), len > 0) {
+	while (1) {
+		buffer = XML_GetBuffer(parser, XML_BUFFER_SIZE);
+		len = read(fd, buffer, XML_BUFFER_SIZE);
+		if (len == 0)
+			break;
 		err = XML_ParseBuffer(parser, len, len == 0);
 		if (err == XML_STATUS_ERROR) {
 			fprintf(stderr, "parse error at line %lu:\n%s\n",
@@ -56,11 +58,15 @@ struct test_context {
 	struct razor_importer *importer;
 	struct razor_set **importer_set;
 
+	struct razor_transaction *trans;
+	struct razor_transaction_package *unsat;
+
 	char *install_pkgs[3], *remove_pkgs[3];
 	int n_install_pkgs, n_remove_pkgs;
 
 	int in_result, result_errors;
-	int in_unsatisfiable;
+
+	int debug;
 };
 
 static void
@@ -87,11 +93,11 @@ parse_relation (const char *rel_str)
 {
 	if (!rel_str)
 		return -1;
-	if (rel_str[0] == 'l')
-		return rel_str[1] == 'e' ? RAZOR_VERSION_LESS_OR_EQUAL : RAZOR_VERSION_LESS;
-	else if (rel_str[0] == 'g')
-		return rel_str[1] == 'e' ? RAZOR_VERSION_GREATER_OR_EQUAL : RAZOR_VERSION_GREATER;
-	else if (rel_str[0] == 'e' || rel_str[1] == 'q')
+	if (rel_str[0] == 'L')
+		return rel_str[1] == 'E' ? RAZOR_VERSION_LESS_OR_EQUAL : RAZOR_VERSION_LESS;
+	else if (rel_str[0] == 'G')
+		return rel_str[1] == 'E' ? RAZOR_VERSION_GREATER_OR_EQUAL : RAZOR_VERSION_GREATER;
+	else if (rel_str[0] == 'E' || rel_str[1] == 'Q')
 		return RAZOR_VERSION_EQUAL;
 	else
 		return -1;
@@ -124,6 +130,10 @@ end_test(struct test_context *ctx)
 	if (ctx->result_set) {
 		razor_set_destroy(ctx->result_set);
 		ctx->result_set = NULL;
+	}
+	if (ctx->trans) {
+		razor_transaction_destroy(ctx->trans);
+		ctx->trans = NULL;
 	}
 }
 
@@ -177,15 +187,43 @@ end_package(struct test_context *ctx)
 }
 
 static void
+add_property(struct test_context *ctx, enum razor_property_type type, const char *name, enum razor_version_relation rel, const char *version)
+{
+	razor_importer_add_property(ctx->importer, name,
+				    rel, version, type);
+}
+
+static void
+check_unsatisfiable_property(struct test_context *ctx, enum razor_property_type type, const char *name, enum razor_version_relation rel, const char *version)
+{
+	if (!version)
+		version = "";
+
+	for (; ctx->unsat < ctx->trans->packages + ctx->trans->package_count; ctx->unsat++) {
+		if (ctx->unsat->state != RAZOR_PACKAGE_INSTALL_UNSATISFIABLE)
+			continue;
+		if (strcmp(name, ctx->unsat->req_property) != 0 ||
+		    rel != ctx->unsat->req_relation ||
+		    strcmp(version, ctx->unsat->req_version) != 0)
+			continue;
+
+		/* OK, found it, so skip over it and continue */
+		ctx->unsat++;
+		return;
+	}
+
+	fprintf(stderr, "  didn't get unsatisfiable '%s %s %s'\n",
+		name, razor_version_relations[rel], version);
+	exit(1);
+}
+
+static void
 start_property(struct test_context *ctx, enum razor_property_type type, const char **atts)
 {
 	const char *name = NULL, *rel_str = NULL, *version = NULL;
 	enum razor_version_relation rel;
 
-	if (ctx->in_unsatisfiable)
-		return;
-
-	get_atts(atts, "name", &name, "rel", &rel_str, "version", &version, NULL);
+	get_atts(atts, "name", &name, "relation", &rel_str, "version", &version, NULL);
 	if (name == NULL) {
 		fprintf(stderr, "  no name specified for property\n");
 		exit(1);
@@ -199,8 +237,10 @@ start_property(struct test_context *ctx, enum razor_property_type type, const ch
 	} else
 		rel = RAZOR_VERSION_EQUAL;
 	
-	razor_importer_add_property(ctx->importer, name,
-				    rel, version, type);
+	if (ctx->unsat)
+		check_unsatisfiable_property(ctx, type, name, rel, version);
+	else
+		add_property(ctx, type, name, rel, version);
 }
 
 static void
@@ -213,22 +253,27 @@ start_transaction(struct test_context *ctx, const char **atts)
 static void
 end_transaction(struct test_context *ctx)
 {
-	if (ctx->n_install_pkgs) {
-		ctx->system_set = razor_set_update(ctx->system_set,
-						   ctx->repo_set,
-						   ctx->n_install_pkgs,
-						   (const char **)ctx->install_pkgs);
-	}
-	if (ctx->n_remove_pkgs && ctx->system_set) {
-		ctx->system_set = razor_set_remove(ctx->system_set,
-						   ctx->n_remove_pkgs,
-						   (const char **)ctx->remove_pkgs);
+	ctx->trans = razor_transaction_create(ctx->system_set, ctx->repo_set,
+					      ctx->n_install_pkgs,
+					      (const char **)ctx->install_pkgs,
+					      ctx->n_remove_pkgs,
+					      (const char **)ctx->remove_pkgs);
+	if (ctx->debug) {
+		razor_transaction_describe(ctx->trans);
+		printf("\n");
 	}
 
 	while (ctx->n_install_pkgs--)
 		free(ctx->install_pkgs[ctx->n_install_pkgs]);
 	while (ctx->n_remove_pkgs--)
 		free(ctx->remove_pkgs[ctx->n_remove_pkgs]);
+
+	if (!ctx->trans->errors) {
+		struct razor_set *new;
+		new = razor_transaction_run(ctx->trans);
+		razor_set_destroy(ctx->system_set);
+		ctx->system_set = new;
+	}
 }
 
 static void
@@ -301,20 +346,18 @@ end_result(struct test_context *ctx)
 static void
 start_unsatisfiable(struct test_context *ctx, const char **atts)
 {
-	if (ctx->system_set) {
+	if (ctx->result_set) {
 		fprintf(stderr, "Expected to fail, but didn't\n");
 		exit(1);
 	}
 
-	/* FIXME */
-	fprintf(stderr, "  Not actually checking <unsatisfiable>\n");
-	ctx->in_unsatisfiable = 1;
+	ctx->unsat = ctx->trans->packages;
 }
 
 static void
 end_unsatisfiable(struct test_context *ctx)
 {
-	ctx->in_unsatisfiable = 0;
+	ctx->unsat = NULL;
 }
 
 static void
@@ -379,14 +422,26 @@ end_test_element (void *data, const char *element)
 int main(int argc, char *argv[])
 {
 	struct test_context ctx;
+	const char *test_file;
 
-	if (argc != 2) {
-		fprintf(stderr, "usage: %s TESTS-FILE\n", argv[0]);
+	memset(&ctx, 0, sizeof ctx);
+
+	if (argc > 3) {
+		fprintf(stderr, "usage: %s [-d] [TESTS-FILE]\n", argv[0]);
 		exit(-1);			
 	}
 
-	memset(&ctx, 0, sizeof ctx);
-	parse_xml_file(argv[1], start_test_element, end_test_element, &ctx);
+	if (argc >= 2 && !strcmp (argv[1], "-d")) {
+		ctx.debug = 1;
+		argc--;
+		argv++;
+	}
+	if (argc == 2)
+		test_file = argv[1];
+	else
+		test_file = "test.xml";
+
+	parse_xml_file(test_file, start_test_element, end_test_element, &ctx);
 
 	return 0;
 }

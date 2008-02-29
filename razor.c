@@ -382,7 +382,7 @@ __qsort_with_data(void *base, size_t nelem, uint32_t *map,
 		__qsort_with_data(end, right, mend, ctx);
 }
 
-uint32_t *
+static uint32_t *
 qsort_with_data(void *base, size_t nelem, size_t size,
 		compare_with_data_func_t compare, void *data)
 {
@@ -758,7 +758,7 @@ struct razor_package_iterator {
 	struct list *index;
 };
 
-struct razor_package_iterator *
+static struct razor_package_iterator *
 razor_package_iterator_create_with_index(struct razor_set *set,
 					 struct list *index)
 {
@@ -1231,53 +1231,6 @@ add_package(struct razor_merger *merger,
 	}
 }
 
-
-/* Build the new package list sorted by merging the two package lists.
- * Build new string pool as we go. */
-static void
-merge_packages(struct razor_merger *merger, struct array *packages)
-{
-	struct razor_package *upstream_packages, *p, *s, *send;
-	struct source *source1, *source2;
-	char *spool, *upool;
-	uint32_t *u, *uend;
-	int cmp;
-
-	source1 = &merger->source1;
-	source2 = &merger->source2;
-	upstream_packages = source2->set->packages.data;
-
-	u = packages->data;
-	uend = packages->data + packages->size;
-	upool = source2->set->string_pool.data;
-
-	s = source1->set->packages.data;
-	send = source1->set->packages.data + source1->set->packages.size;
-	spool = source1->set->string_pool.data;
-
-	while (s < send || u < uend) {
-		p = upstream_packages + *u;
-
-		if (s < send && u < uend)
-			cmp = strcmp(&spool[s->name], &upool[p->name]);
-		else if (s < send)
-			cmp = -1;
-		else
-			cmp = 1;
-		if (cmp < 0) {
-			add_package(merger, s, source1, 0);
-			s++;
-		} else if (cmp == 0) {
-			add_package(merger, p, source2, UPSTREAM_SOURCE);
-			s++;
-			u++;
-		} else {
-			add_package(merger, p, source2, UPSTREAM_SOURCE);
-			u++;
-		}
-	}
-}
-
 static uint32_t
 add_property(struct razor_merger *merger,
 	     const char *name, enum razor_version_relation relation,
@@ -1648,7 +1601,7 @@ rebuild_file_package_lists(struct razor_set *set)
 	free(pkgs);
 }
 
-struct razor_set *
+static struct razor_set *
 razor_merger_finish(struct razor_merger *merger)
 {
 	struct razor_set *result;
@@ -1698,112 +1651,58 @@ razor_merger_finish(struct razor_merger *merger)
 	return result;
 }
 
-/* Add packages from 'upstream' to 'set'.  The packages to add are
- * specified by the 'packages' array, which is a sorted list of
- * package indexes.  Returns a newly allocated package set.  Does not
- * enforce validity of the resulting package set.
- *
- * This looks more complicated than it is.  An easy way to merge two
- * package sets would be to just use a razor_importer, but that
- * requires resorting, and is thus O(n log n).  We can do this in a
- * linear sweep, but it gets a little more complicated.
- */
-struct razor_set *
-razor_set_add(struct razor_set *set, struct razor_set *upstream,
-	      struct array *packages)
-{
-	struct razor_merger *merger;
-
-	merger = razor_merger_create(set, upstream);
-
-	merge_packages(merger, packages);
-
-	return razor_merger_finish(merger);
-}
-
-void
-razor_set_satisfy(struct razor_set *set, struct array *unsatisfied,
-		  struct razor_set *upstream, struct array *list)
-{
-	struct razor_property *requires, *r;
-	struct razor_property *p, *pend;
-	uint32_t *u, *end, *pkg;
-	struct array *package_pool;
-	char *pool, *upool;
-
-	end = unsatisfied->data + unsatisfied->size;
-	requires = set->properties.data;
-	pool = set->string_pool.data;
-
-	p = upstream->properties.data;
-	pend = upstream->properties.data + upstream->properties.size;
-	upool = upstream->string_pool.data;
-	package_pool = &upstream->package_pool;
-
-	u = unsatisfied->data;
-	while (u < end) {
-		r = requires + *u;
-
-		while (p < pend &&
-		       p->type != RAZOR_PROPERTY_PROVIDES &&
-		       strcmp(&pool[r->name], &upool[p->name]) > 0)
-			p++;
-		/* If there is more than one version of a provides,
-		 * seek to the end for the highest version. */
-		while (p + 1 < pend && p->name == (p + 1)->name && p->type == (p + 1)->type)
-			p++;
-
-		if (p != pend &&
-		    p->type == RAZOR_PROPERTY_PROVIDES &&
-		    strcmp(&pool[r->name], &upool[p->name]) == 0 &&
-		    versioncmp(&pool[r->version], &upool[p->version]) <= 0) {
-			pkg = array_add(list, sizeof *pkg);
-			/* We just pull in the first package that provides */
-			*pkg = list_first(&p->packages, package_pool)->data;
-
-			/* Remove this from the unsatisfied list */
-			memmove (u, u + 1, end - (u + 1));
-			end--;
-		} else {
-			/* Leave this in the unsatisfied list */
-			u++;
-		}
-	}
-	unsatisfied->size = (void *)end - unsatisfied->data;
-}
-
-static void
-find_packages(struct razor_set *set,
-	      int count, const char **package_names, struct array *list)
+static int
+find_packages(struct razor_set *set, int count, const char **package_names,
+	      struct array *package_array,
+	      enum razor_transaction_package_state state)
 {
 	struct razor_package_iterator *pi;
 	struct razor_package *p, *packages;
 	const char *name, *version;
-	uint32_t *r;
-	int i;
+	struct razor_transaction_package *tp;
+	int i, *found, errors = 0;
 
 	packages = (struct razor_package *) set->packages.data;
 	pi = razor_package_iterator_create(set);
+	found = zalloc(count * sizeof (int));
 
 	while (razor_package_iterator_next(pi, &p, &name, &version)) {
 		for (i = 0; i < count; i++) {
 			if (strcmp(name, package_names[i]) == 0) {
-				r = array_add(list, sizeof *r);
-				*r = p - packages;
+				found[i] = 1;
+				tp = array_add(package_array, sizeof *tp);
+				memset(tp, 0, sizeof *tp);
+				tp->package = p;
+				tp->name = name;
+				tp->version = version;
+				tp->state = state;
 				break;
 			}
 		}
 	}
 
+	for (i = 0; i < count; i++) {
+		if (!found[i]) {
+			tp = array_add(package_array, sizeof *tp);
+			memset(tp, 0, sizeof *tp);
+			tp->name = strdup(package_names[i]);
+			tp->state = state | RAZOR_PACKAGE_UNAVAILABLE;
+			errors++;
+		}
+	}
+
 	razor_package_iterator_destroy(pi);
+	free(found);
+
+	return errors;
 }
 
 static void
 find_all_packages(struct razor_set *set,
-		  struct razor_set *upstream, struct array *list)
+		  struct razor_set *upstream, struct array *package_array)
 {
+	struct razor_transaction_package *tp;
 	struct razor_package *p, *u, *pend, *uend;
-	uint32_t *r;
 	char *pool, *upool;
 
 	pend = set->packages.data + set->packages.size;
@@ -1816,25 +1715,89 @@ find_all_packages(struct razor_set *set,
 		while (u < uend && strcmp(&pool[p->name], &upool[u->name]) > 0)
 			u++;
 		if (strcmp(&pool[p->name], &upool[u->name]) == 0) {
-			r = array_add(list, sizeof *r);
-			*r = u - (struct razor_package *) upstream->packages.data;
+			tp = array_add(package_array, sizeof *tp);
+			memset(tp, 0, sizeof *tp);
+			tp->name = &upool[u->name];
+			tp->version = &upool[u->version];
+			tp->state = RAZOR_PACKAGE_INSTALL;
 		}
 	}
 }
 
+/* FIXME: wrong, need to compare names, not razor_package* */
 static int
-find_provider(struct razor_set *set, const char *req_name,
-	      enum razor_version_relation relation, const char *version)
+find_transaction_package(struct array *package_array,
+			 struct razor_package *package)
+{
+	struct razor_transaction_package *tps = package_array->data;
+	int i, tpcount = package_array->size / sizeof *tps;
+
+	for (i = 0; i < tpcount; i++) {
+		if (tps[i].package == package)
+			return i;
+	}
+	return -1;
+}
+
+static int
+provider_satisfies_requirement(struct razor_property *provider,
+			       const char *provider_strings,
+			       struct razor_property *requirement,
+			       const char *requirement_strings)
+{
+	int cmp, len;
+	const char *provided = &provider_strings[provider->version];
+	const char *required = &requirement_strings[requirement->version];
+
+	if (!*required)
+		return 1;
+
+	cmp = versioncmp(provided, required);
+
+	switch (requirement->relation) {
+	case RAZOR_VERSION_LESS:
+		return cmp < 0;
+
+	case RAZOR_VERSION_LESS_OR_EQUAL:
+		if (cmp <= 0)
+			return 1;
+		/* fall through: FIXME, make sure this is correct */
+
+	case RAZOR_VERSION_EQUAL:
+		if (cmp == 0)
+			return 1;
+
+		/* "foo == 1.1" is satisfied by "foo 1.1-2" */
+		len = strlen(required);
+		if (!strncmp(required, provided, len) && provided[len] == '-')
+			return 1;
+		return 0;
+
+	case RAZOR_VERSION_GREATER_OR_EQUAL:
+		return cmp >= 0;
+
+	case RAZOR_VERSION_GREATER:
+		return cmp > 0;
+	}
+
+	/* shouldn't happen */
+	return 0;
+}
+
+static int
+find_provider(struct razor_set *set, struct razor_property *requirement,
+	      const char *requirement_strings)
 {
 	struct razor_property *props = set->properties.data;
-	int p, hi, lo, cmp, pkg;
+	int p, hi, lo, cmp;
 	char *pool = set->string_pool.data;
 
 	lo = 0;
 	hi = set->properties.size / sizeof *props;
 	while (lo < hi) {
 		p = (lo + hi) / 2;
-		cmp = strcmp(&pool[props[p].name], req_name);
+		cmp = strcmp(&pool[props[p].name],
+			     &requirement_strings[requirement->name]);
 		if (cmp < 0)
 			lo = p + 1;
 		else if (cmp > 0)
@@ -1868,35 +1831,9 @@ find_provider(struct razor_set *set, const char *req_name,
 		return -1;
 
 	do {
-		pkg = list_first(&props[p].packages, &set->package_pool)->data;
-		if (!*version)
-			return pkg;
-
-		cmp = versioncmp(&pool[props[p].version], version);
-
-		switch (relation) {
-		case RAZOR_VERSION_EQUAL:
-		case RAZOR_VERSION_GREATER_OR_EQUAL:
-		case RAZOR_VERSION_GREATER:
-			if (cmp >= 0)
-				return pkg;
-			else {
-				/* If the highest version doesn't pass,
-				 * none of the others will either.
-				 */
-				return -1;
-			}
-
-		case RAZOR_VERSION_LESS_OR_EQUAL:
-			if (cmp <= 0)
-				return pkg;
-			break;
-
-		case RAZOR_VERSION_LESS:
-			if (cmp < 0)
-				return pkg;
-			break;
-		}
+		if (provider_satisfies_requirement(&props[p], pool,
+						   requirement, requirement_strings))
+			return list_first(&props[p].packages, &set->package_pool)->data;
 
 		p--;
 	} while (p > lo && props[p].name == props[p + 1].name &&
@@ -1921,78 +1858,79 @@ gather_new_requires(struct razor_set *system, struct razor_set *upstream,
 		if (!strncmp(&upool[prop->name], "rpmlib(", 7))
 			continue;
 
-		if (find_provider(system, &upool[prop->name],
-				  prop->relation, &upool[prop->version]) == -1) {
+		if (find_provider(system, prop, upool) == -1) {
 			new = array_add(new_requires, sizeof *new);
 			*new = p->data;
 		}
 	}
 }
 
-struct razor_set *
-razor_set_update(struct razor_set *set, struct razor_set *upstream,
-		 int count, const char **packages)
+static void
+razor_transaction_satisfy_installs(struct razor_transaction *trans,
+				   struct array *package_array,
+				   int start, int end)
 {
-	struct razor_set *new_set;
-	struct array list;
 	struct razor_package *pkgs;
-	int update_count, u, provider, already;
-	uint32_t *update, *new, *new_end, *required;
+	struct razor_transaction_package *packages, *tp;
+	int p, provider, already;
+	uint32_t *new, *new_end;
 	struct razor_property *props, *prop_end;
 	struct array new_requires;
 	char *pool;
 
-	pkgs = upstream->packages.data;
-	props = upstream->properties.data;
-	prop_end = upstream->properties.data + set->properties.size;
-	pool = upstream->string_pool.data;
+	pkgs = trans->upstream->packages.data;
+	props = trans->upstream->properties.data;
+	prop_end = trans->upstream->properties.data + trans->upstream->properties.size;
+	pool = trans->upstream->string_pool.data;
 
-	array_init(&list);
-	if (count > 0)
-		find_packages(upstream, count, packages, &list);
-	else
-		find_all_packages(set, upstream, &list);
+	packages = package_array->data;
+	for (p = start; p < end; p++) {
+		if (packages[p].state != RAZOR_PACKAGE_INSTALL)
+			continue;
 
-	update = list.data;
-	update_count = list.size / sizeof (uint32_t);
-	u = 0;
-	while (u < update_count) {
 		array_init(&new_requires);
-		for (; u < update_count; u++)
-			gather_new_requires(set, upstream, &pkgs[update[u]], &new_requires);
+		gather_new_requires(trans->system, trans->upstream,
+				    packages[p].package, &new_requires);
 
 		new_end = new_requires.data + new_requires.size;
 		for (new = new_requires.data; new < new_end; new++) {
-			provider = find_provider(upstream, &pool[props[*new].name],
-						 props[*new].relation,
-						 &pool[props[*new].version]);
-
 			/* FIXME */
-			if (provider == -1)
+			if (pool[props[*new].name] == '/')
 				continue;
 
-			update = list.data;
-			update_count = list.size / sizeof (uint32_t);
-			for (already = 0; already < update_count; already++) {
-				if (provider == update[already])
-					break;
+			provider = find_provider(trans->upstream,
+						 &props[*new], pool);
+			already = find_transaction_package(package_array,
+							   &pkgs[provider]);
+			if (already != -1 &&
+			    (packages[already].state & RAZOR_PACKAGE_INSTALL))
+				continue;
+
+			tp = array_add(package_array, sizeof *tp);
+			memset(tp, 0, sizeof *tp);
+			tp->req_package = packages[p].name;
+			tp->req_property = &pool[props[*new].name];
+			tp->req_relation = props[*new].relation;
+			tp->req_version = &pool[props[*new].version];
+
+			if (provider != -1) {
+				tp->package = &pkgs[provider];
+				tp->name = &pool[tp->package->name];
+				tp->version = &pool[tp->package->version];
+				if (already != -1) {
+					tp->state = RAZOR_PACKAGE_INSTALL_BLOCKED;
+					trans->errors++;
+				} else
+					tp->state = RAZOR_PACKAGE_INSTALL;
+			} else {
+				tp->state = RAZOR_PACKAGE_INSTALL_UNSATISFIABLE;
+				trans->errors++;
 			}
-			if (already < update_count)
-				continue;
 
-			required = array_add(&list, sizeof *required);
-			*required = provider;
+			packages = package_array->data;
 		}
 		array_release(&new_requires);
-
-		update = list.data;
-		update_count = list.size / sizeof (uint32_t);
 	}
-
-	new_set = razor_set_add(set, upstream, &list);
-	array_release(&list);
-	razor_set_destroy(set);
-	return new_set;
 }
 
 /* Look through pkg's PROVIDES, and for each one that no other package
@@ -2019,101 +1957,102 @@ gather_lost_provides(struct razor_set *set, struct razor_package *pkg,
 	}
 }
 
-/* Add the index of each package required by req that isn't already in
- * lost_requires, to lost_requires
- */
 static void
-gather_lost_requires(struct razor_set *set, struct razor_property *req,
-		     struct array *lost_requires)
+lose_requirement(struct razor_transaction *trans, struct array *package_array,
+		 const char *req_package, struct razor_property *req,
+		 struct razor_property *lost_provider,
+		 struct razor_property *first_provider)
 {
+	struct razor_property *provider, *prop_end;
+	struct razor_package *pkgs;
+	char *pool = trans->system->string_pool.data;
 	struct list *p;
-	uint32_t *lost, *already_lost, *already_end;
+	struct razor_transaction_package *tp, *packages;;
+	int already;
 
-	for (p = list_first(&req->packages, &set->package_pool); p; p = list_next(p)) {
-		already_end = lost_requires->data + lost_requires->size;
-		for (already_lost = lost_requires->data; already_lost < already_end; already_lost++) {
-			if (*already_lost == p->data)
-				break;
-		}
+	pkgs = trans->system->packages.data;
+	prop_end = trans->system->properties.data + trans->system->properties.size;
 
-		if (already_lost == already_end) {
-			lost = array_add(lost_requires, sizeof *lost);
-			*lost = p->data;
-		}
+	/* See if any other provider satisfies req */
+	for (provider = first_provider;
+	     provider < prop_end && provider->type == RAZOR_PROPERTY_PROVIDES && provider->name == lost_provider->name;
+	     provider++) {
+		if (provider == lost_provider)
+			continue;
+
+		if (provider_satisfies_requirement(provider, pool, req, pool))
+			return;
+	}
+
+	/* Remove each of the packages requiring req */
+	for (p = list_first(&req->packages, &trans->system->package_pool); p; p = list_next(p)) {
+		packages = package_array->data;
+		already = find_transaction_package(package_array, &pkgs[p->data]);
+		if (already != -1 &&
+		    (packages[already].state & RAZOR_PACKAGE_REMOVE))
+			continue;
+
+		tp = array_add(package_array, sizeof *tp);
+		memset(tp, 0, sizeof *tp);
+		tp->package = &pkgs[p->data];
+		tp->name = &pool[tp->package->name];
+		tp->version = &pool[tp->package->version];
+		tp->req_package = req_package;
+		tp->req_property = &pool[req->name];
+		tp->req_relation = req->relation;
+		tp->req_version = &pool[req->version];
+		if (already != -1) {
+			tp->state = RAZOR_PACKAGE_REMOVE_BLOCKED;
+			trans->errors++;
+		} else
+			tp->state = RAZOR_PACKAGE_REMOVE;
 	}
 }
 
-static struct razor_set *
-razor_set_remove_internal(struct razor_set *set, struct array *list)
+static void
+razor_transaction_satisfy_removes(struct razor_transaction *trans,
+				  struct array *package_array,
+				  int start, int end)
 {
-	struct razor_set *empty, *new;
-	struct razor_merger *merger;
+	struct razor_transaction_package *packages;
 	struct razor_package *pkgs;
-	int pkg_count, remove_count, p, r;
-	uint32_t *remove, *lost, *lost_end;
-	struct razor_property *props, *prop_end, *req;
+	int pkg_count, r;
+	uint32_t *lost, *lost_end;
+	struct razor_property *props, *prop_end, *req, *first_provider;
 	struct array lost_provides;
+	const char *req_package;
 
-	pkgs = set->packages.data;
-	pkg_count = set->packages.size / sizeof (struct razor_package);
-	props = set->properties.data;
-	prop_end = set->properties.data + set->properties.size;
+	pkgs = trans->system->packages.data;
+	pkg_count = trans->system->packages.size / sizeof (struct razor_package);
+	props = trans->system->properties.data;
+	prop_end = trans->system->properties.data + trans->system->properties.size;
 
-	remove = list->data;
-	remove_count = list->size / sizeof (uint32_t);
-	r = 0;
-	while (r < remove_count) {
+	for (r = start; r < end; r++) {
+		packages = package_array->data;
+		if (packages[r].state != RAZOR_PACKAGE_REMOVE)
+			continue;
+
 		array_init(&lost_provides);
-		for (; r < remove_count; r++)
-			gather_lost_provides(set, &pkgs[remove[r]], &lost_provides);
+		req_package = packages[r].name;
+		gather_lost_provides(trans->system, packages[r].package,
+				     &lost_provides);
 
 		lost_end = lost_provides.data + lost_provides.size;
 		for (lost = lost_provides.data; lost < lost_end; lost++) {
 			/* Requires FOO will appear before Provides FOO */
 			for (req = &props[*lost]; req > props && req->name == props[*lost].name && req->type != RAZOR_PROPERTY_REQUIRES; req--)
 				;
-			/* FIXME: versioned deps... */
+			first_provider = req + 1;
+
 			while (req > props && req->name == props[*lost].name) {
-				gather_lost_requires(set, req, list);
+				lose_requirement(trans, package_array,
+						 req_package, req,
+						 &props[*lost], first_provider);
 				req--;
 			}
 		}
 		array_release(&lost_provides);
-
-		remove = list->data;
-		remove_count = list->size / sizeof (uint32_t);
 	}
-
-	empty = razor_set_create();
-	merger = razor_merger_create(set, empty);
-
-	for (p = 0; p < pkg_count; p++) {
-		for (r = 0; r < remove_count; r++) {
-			if (p == remove[r])
-				goto skip;
-		}
-		add_package(merger, &pkgs[p], &merger->source1, 0);
-	skip:
-		;
-	}
-
-	new = razor_merger_finish(merger);
-	razor_set_destroy(empty);
-	return new;
-}
-
-struct razor_set *
-razor_set_remove(struct razor_set *set, int count, const char **packages)
-{
-	struct razor_set *new;
-	struct array list;
-
-	array_init(&list);
-	find_packages(set, count, packages, &list);
-	new = razor_set_remove_internal(set, &list);
-	array_release(&list);
-	razor_set_destroy(set);
-	return new;
 }
 
 /* The diff order matters.  We should sort the packages so that a
@@ -2160,4 +2099,259 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 
 	razor_package_iterator_destroy(pi1);
 	razor_package_iterator_destroy(pi2);
+}
+
+struct razor_transaction *
+razor_transaction_create(struct razor_set *system, struct razor_set *upstream,
+			 int update_count, const char **update_packages,
+			 int remove_count, const char **remove_packages)
+{
+	struct razor_transaction *trans;
+	struct array packages;
+	int start, end;
+
+	trans = zalloc(sizeof *trans);
+	trans->system = system;
+	trans->upstream = upstream ? upstream : razor_set_create();
+	array_init(&packages);
+
+	/* Find initial upstream packages to be installed */
+	if (update_count > 0) {
+		trans->errors +=
+			find_packages(upstream, update_count, update_packages,
+				      &packages, RAZOR_PACKAGE_INSTALL);
+	} else if (remove_count == 0)
+		find_all_packages(system, upstream, &packages);
+
+	/* Find initial installed packages to remove. */
+	if (remove_count > 0) {
+		trans->errors +=
+			find_packages(system, remove_count, remove_packages,
+				      &packages, RAZOR_PACKAGE_REMOVE);
+	}
+
+	start = 0;
+	end = packages.size / sizeof (struct razor_transaction_package);
+
+	while (!trans->errors && start != end) {
+		if (upstream)
+			razor_transaction_satisfy_installs(trans, &packages, start, end);
+		razor_transaction_satisfy_removes(trans, &packages, start, end);
+
+		start = end;
+		end = packages.size / sizeof (struct razor_transaction_package);
+	}
+
+	trans->packages = packages.data;
+	trans->package_count = packages.size / sizeof (struct razor_transaction_package);
+	return trans;
+}
+
+const char * const razor_version_relations[] = {
+	/* same order as enum razor_version_relation */
+	"<", "<=", "=", ">=", ">"
+};
+
+void
+razor_transaction_describe(struct razor_transaction *trans)
+{
+	struct razor_transaction_package *p, *pend, *tps;
+	int errors_only = 0;
+
+	tps = trans->packages;
+	pend = trans->packages + trans->package_count;
+	for (p = trans->packages; p < pend; p++) {
+		switch (p->state) {
+		case RAZOR_PACKAGE_INSTALL:
+			if (errors_only)
+				break;
+
+			printf ("Installing %s %s", p->name, p->version);
+			if (p->req_package) {
+				printf (" for %s", p->req_package);
+				if (*p->req_version) {
+					printf (", which requires %s %s %s",
+						p->req_property,
+						razor_version_relations[p->req_relation],
+						p->req_version);
+				} else if (strcmp(p->req_property, p->name) != 0) {
+					printf (", which requires %s",
+						p->req_property);
+				}
+			}
+			printf("\n");
+			break;
+
+		case RAZOR_PACKAGE_INSTALL_UNAVAILABLE:
+			if (*p->req_version && strcmp(p->req_property, p->name) == 0) {
+				printf ("Can't find %s %s %s, which is required by %s",
+					p->name,
+					razor_version_relations[p->req_relation],
+					p->req_version,
+					p->req_package);
+			} else {
+				printf ("Can't find %s", p->name);
+				if (*p->version)
+					printf (" %s", p->version);
+				
+				if (p->req_package) {
+					printf ("  which is required by %s",
+						p->req_package);
+					if (strcmp(p->req_property, p->name) != 0)
+						printf (" for %s", p->req_property);
+				}
+			}
+			printf("\n");
+			errors_only = 1;
+			break;
+
+		case RAZOR_PACKAGE_INSTALL_BLOCKED:
+			printf ("Cannot install %s, which is already marked for removal but is required by %s\n", p->name, p->req_package);
+			errors_only = 1;
+			break;
+
+		case RAZOR_PACKAGE_INSTALL_UNSATISFIABLE:
+			printf ("Cannot find package for %s", p->req_property);
+			if (*p->req_version) {
+				printf (" %s %s",
+					razor_version_relations[p->req_relation],
+					p->req_version);
+			}
+			printf (" which is required by %s\n",
+				p->req_package);
+			errors_only = 1;
+			break;
+
+		case RAZOR_PACKAGE_REMOVE:
+			if (errors_only)
+				break;
+			printf ("Removing %s %s", p->name, p->version);
+			if (p->req_package) {
+				printf (" which required %s", p->req_package);
+				if (strcmp(p->req_property, p->req_package) != 0)
+					printf (" for %s", p->req_property);
+			}
+			printf("\n");
+			break;
+
+		case RAZOR_PACKAGE_REMOVE_NOT_INSTALLED:
+			printf ("Package %s is not installed\n", p->name);
+			errors_only = 1;
+			break;
+
+		case RAZOR_PACKAGE_REMOVE_BLOCKED:
+			printf ("Cannot remove %s, which is marked for installation but requires %s\n", p->name, p->req_package);
+			errors_only = 1;
+			break;
+
+		default:
+			/* Shouldn't actually happen */
+			break;
+		}
+	}
+}
+
+struct razor_set *
+razor_transaction_run(struct razor_transaction *trans)
+{
+	struct array install_packages, remove_packages;
+	struct razor_merger *merger;
+	struct razor_package *pkg, *i, *iend, *r, *rend, *s, *send;
+	struct source *source1, *source2;
+	char *spool, *ipool, *rpool;
+	uint32_t *map;
+	int p, cmp;
+
+	/* FIXME */
+	if (trans->errors)
+		return NULL;
+
+	/* Sort the transaction packages into two arrays */
+	array_init(&install_packages);
+	array_init(&remove_packages);
+	for (p = 0; p < trans->package_count; p++) {
+		if (trans->packages[p].state & RAZOR_PACKAGE_INSTALL)
+			pkg = array_add(&install_packages, sizeof *pkg);
+		else
+			pkg = array_add(&remove_packages, sizeof *pkg);
+		*pkg = *trans->packages[p].package;
+	}
+	map = qsort_with_data(install_packages.data,
+			      install_packages.size / sizeof *pkg,
+			      sizeof *pkg,
+			      compare_packages,
+			      trans->upstream);
+	free(map);
+	map = qsort_with_data(remove_packages.data,
+			      remove_packages.size / sizeof *pkg,
+			      sizeof *pkg,
+			      compare_packages,
+			      trans->system);
+	free(map);
+
+	merger = razor_merger_create(trans->system, trans->upstream);
+
+	source1 = &merger->source1;
+	source2 = &merger->source2;
+
+	i = install_packages.data;
+	iend = install_packages.data + install_packages.size;
+	ipool = trans->upstream->string_pool.data;
+
+	r = remove_packages.data;
+	rend = remove_packages.data + remove_packages.size;
+	rpool = trans->system->string_pool.data;
+
+	s = trans->system->packages.data;
+	send = trans->system->packages.data + trans->system->packages.size;
+	spool = trans->system->string_pool.data;
+
+	while (s < send || i < iend) {
+		/* Check if s is being removed */
+		if (s < send && r < rend &&
+		    s->name == r->name && s->version && r->version) {
+			s++;
+			r++;
+			continue;
+		}
+
+		if (s < send && i < iend)
+			cmp = strcmp(&spool[s->name], &ipool[i->name]);
+		else if (s < send)
+			cmp = -1;
+		else
+			cmp = 1;
+		if (cmp < 0) {
+			add_package(merger, s, source1, 0);
+			s++;
+		} else if (cmp == 0) {
+			add_package(merger, i, source2, UPSTREAM_SOURCE);
+			s++;
+			i++;
+		} else {
+			add_package(merger, i, source2, UPSTREAM_SOURCE);
+			i++;
+		}
+	}
+
+	array_release(&install_packages);
+	array_release(&remove_packages);
+
+	return razor_merger_finish(merger);
+}
+
+void
+razor_transaction_destroy(struct razor_transaction *trans)
+{
+	int p;
+
+	for (p = 0; p < trans->package_count; p++) {
+		if (!trans->packages[p].req_package &&
+		    (trans->packages[p].state == RAZOR_PACKAGE_INSTALL_UNAVAILABLE ||
+		     trans->packages[p].state == RAZOR_PACKAGE_REMOVE_NOT_INSTALLED))
+			free((char *)trans->packages[p].name);
+	}
+	free(trans);
+
+	/* FIXME: free upstream if it was created as an empty set */
 }
