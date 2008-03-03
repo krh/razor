@@ -1803,30 +1803,40 @@ provider_satisfies_requirement(struct razor_property *provider,
 	return 0;
 }
 
-static int
-find_system_file(struct razor_transaction_resolver *trans,
-		 int installed, int up)
+static struct razor_package *
+find_file(struct razor_set *set, struct bitarray *pkgbits,
+	  const char *filename, int installed)
 {
+	struct razor_package *pkgs = set->packages.data;
 	struct razor_entry *entry;
-	struct razor_property *uprops = trans->upstream->properties.data;
-	const char *upool = trans->upstream->string_pool.data;
-	const char *filename = &upool[uprops[up].name];
 	struct list *p;
 
 	if (filename[0] != '/')
 		return 0;
 
-	entry = find_entry(trans->system, trans->system->files.data, filename);
+	entry = find_entry(set, set->files.data, filename);
 	if (!entry)
 		return 0;
 
-	for (p = list_first(&entry->packages, &trans->system->package_pool);
-	     p;
-	     p = list_next(p)) {
-		if (bitarray_get(&trans->syspkgs, p->data) == installed)
-			return 1;
+	for (p = list_first(&entry->packages, &set->package_pool); p; p = list_next(p)) {
+		if (bitarray_get(pkgbits, p->data) == installed)
+			return &pkgs[p->data];
 	}
-	return 0;
+	return NULL;
+}
+
+static struct razor_package *
+find_system_file(struct razor_transaction_resolver *trans,
+		 const char *filename, int installed)
+{
+	return find_file(trans->system, &trans->syspkgs, filename, installed);
+}
+
+static struct razor_package *
+find_upstream_file(struct razor_transaction_resolver *trans,
+		   const char *filename, int installed)
+{
+	return find_file(trans->upstream, &trans->uppkgs, filename, installed);
 }
 
 static struct razor_package *
@@ -1955,31 +1965,6 @@ find_upgrade(struct razor_transaction_resolver *trans,
 	return find_upstream_provider(trans, 0, 1, &req, up);
 }
 
-static struct razor_package *
-find_upstream_file(struct razor_transaction_resolver *trans,
-		   int installed, int up)
-{
-	struct razor_package *upkgs = trans->upstream->packages.data;
-	struct razor_property *uprops = trans->upstream->properties.data;
-	const char *upool = trans->upstream->string_pool.data;
-	const char *filename = &upool[uprops[up].name];
-	struct razor_entry *entry;
-	struct list *pkg;
-
-	if (filename[0] != '/')
-		return NULL;
-
-	entry = find_entry(trans->upstream, trans->upstream->files.data, filename);
-	if (!entry)
-		return NULL;
-
-	for (pkg = list_first(&entry->packages, &trans->upstream->package_pool); pkg; pkg = list_next(pkg)) {
-		if (bitarray_get(&trans->uppkgs, pkg->data) == installed)
-			return &upkgs[pkg->data];
-	}
-	return NULL;
-}
-
 static void
 add_transaction_package(struct razor_transaction_resolver *trans,
 			struct razor_package *package,
@@ -2046,7 +2031,7 @@ static void
 razor_transaction_satisfy_installs(struct razor_transaction_resolver *trans)
 {
 	struct razor_package *spkgs, *upkgs, *pkg;
-	struct razor_property *sprops, *uprops;
+	struct razor_property *prop, *sprops, *uprops;
 	int sp, up, ucount;
 	const char *upool;
 
@@ -2069,15 +2054,16 @@ razor_transaction_satisfy_installs(struct razor_transaction_resolver *trans)
 		if (up == ucount)
 			break;
 
-		switch (uprops[up].type) {
+		prop = &uprops[up];
+		switch (prop->type) {
 		case RAZOR_PROPERTY_REQUIRES:
-			if (!strncmp(&upool[uprops[up].name], "rpmlib(", 7))
+			if (!strncmp(&upool[prop->name], "rpmlib(", 7))
 				break;
 
-			if (find_system_provider(trans, 1, 0, &uprops[up], &sp) ||
-			    find_upstream_provider(trans, 1, 0, &uprops[up], up) ||
-			    find_system_file(trans, 1, up) ||
-			    find_upstream_file(trans, 1, up)) {
+			if (find_system_provider(trans, 1, 0, prop, &sp) ||
+			    find_upstream_provider(trans, 1, 0, prop, up) ||
+			    find_system_file(trans, &upool[prop->name], 1) ||
+			    find_upstream_file(trans, &upool[prop->name], 1)) {
 				/* Requires something that is either installed
 				 * or to-be-installed.
 				 */
@@ -2085,56 +2071,56 @@ razor_transaction_satisfy_installs(struct razor_transaction_resolver *trans)
 			}
 
 			/* See if we can install a new upstream provider */
-			pkg = find_upstream_provider(trans, 0, 0, &uprops[up], up);
+			pkg = find_upstream_provider(trans, 0, 0, prop, up);
 			if (!pkg)
-				pkg = find_upstream_file(trans, 0, up);
+				pkg = find_upstream_file(trans, &upool[prop->name], 0);
 			add_transaction_package(trans, pkg, trans->upstream,
 						RAZOR_PACKAGE_INSTALL,
-						&uprops[up], trans->upstream);
+						prop, trans->upstream);
 			break;
 
 		case RAZOR_PROPERTY_CONFLICTS:
-			if ((pkg = find_system_provider(trans, 1, 1, &uprops[up], &sp))) {
+			if ((pkg = find_system_provider(trans, 1, 1, prop, &sp))) {
 				struct razor_package *upgrade;
 
 				/* Conflicts with something already installed.
 				 * Try to upgrade out.
 				 */
-				upgrade = find_upgrade(trans, &uprops[up], up);
+				upgrade = find_upgrade(trans, prop, up);
 				if (upgrade) {
 					bitarray_set(&trans->syspkgs, pkg - spkgs, 0);
 					add_transaction_package(trans, upgrade,
 								trans->upstream,
 								RAZOR_PACKAGE_INSTALL,
-								&uprops[up], trans->upstream);
+								prop, trans->upstream);
 				} else {
 					add_transaction_package(trans, pkg,
 								trans->system, 
 								RAZOR_PACKAGE_INSTALL_CONFLICT,
-								&uprops[up], trans->upstream);
+								prop, trans->upstream);
 				}
-			} else if ((pkg = find_upstream_provider(trans, 1, 1, &uprops[up], up))) {
+			} else if ((pkg = find_upstream_provider(trans, 1, 1, prop, up))) {
 				/* Conflicts with something already to-be-installed */
 				add_transaction_package(trans, pkg,
 							trans->upstream, 
 							RAZOR_PACKAGE_INSTALL_CONFLICT,
-							&uprops[up], trans->upstream);
+							prop, trans->upstream);
 			}
 			break;
 
 		case RAZOR_PROPERTY_OBSOLETES:
-			if ((pkg = find_system_provider(trans, 1, 1, &uprops[up], &sp))) {
+			if ((pkg = find_system_provider(trans, 1, 1, prop, &sp))) {
 				/* Obsoletes something installed */
 				add_transaction_package(trans, pkg,
 							trans->system, 
 							RAZOR_PACKAGE_REMOVE,
-							&uprops[up], trans->upstream);
-			} else if ((pkg = find_upstream_provider(trans, 1, 1, &uprops[up], up))) {
+							prop, trans->upstream);
+			} else if ((pkg = find_upstream_provider(trans, 1, 1, prop, up))) {
 				/* Obsoletes something that was to-be-installed */
 				add_transaction_package(trans, pkg,
 							trans->upstream, 
 							RAZOR_PACKAGE_REMOVE_CONFLICT,
-							&uprops[up], trans->upstream);
+							prop, trans->upstream);
 			}
 			break;
 
