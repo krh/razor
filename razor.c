@@ -1651,16 +1651,34 @@ razor_merger_finish(struct razor_merger *merger)
 	return result;
 }
 
-static int
-find_packages(struct razor_set *set, int count, const char **package_names,
-	      struct array *package_array, struct bitarray *pkgbits,
+
+struct razor_transaction_resolver {
+	struct razor_set *system, *upstream;
+	struct bitarray syspkgs, uppkgs;
+	struct array packages;
+	int errors;
+};
+
+static void
+find_packages(struct razor_transaction_resolver *trans,
+	      int count, const char **package_names,
 	      enum razor_transaction_package_state state)
 {
+	struct razor_set *set;
+	struct bitarray *pkgbits;
 	struct razor_package_iterator *pi;
 	struct razor_package *p, *packages;
 	const char *name, *version;
 	struct razor_transaction_package *tp;
-	int i, *found, errors = 0;
+	int i, *found;
+
+	if (state == RAZOR_PACKAGE_INSTALL) {
+		set = trans->upstream;
+		pkgbits = &trans->uppkgs;
+	} else {
+		set = trans->system;
+		pkgbits = &trans->syspkgs;
+	}
 
 	packages = (struct razor_package *) set->packages.data;
 	pi = razor_package_iterator_create(set);
@@ -1670,7 +1688,7 @@ find_packages(struct razor_set *set, int count, const char **package_names,
 		for (i = 0; i < count; i++) {
 			if (strcmp(name, package_names[i]) == 0) {
 				found[i] = 1;
-				tp = array_add(package_array, sizeof *tp);
+				tp = array_add(&trans->packages, sizeof *tp);
 				memset(tp, 0, sizeof *tp);
 				tp->package = p;
 				tp->name = name;
@@ -1685,45 +1703,42 @@ find_packages(struct razor_set *set, int count, const char **package_names,
 
 	for (i = 0; i < count; i++) {
 		if (!found[i]) {
-			tp = array_add(package_array, sizeof *tp);
+			tp = array_add(&trans->packages, sizeof *tp);
 			memset(tp, 0, sizeof *tp);
 			tp->name = strdup(package_names[i]);
 			tp->state = state | RAZOR_PACKAGE_UNAVAILABLE;
-			errors++;
+			trans->errors++;
 		}
 	}
 
 	razor_package_iterator_destroy(pi);
 	free(found);
-
-	return errors;
 }
 
 static void
-find_all_packages(struct razor_set *set, struct razor_set *upstream,
-		  struct array *package_array, struct bitarray *pkgbits)
+find_all_packages(struct razor_transaction_resolver *trans)
 {
 	struct razor_transaction_package *tp;
 	struct razor_package *p, *packages, *u, *pend, *uend;
 	char *pool, *upool;
 
-	packages = set->packages.data;
-	pend = set->packages.data + set->packages.size;
-	pool = set->string_pool.data;
-	u = upstream->packages.data;
-	uend = upstream->packages.data + upstream->packages.size;
-	upool = upstream->string_pool.data;
+	packages = trans->system->packages.data;
+	pend = trans->system->packages.data + trans->system->packages.size;
+	pool = trans->system->string_pool.data;
+	u = trans->upstream->packages.data;
+	uend = trans->upstream->packages.data + trans->upstream->packages.size;
+	upool = trans->upstream->string_pool.data;
 
 	for (p = packages; p < pend; p++) {
 		while (u < uend && strcmp(&pool[p->name], &upool[u->name]) > 0)
 			u++;
 		if (strcmp(&pool[p->name], &upool[u->name]) == 0) {
-			tp = array_add(package_array, sizeof *tp);
+			tp = array_add(&trans->packages, sizeof *tp);
 			memset(tp, 0, sizeof *tp);
 			tp->name = &upool[u->name];
 			tp->version = &upool[u->version];
 			tp->state = RAZOR_PACKAGE_INSTALL;
-			bitarray_set(pkgbits, p - packages, 1);
+			bitarray_set(&trans->uppkgs, p - packages, 1);
 		}
 	}
 }
@@ -1789,8 +1804,8 @@ provider_satisfies_requirement(struct razor_property *provider,
 }
 
 static int
-find_system_file(struct razor_transaction *trans,
-		 struct bitarray *syspkgs, int installed, int up)
+find_system_file(struct razor_transaction_resolver *trans,
+		 int installed, int up)
 {
 	struct razor_entry *entry;
 	struct razor_property *uprops = trans->upstream->properties.data;
@@ -1808,14 +1823,14 @@ find_system_file(struct razor_transaction *trans,
 	for (p = list_first(&entry->packages, &trans->system->package_pool);
 	     p;
 	     p = list_next(p)) {
-		if (bitarray_get(syspkgs, p->data) == installed)
+		if (bitarray_get(&trans->syspkgs, p->data) == installed)
 			return 1;
 	}
 	return 0;
 }
 
 static struct razor_package *
-find_system_provider(struct razor_transaction *trans, struct bitarray *syspkgs,
+find_system_provider(struct razor_transaction_resolver *trans,
 		     int installed, int match_name,
 		     struct razor_property *req, int *sp)
 {
@@ -1844,7 +1859,7 @@ find_system_provider(struct razor_transaction *trans, struct bitarray *syspkgs,
 			struct list *pkg;
 
 			for (pkg = list_first(&sprops[*sp].packages, &trans->system->package_pool); pkg; pkg = list_next(pkg)) {
-				if (bitarray_get(syspkgs, pkg->data) != installed)
+				if (bitarray_get(&trans->syspkgs, pkg->data) != installed)
 					continue;
 				if (!match_name ||
 				    strcmp(&spool[spkgs[pkg->data].name],
@@ -1859,8 +1874,7 @@ find_system_provider(struct razor_transaction *trans, struct bitarray *syspkgs,
 }
 
 static struct razor_package *
-find_upstream_provider(struct razor_transaction *trans,
-		       struct bitarray *uppkgs,
+find_upstream_provider(struct razor_transaction_resolver *trans,
 		       int installed, int match_name,
 		       struct razor_property *req, int up)
 {
@@ -1894,7 +1908,7 @@ find_upstream_provider(struct razor_transaction *trans,
 			struct list *pkg;
 
 			for (pkg = list_first(&uprops[up].packages, &trans->upstream->package_pool); pkg; pkg = list_next(pkg)) {
-				if (bitarray_get(uppkgs, pkg->data) != installed)
+				if (bitarray_get(&trans->uppkgs, pkg->data) != installed)
 					continue;
 				if (!match_name ||
 				    strcmp(&upool[upkgs[pkg->data].name],
@@ -1908,9 +1922,8 @@ find_upstream_provider(struct razor_transaction *trans,
 }
 
 static struct razor_package *
-find_upgrade(struct razor_transaction *trans,
-	     struct bitarray *uppkgs, struct razor_property *obsolete,
-	     int up)
+find_upgrade(struct razor_transaction_resolver *trans,
+	     struct razor_property *obsolete, int up)
 {
 	struct razor_property *uprops = trans->upstream->properties.data;
 	const char *upool = trans->upstream->string_pool.data;
@@ -1939,13 +1952,12 @@ find_upgrade(struct razor_transaction *trans,
 	if (up < 0)
 		return NULL;
 
-	return find_upstream_provider(trans, uppkgs, 0, 1, &req, up);
+	return find_upstream_provider(trans, 0, 1, &req, up);
 }
 
 static struct razor_package *
-find_upstream_file(struct razor_transaction *trans,
-		   struct bitarray *uppkgs, int installed,
-		   int up)
+find_upstream_file(struct razor_transaction_resolver *trans,
+		   int installed, int up)
 {
 	struct razor_package *upkgs = trans->upstream->packages.data;
 	struct razor_property *uprops = trans->upstream->properties.data;
@@ -1962,17 +1974,14 @@ find_upstream_file(struct razor_transaction *trans,
 		return NULL;
 
 	for (pkg = list_first(&entry->packages, &trans->upstream->package_pool); pkg; pkg = list_next(pkg)) {
-		if (bitarray_get(uppkgs, pkg->data) == installed)
+		if (bitarray_get(&trans->uppkgs, pkg->data) == installed)
 			return &upkgs[pkg->data];
 	}
 	return NULL;
 }
 
 static void
-add_transaction_package(struct razor_transaction *trans,
-			struct bitarray *syspkgs,
-			struct bitarray *uppkgs,
-			struct array *package_array,
+add_transaction_package(struct razor_transaction_resolver *trans,
 			struct razor_package *package,
 			struct razor_set *package_set,
 			enum razor_transaction_package_state state,
@@ -1984,7 +1993,7 @@ add_transaction_package(struct razor_transaction *trans,
 	struct razor_package *pkgs;
 	struct list *pkg;
 
-	tp = array_add(package_array, sizeof *tp);
+	tp = array_add(&trans->packages, sizeof *tp);
 	memset(tp, 0, sizeof *tp);
 
 	if (package) {
@@ -1997,7 +2006,7 @@ add_transaction_package(struct razor_transaction *trans,
 		tp->state = state | RAZOR_PACKAGE_UNSATISFIABLE;
 
 	for (pkg = list_first(&req_prop->packages, &req_set->package_pool); pkg; pkg = list_next(pkg)) {
-		if (bitarray_get(uppkgs, pkg->data))
+		if (bitarray_get(&trans->uppkgs, pkg->data))
 			break;
 	}
 	if (pkg) {
@@ -2012,33 +2021,29 @@ add_transaction_package(struct razor_transaction *trans,
 
 	pkgs = package_set->packages.data;
 	if (tp->state == RAZOR_PACKAGE_INSTALL)
-		bitarray_set(uppkgs, package - pkgs, 1);
+		bitarray_set(&trans->uppkgs, package - pkgs, 1);
 	else if (tp->state == RAZOR_PACKAGE_REMOVE)
-		bitarray_set(uppkgs, package - pkgs, 0);
+		bitarray_set(&trans->syspkgs, package - pkgs, 0);
 	else
 		trans->errors++;
 }
 
 /* FIXME */
 static int
-prop_belongs_to_uppkgs(struct razor_set *set,
-		       struct razor_property *prop,
-		       struct bitarray *uppkgs)
+prop_is_being_installed(struct razor_transaction_resolver *trans,
+			struct razor_property *prop)
 {
 	struct list *pkg;
 
-	for (pkg = list_first(&prop->packages, &set->package_pool); pkg; pkg = list_next(pkg)) {
-		if (bitarray_get(uppkgs, pkg->data))
+	for (pkg = list_first(&prop->packages, &trans->upstream->package_pool); pkg; pkg = list_next(pkg)) {
+		if (bitarray_get(&trans->uppkgs, pkg->data))
 			return 1;
 	}
 	return 0;
 }
 
 static void
-razor_transaction_satisfy_installs(struct razor_transaction *trans,
-				   struct bitarray *syspkgs,
-				   struct bitarray *uppkgs,
-				   struct array *package_array)
+razor_transaction_satisfy_installs(struct razor_transaction_resolver *trans)
 {
 	struct razor_package *spkgs, *upkgs, *pkg;
 	struct razor_property *sprops, *uprops;
@@ -2059,7 +2064,7 @@ razor_transaction_satisfy_installs(struct razor_transaction *trans,
 		 */
 		while (up < ucount &&
 		       (uprops[up].type == RAZOR_PROPERTY_PROVIDES ||
-			!prop_belongs_to_uppkgs(trans->upstream, &uprops[up], uppkgs)))
+			!prop_is_being_installed(trans, &uprops[up])))
 			up++;
 		if (up == ucount)
 			break;
@@ -2069,10 +2074,10 @@ razor_transaction_satisfy_installs(struct razor_transaction *trans,
 			if (!strncmp(&upool[uprops[up].name], "rpmlib(", 7))
 				break;
 
-			if (find_system_provider(trans, syspkgs, 1, 0, &uprops[up], &sp) ||
-			    find_upstream_provider(trans, uppkgs, 1, 0, &uprops[up], up) ||
-			    find_system_file(trans, syspkgs, 1, up) ||
-			    find_upstream_file(trans, uppkgs, 1, up)) {
+			if (find_system_provider(trans, 1, 0, &uprops[up], &sp) ||
+			    find_upstream_provider(trans, 1, 0, &uprops[up], up) ||
+			    find_system_file(trans, 1, up) ||
+			    find_upstream_file(trans, 1, up)) {
 				/* Requires something that is either installed
 				 * or to-be-installed.
 				 */
@@ -2080,61 +2085,54 @@ razor_transaction_satisfy_installs(struct razor_transaction *trans,
 			}
 
 			/* See if we can install a new upstream provider */
-			pkg = find_upstream_provider(trans, uppkgs, 0, 0, &uprops[up], up);
+			pkg = find_upstream_provider(trans, 0, 0, &uprops[up], up);
 			if (!pkg)
-				pkg = find_upstream_file(trans, uppkgs, 0, up);
-			add_transaction_package(trans, syspkgs, uppkgs,
-						package_array,
-						pkg, trans->upstream,
+				pkg = find_upstream_file(trans, 0, up);
+			add_transaction_package(trans, pkg, trans->upstream,
 						RAZOR_PACKAGE_INSTALL,
 						&uprops[up], trans->upstream);
 			break;
 
 		case RAZOR_PROPERTY_CONFLICTS:
-			if ((pkg = find_system_provider(trans, syspkgs, 1, 1, &uprops[up], &sp))) {
+			if ((pkg = find_system_provider(trans, 1, 1, &uprops[up], &sp))) {
 				struct razor_package *upgrade;
 
 				/* Conflicts with something already installed.
 				 * Try to upgrade out.
 				 */
-				upgrade = find_upgrade(trans, uppkgs, &uprops[up], up);
+				upgrade = find_upgrade(trans, &uprops[up], up);
 				if (upgrade) {
-					bitarray_set(syspkgs, pkg - spkgs, 0);
-					add_transaction_package(trans, syspkgs, uppkgs,
-								package_array,
-								upgrade, trans->upstream,
+					bitarray_set(&trans->syspkgs, pkg - spkgs, 0);
+					add_transaction_package(trans, upgrade,
+								trans->upstream,
 								RAZOR_PACKAGE_INSTALL,
 								&uprops[up], trans->upstream);
 				} else {
-					add_transaction_package(trans, syspkgs, uppkgs,
-								package_array,
-								pkg, trans->system, 
+					add_transaction_package(trans, pkg,
+								trans->system, 
 								RAZOR_PACKAGE_INSTALL_CONFLICT,
 								&uprops[up], trans->upstream);
 				}
-			} else if ((pkg = find_upstream_provider(trans, uppkgs, 1, 1, &uprops[up], up))) {
+			} else if ((pkg = find_upstream_provider(trans, 1, 1, &uprops[up], up))) {
 				/* Conflicts with something already to-be-installed */
-				add_transaction_package(trans, syspkgs, uppkgs,
-							package_array,
-							pkg, trans->upstream, 
+				add_transaction_package(trans, pkg,
+							trans->upstream, 
 							RAZOR_PACKAGE_INSTALL_CONFLICT,
 							&uprops[up], trans->upstream);
 			}
 			break;
 
 		case RAZOR_PROPERTY_OBSOLETES:
-			if ((pkg = find_system_provider(trans, syspkgs, 1, 1, &uprops[up], &sp))) {
+			if ((pkg = find_system_provider(trans, 1, 1, &uprops[up], &sp))) {
 				/* Obsoletes something installed */
-				add_transaction_package(trans, syspkgs, uppkgs,
-							package_array,
-							pkg, trans->system, 
+				add_transaction_package(trans, pkg,
+							trans->system, 
 							RAZOR_PACKAGE_REMOVE,
 							&uprops[up], trans->upstream);
-			} else if ((pkg = find_upstream_provider(trans, uppkgs, 1, 1, &uprops[up], up))) {
+			} else if ((pkg = find_upstream_provider(trans, 1, 1, &uprops[up], up))) {
 				/* Obsoletes something that was to-be-installed */
-				add_transaction_package(trans, syspkgs, uppkgs,
-							package_array,
-							pkg, trans->upstream, 
+				add_transaction_package(trans, pkg,
+							trans->upstream, 
 							RAZOR_PACKAGE_REMOVE_CONFLICT,
 							&uprops[up], trans->upstream);
 			}
@@ -2190,8 +2188,7 @@ gather_lost_files(struct razor_set *set, struct razor_package *pkg,
 }
 
 static void
-lose_required_package(struct razor_transaction *trans, struct bitarray *syspkgs,
-		      struct array *package_array,
+lose_required_package(struct razor_transaction_resolver *trans,
 		      struct razor_property *req,
 		      struct list_head *lost_package_list)
 {
@@ -2205,13 +2202,13 @@ lose_required_package(struct razor_transaction *trans, struct bitarray *syspkgs,
 	lost_package = &pkgs[list_first(lost_package_list, &trans->system->package_pool)->data];
 
 	for (p = list_first(&req->packages, &trans->system->package_pool); p; p = list_next(p)) {
-		packages = package_array->data;
-		already = find_transaction_package(package_array, &pkgs[p->data]);
+		packages = trans->packages.data;
+		already = find_transaction_package(&trans->packages, &pkgs[p->data]);
 		if (already != -1 &&
 		    (packages[already].state & RAZOR_PACKAGE_REMOVE))
 			continue;
 
-		tp = array_add(package_array, sizeof *tp);
+		tp = array_add(&trans->packages, sizeof *tp);
 		memset(tp, 0, sizeof *tp);
 		tp->package = &pkgs[p->data];
 		tp->name = &pool[tp->package->name];
@@ -2226,14 +2223,13 @@ lose_required_package(struct razor_transaction *trans, struct bitarray *syspkgs,
 			trans->errors++;
 		} else {
 			tp->state = RAZOR_PACKAGE_REMOVE;
-			bitarray_set(syspkgs, p->data, 0);
+			bitarray_set(&trans->syspkgs, p->data, 0);
 		}
 	}
 }
 
 static void
-lose_requirement(struct razor_transaction *trans, struct bitarray *syspkgs,
-		 struct array *package_array,
+lose_requirement(struct razor_transaction_resolver *trans,
 		 struct razor_property *req,
 		 struct razor_property *lost_provider,
 		 struct razor_property *first_provider)
@@ -2254,14 +2250,11 @@ lose_requirement(struct razor_transaction *trans, struct bitarray *syspkgs,
 			return;
 	}
 
-	lose_required_package(trans, syspkgs, package_array, req,
-			      &lost_provider->packages);
+	lose_required_package(trans, req, &lost_provider->packages);
 }
 
 static void
-razor_transaction_satisfy_removes(struct razor_transaction *trans,
-				  struct bitarray *syspkgs,
-				  struct array *package_array,
+razor_transaction_satisfy_removes(struct razor_transaction_resolver *trans,
 				  int start, int end)
 {
 	struct razor_transaction_package *packages;
@@ -2282,7 +2275,7 @@ razor_transaction_satisfy_removes(struct razor_transaction *trans,
 	array_init(&lost_files);
 	array_init(&lost_provides);
 	for (r = start; r < end; r++) {
-		packages = package_array->data;
+		packages = trans->packages.data;
 		if (packages[r].state != RAZOR_PACKAGE_REMOVE)
 			continue;
 
@@ -2301,8 +2294,8 @@ razor_transaction_satisfy_removes(struct razor_transaction *trans,
 		first_provider = req + 1;
 
 		while (req > props && req->name == props[*lost].name) {
-			lose_requirement(trans, syspkgs, package_array, req,
-					 &props[*lost], first_provider);
+			lose_requirement(trans, req, &props[*lost],
+					 first_provider);
 			req--;
 		}
 	}
@@ -2332,8 +2325,7 @@ razor_transaction_satisfy_removes(struct razor_transaction *trans,
 		if (lostf == lostf_end)
 			continue;
 
-		lose_required_package(trans, syspkgs, package_array, req,
-				      &(entry)->packages);
+		lose_required_package(trans, req, &entry->packages);
 	}
 	array_release(&lost_files);
 }
@@ -2389,54 +2381,48 @@ razor_transaction_create(struct razor_set *system, struct razor_set *upstream,
 			 int update_count, const char **update_packages,
 			 int remove_count, const char **remove_packages)
 {
-	struct razor_transaction *trans;
-	struct array package_array;
-	struct razor_package *spkgs, *upkgs;
-	struct bitarray syspkgs, uppkgs;
+	struct razor_transaction_resolver trans;
+	struct razor_transaction *ret_trans;
 	int start, end;
 
-	trans = zalloc(sizeof *trans);
-	trans->system = system;
-	spkgs = trans->system->packages.data;
-	trans->upstream = upstream ? upstream : razor_set_create();
-	upkgs = trans->upstream->packages.data;
-	array_init(&package_array);
-	bitarray_init(&syspkgs, trans->system->packages.size / sizeof (struct razor_package), 1);
-	bitarray_init(&uppkgs, trans->upstream->packages.size / sizeof (struct razor_package), 0);
+	trans.system = system;
+	trans.upstream = upstream ? upstream : razor_set_create();
+	array_init(&trans.packages);
+	bitarray_init(&trans.syspkgs, trans.system->packages.size / sizeof (struct razor_package), 1);
+	bitarray_init(&trans.uppkgs, trans.upstream->packages.size / sizeof (struct razor_package), 0);
+	trans.errors = 0;
 
 	/* Find initial upstream packages to be installed */
 	if (update_count > 0) {
-		trans->errors +=
-			find_packages(upstream, update_count, update_packages,
-				      &package_array, &uppkgs,
-				      RAZOR_PACKAGE_INSTALL);
+		find_packages(&trans, update_count, update_packages,
+			      RAZOR_PACKAGE_INSTALL);
 	} else if (remove_count == 0)
-		find_all_packages(system, upstream, &package_array, &uppkgs);
+		find_all_packages(&trans);
 
 	/* Find initial installed packages to remove. */
 	if (remove_count > 0) {
-		trans->errors +=
-			find_packages(system, remove_count, remove_packages,
-				      &package_array, &syspkgs,
-				      RAZOR_PACKAGE_REMOVE);
+		find_packages(&trans, remove_count, remove_packages,
+			      RAZOR_PACKAGE_REMOVE);
 	}
 
 	start = 0;
-	end = package_array.size / sizeof (struct razor_transaction_package);
+	end = trans.packages.size / sizeof (struct razor_transaction_package);
 
-	while (!trans->errors && start != end) {
-		razor_transaction_satisfy_installs(trans, &syspkgs, &uppkgs,
-						   &package_array);
-		razor_transaction_satisfy_removes(trans, &syspkgs,
-						  &package_array, start, end);
+	while (!trans.errors && start != end) {
+		razor_transaction_satisfy_installs(&trans);
+		razor_transaction_satisfy_removes(&trans, start, end);
 
 		start = end;
-		end = package_array.size / sizeof (struct razor_transaction_package);
+		end = trans.packages.size / sizeof (struct razor_transaction_package);
 	}
 
-	trans->packages = package_array.data;
-	trans->package_count = end;
-	return trans;
+	ret_trans = zalloc(sizeof *ret_trans);
+	ret_trans->system = trans.system;
+	ret_trans->upstream = trans.upstream;
+	ret_trans->packages = trans.packages.data;
+	ret_trans->package_count = end;
+	ret_trans->errors = trans.errors;
+	return ret_trans;
 }
 
 const char * const razor_version_relations[] = {
