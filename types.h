@@ -45,4 +45,14 @@ uint32_t hashtable_insert(struct hashtable *table, const char *key);
 uint32_t hashtable_lookup(struct hashtable *table, const char *key);
 uint32_t hashtable_tokenize(struct hashtable *table, const char *string);
 
+
+struct bitarray {
+	uint32_t *bits;
+};
+
+void bitarray_init(struct bitarray *bitarray, int size, int intial_value);
+void bitarray_set(struct bitarray *bitarray, int bit, int value);
+int bitarray_get(struct bitarray *bitarray, int bit);
+
+
 #endif /* _RAZOR_TYPES_H_ */
