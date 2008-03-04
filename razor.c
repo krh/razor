@@ -229,6 +229,29 @@ razor_set_write(struct razor_set *set, const char *filename)
 }
 
 void
+razor_build_evr(char *evr_buf, int size, const char *epoch,
+		const char *version, const char *release)
+{
+	int len;
+
+	if (!version || !*version) {
+		*evr_buf = '\0';
+		return;
+	}
+
+	if (epoch && *epoch && strcmp(epoch, "0") != 0) {
+		len = snprintf(evr_buf, size, "%s:", epoch);
+		evr_buf += len;
+		size -= len;
+	}
+	len = snprintf(evr_buf, size, "%s", version);
+	evr_buf += len;
+	size -= len;
+	if (release && *release)
+		snprintf(evr_buf, size, "-%s", release);
+}
+
+void
 razor_importer_begin_package(struct razor_importer *importer,
 			     const char *name, const char *version)
 {

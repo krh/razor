@@ -130,7 +130,7 @@ struct razor_rpm;
 struct razor_importer *razor_importer_new(void);
 void razor_importer_destroy(struct razor_importer *importer);
 void razor_importer_begin_package(struct razor_importer *importer,
-				const char *name, const char *version);
+				  const char *name, const char *version);
 void razor_importer_add_property(struct razor_importer *importer,
 				 const char *name,
 				 enum razor_version_relation relation,
@@ -144,6 +144,9 @@ int razor_importer_add_rpm(struct razor_importer *importer,
 			   struct razor_rpm *rpm);
 
 struct razor_set *razor_importer_finish(struct razor_importer *importer);
+
+void razor_build_evr(char *evr_buf, int size, const char *epoch,
+		     const char *version, const char *release);
 
 struct razor_set *razor_set_create_from_yum(void);
 struct razor_set *razor_set_create_from_rpmdb(void);

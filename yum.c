@@ -62,7 +62,7 @@ static void
 yum_primary_start_element(void *data, const char *name, const char **atts)
 {
 	struct yum_context *ctx = data;
-	const char *n, *version, *release, *flags;
+	const char *n, *epoch, *version, *release, *flags;
 	char buffer[128];
 	int i;
 
@@ -70,10 +70,13 @@ yum_primary_start_element(void *data, const char *name, const char **atts)
 		ctx->state = YUM_STATE_PACKAGE_NAME;
 		ctx->p = ctx->name;
 	} else if (strcmp(name, "version") == 0) {
+		epoch = NULL;
 		version = NULL;
 		release = NULL;
 		for (i = 0; atts[i]; i += 2) {
-			if (strcmp(atts[i], "ver") == 0)
+			if (strcmp(atts[i], "epoch") == 0)
+				epoch = atts[i + 1];
+			else if (strcmp(atts[i], "ver") == 0)
 				version = atts[i + 1];
 			else if (strcmp(atts[i], "rel") == 0)
 				release = atts[i + 1];
@@ -84,7 +87,7 @@ yum_primary_start_element(void *data, const char *name, const char **atts)
 			return;
 		}
 
-		snprintf(buffer, sizeof buffer, "%s-%s", version, release);
+		razor_build_evr(buffer, sizeof buffer, epoch, version, release);
 		razor_importer_begin_package(ctx->importer, ctx->name, buffer);
 	} else if (strcmp(name, "checksum") == 0) {
 		ctx->p = ctx->pkgid;
@@ -100,12 +103,15 @@ yum_primary_start_element(void *data, const char *name, const char **atts)
 	} else if (strcmp(name, "rpm:entry") == 0 &&
 		   ctx->state != YUM_STATE_BEGIN) {
 		n = NULL;
+		epoch = NULL;
 		version = NULL;
 		release = NULL;
 		flags = NULL;
 		for (i = 0; atts[i]; i += 2) {
 			if (strcmp(atts[i], "name") == 0)
 				n = atts[i + 1];
+			else if (strcmp(atts[i], "epoch") == 0)
+				epoch = atts[i + 1];
 			else if (strcmp(atts[i], "ver") == 0)
 				version = atts[i + 1];
 			else if (strcmp(atts[i], "rel") == 0)
@@ -120,14 +126,7 @@ yum_primary_start_element(void *data, const char *name, const char **atts)
 			return;
 		}
 
-		if (version && release)
-			snprintf(buffer, sizeof buffer,
-				 "%s-%s", version, release);
-		else if (version)
-			strcpy(buffer, version);
-		else
-			buffer[0] = '\0';
-			
+		razor_build_evr(buffer, sizeof buffer, epoch, version, release);
 		switch (ctx->state) {
 		case YUM_STATE_REQUIRES:
 			razor_importer_add_property(ctx->importer, n,

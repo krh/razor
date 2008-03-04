@@ -109,7 +109,6 @@ import_properties(struct razor_importer *importer, unsigned long type,
 
 	flags = *(uint_32 *)razor_rpm_get_indirect(rpm, flags_tag, &count);
 
-	/* FIXME: Concat version and release. */
 	version = razor_rpm_get_indirect(rpm, version_tag, &count);
 	for (i = 0; i < count; i++) {
 		razor_importer_add_property(importer, name,
@@ -525,14 +524,16 @@ razor_rpm_close(struct razor_rpm *rpm)
 int
 razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 {
-	const char *name, *version, *release;
+	const char *name, *epoch, *version, *release;
+	char evr[128];
 
 	name = razor_rpm_get_indirect(rpm, RPMTAG_NAME, NULL);
+	epoch = razor_rpm_get_indirect(rpm, RPMTAG_EPOCH, NULL);
 	version = razor_rpm_get_indirect(rpm, RPMTAG_VERSION, NULL);
 	release = razor_rpm_get_indirect(rpm, RPMTAG_RELEASE, NULL);
 
-	/* FIXME: Concatenate version and release. */
-	razor_importer_begin_package(importer, name, version);
+	razor_build_evr(evr, sizeof evr, epoch, version, release);
+	razor_importer_begin_package(importer, name, evr);
 
 	import_properties(importer, RAZOR_PROPERTY_REQUIRES, rpm,
 			  RPMTAG_REQUIRENAME,
@@ -595,9 +596,9 @@ razor_set_create_from_rpmdb(void)
 	rpmdbMatchIterator iter;
 	Header h;
 	int_32 type, count, i;
-	union rpm_entry name, version, release;
+	union rpm_entry name, epoch, version, release;
 	union rpm_entry basenames, dirnames, dirindexes;
-	char filename[PATH_MAX];
+	char filename[PATH_MAX], evr[128];
 	rpmdb db;
 
 	rpmReadConfigFiles(NULL, NULL);
@@ -612,11 +613,12 @@ razor_set_create_from_rpmdb(void)
 	iter = rpmdbInitIterator(db, 0, NULL, 0);
 	while (h = rpmdbNextIterator(iter), h != NULL) {
 		headerGetEntry(h, RPMTAG_NAME, &type, &name.p, &count);
+		headerGetEntry(h, RPMTAG_EPOCH, &type, &epoch.p, &count);
 		headerGetEntry(h, RPMTAG_VERSION, &type, &version.p, &count);
 		headerGetEntry(h, RPMTAG_RELEASE, &type, &release.p, &count);
-		snprintf(filename, sizeof filename, "%s-%s",
-			 version.string, release.string);
-		razor_importer_begin_package(importer, name.string, filename);
+		razor_build_evr(evr, sizeof evr, epoch.string, version.string,
+				release.string);
+		razor_importer_begin_package(importer, name.string, evr);
 
 		add_properties(importer, RAZOR_PROPERTY_REQUIRES, h,
 			       RPMTAG_REQUIRENAME,
