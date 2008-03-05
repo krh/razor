@@ -76,22 +76,25 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 
 enum razor_transaction_package_state {
 	/* Basic states */
-	RAZOR_PACKAGE_INSTALL       = 0x01,
-	RAZOR_PACKAGE_REMOVE        = 0x02,
-
-	/* (Flags used to define the error states) */
-	RAZOR_PACKAGE_UNAVAILABLE   = 0x04,
-	RAZOR_PACKAGE_UNSATISFIABLE = 0x08,
-	RAZOR_PACKAGE_BLOCKED       = 0x10,
-	RAZOR_PACKAGE_CONFLICT      = 0x20,
+	RAZOR_PACKAGE_INSTALL,
+	RAZOR_PACKAGE_REMOVE,
 
 	/* Error states */
-	RAZOR_PACKAGE_INSTALL_UNAVAILABLE   = RAZOR_PACKAGE_INSTALL | RAZOR_PACKAGE_UNAVAILABLE,
-	RAZOR_PACKAGE_INSTALL_UNSATISFIABLE = RAZOR_PACKAGE_INSTALL | RAZOR_PACKAGE_UNSATISFIABLE,
-	RAZOR_PACKAGE_INSTALL_CONFLICT = RAZOR_PACKAGE_INSTALL | RAZOR_PACKAGE_CONFLICT,
-	RAZOR_PACKAGE_REMOVE_NOT_INSTALLED  = RAZOR_PACKAGE_REMOVE | RAZOR_PACKAGE_UNAVAILABLE,
-	RAZOR_PACKAGE_REMOVE_BLOCKED  = RAZOR_PACKAGE_REMOVE | RAZOR_PACKAGE_BLOCKED,
-	RAZOR_PACKAGE_REMOVE_CONFLICT  = RAZOR_PACKAGE_REMOVE | RAZOR_PACKAGE_CONFLICT
+
+	/* Package requested for install does not exist */
+	RAZOR_PACKAGE_INSTALL_UNAVAILABLE,
+	/* Package requested for removal does not exist */
+	RAZOR_PACKAGE_REMOVE_NOT_INSTALLED,
+	/* No newer version of package is available */
+	RAZOR_PACKAGE_UP_TO_DATE,
+	/* Package marked for both install and remove */
+	RAZOR_PACKAGE_CONTRADICTION,
+	/* Package would add a conflict with an already-installed package */
+	RAZOR_PACKAGE_NEW_CONFLICT,
+	/* Already-installed package has a conflict against this package */
+	RAZOR_PACKAGE_OLD_CONFLICT,
+	/* Requirement of to-be-installed package can't be satisfied */
+	RAZOR_PACKAGE_UNSATISFIABLE
 };
 
 struct razor_transaction_package {
@@ -99,11 +102,34 @@ struct razor_transaction_package {
 	const char *name, *version;
 	enum razor_transaction_package_state state;
 
-	const char *req_package;
-	enum razor_property_type req_type;
-	const char *req_property;
-	enum razor_version_relation req_relation;
-	const char *req_version;
+	/* dep_package is the name of the package that resulted in
+	 * this entry being created (or NULL if the user requested the
+	 * install/remove), with the other dep_ fields providing
+	 * additional information.
+	 *
+	 * For INSTALL, if dep_type is REQUIRES, then dep_package
+	 * required something that this package provides. If dep_type
+	 * is CONFLICTS, then dep_package is a package that conflicted
+	 * with an older version of this package, forcing an upgrade.
+	 *
+	 * For REMOVE, if dep_type is REQUIRES, then dep_package is a
+	 * package that is being removed. If dep_type is OBSOLETES,
+	 * then dep_package is a package that obsoletes this one.
+	 *
+	 * For OLD_CONFLICT or NEW_CONFLICT, dep_package is an
+	 * existing package that conflicts with this one. The
+	 * conflicting property comes from the already-installed
+	 * package for OLD_CONFLICT, or the to-be-installed package
+	 * for NEW_CONFLICT.
+	 *
+	 * For UNSATISFIABLE, the dep_ fields are as for an INSTALL,
+	 * but the name field will be NULL.
+	 */
+	const char *dep_package;
+	enum razor_property_type dep_type;
+	const char *dep_property;
+	enum razor_version_relation dep_relation;
+	const char *dep_version;
 };
 
 struct razor_transaction {

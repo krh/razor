@@ -1754,28 +1754,26 @@ find_packages(struct razor_transaction_resolver *trans,
 				bitarray_set(&trans->syspkgs, sp - spkgs, 0);
 			} else {
 				packages[i].name = strdup(packages[i].name);
-				packages[i].state |= RAZOR_PACKAGE_UNAVAILABLE;
+				packages[i].state = RAZOR_PACKAGE_REMOVE_NOT_INSTALLED;
 				trans->errors++;
 			}
 		} else {
 			if (up < uend && strcmp(packages[i].name, &upool[up->name]) == 0) {
+				packages[i].package = up;
+				packages[i].name = &upool[up->name];
+				packages[i].version = &upool[up->version];
 				if (sp < send && strcmp(packages[i].name, &spool[sp->name]) == 0) {
 					if (versioncmp(&spool[sp->version], &upool[up->version]) >= 0) {
-						/* FIXME: need a distinct error */
-						packages[i].name = strdup(packages[i].name);
-						packages[i].state |= RAZOR_PACKAGE_UNAVAILABLE;
+						packages[i].state = RAZOR_PACKAGE_UP_TO_DATE;
 						trans->errors++;
 						continue;
 					}
 					bitarray_set(&trans->syspkgs, sp - spkgs, 0);
 				}
-				packages[i].package = up;
-				packages[i].name = &upool[up->name];
-				packages[i].version = &upool[up->version];
 				bitarray_set(&trans->uppkgs, up - upkgs, 1);
 			} else {
 				packages[i].name = strdup(packages[i].name);
-				packages[i].state |= RAZOR_PACKAGE_UNAVAILABLE;
+				packages[i].state = RAZOR_PACKAGE_INSTALL_UNAVAILABLE;
 				trans->errors++;
 			}
 		}
@@ -2099,13 +2097,21 @@ add_transaction_package(struct razor_transaction_resolver *trans,
 			const char *req_package,
 			struct razor_property *req_prop)
 {
-	struct razor_set *package_set;
+	struct razor_set *package_set, *req_set;
+	struct bitarray *reqpkgbits;
 	struct razor_transaction_package *tp, *packages;
 	const char *pool;
 	struct razor_package *pkgs;
 	struct list *pkg;
 
 	package_set = package_in_set(package, trans->system) ? trans->system : trans->upstream;
+	if (property_in_set(req_prop, trans->system)) {
+		req_set = trans->system;
+		reqpkgbits = &trans->syspkgs;
+	} else {
+		req_set = trans->upstream;
+		reqpkgbits = &trans->uppkgs;
+	}
 
 	tp = array_add(&trans->packages, sizeof *tp);
 	memset(tp, 0, sizeof *tp);
@@ -2125,7 +2131,11 @@ add_transaction_package(struct razor_transaction_resolver *trans,
 					return;
 				}
 				/* Oops. We lose */
-				state |= RAZOR_PACKAGE_BLOCKED;
+				if (state != RAZOR_PACKAGE_CONTRADICTION) {
+					add_transaction_package(trans, package,
+								RAZOR_PACKAGE_CONTRADICTION,
+								NULL, NULL);
+				}
 				break;
 			}
 		}
@@ -2134,35 +2144,39 @@ add_transaction_package(struct razor_transaction_resolver *trans,
 		tp->name = &pool[package->name];
 		tp->version = &pool[package->version];
 		tp->state = state;
-	} else
-		tp->state = state | RAZOR_PACKAGE_UNSATISFIABLE;
 
-	if (req_package)
-		tp->req_package = req_package;
-	else {
-		for (pkg = list_first(&req_prop->packages, &trans->upstream->package_pool); pkg; pkg = list_next(pkg)) {
-			if (bitarray_get(&trans->uppkgs, pkg->data))
-				break;
-		}
-		if (pkg) {
-			pool = trans->upstream->string_pool.data;
-			pkgs = trans->upstream->packages.data;
-			tp->req_package = &pool[pkgs[pkg->data].name];
-		}
+		pkgs = package_set->packages.data;
+		if (tp->state == RAZOR_PACKAGE_INSTALL)
+			bitarray_set(&trans->uppkgs, package - pkgs, 1);
+		else if (tp->state == RAZOR_PACKAGE_REMOVE)
+			bitarray_set(&trans->syspkgs, package - pkgs, 0);
+		else
+			trans->errors++;
+	} else {
+		tp->state = RAZOR_PACKAGE_UNSATISFIABLE;
+		trans->errors++;
 	}
 
-	tp->req_type = req_prop->type;
-	tp->req_property = &pool[req_prop->name];
-	tp->req_relation = req_prop->relation;
-	tp->req_version = &pool[req_prop->version];
+	if (req_package)
+		tp->dep_package = req_package;
+	if (!req_prop)
+		return;
 
-	pkgs = package_set->packages.data;
-	if (tp->state == RAZOR_PACKAGE_INSTALL)
-		bitarray_set(&trans->uppkgs, package - pkgs, 1);
-	else if (tp->state == RAZOR_PACKAGE_REMOVE)
-		bitarray_set(&trans->syspkgs, package - pkgs, 0);
-	else
-		trans->errors++;
+	pool = req_set->string_pool.data;
+	pkgs = req_set->packages.data;
+	if (!req_package) {
+		for (pkg = list_first(&req_prop->packages, &req_set->package_pool); pkg; pkg = list_next(pkg)) {
+			if (bitarray_get(reqpkgbits, pkg->data))
+				break;
+		}
+		if (pkg)
+			tp->dep_package = &pool[pkgs[pkg->data].name];
+	}
+
+	tp->dep_type = req_prop->type;
+	tp->dep_property = &pool[req_prop->name];
+	tp->dep_relation = req_prop->relation;
+	tp->dep_version = &pool[req_prop->version];
 }
 
 /* FIXME: make this more efficient */
@@ -2191,11 +2205,12 @@ razor_transaction_satisfy_installs(struct razor_transaction_resolver *trans)
 	struct razor_package *spkgs, *upkgs, *pkg, *upgrade;
 	struct razor_property *sp, *sprops, *sprop_end;
 	struct razor_property *up, *uprops, *uprop_end;
-	const char *upool;
+	const char *spool, *upool;
 
 	spkgs = trans->system->packages.data;
 	sprops = trans->system->properties.data;
 	sprop_end = trans->system->properties.data + trans->system->properties.size;
+	spool = trans->system->string_pool.data;
 	upkgs = trans->upstream->packages.data;
 	uprops = trans->upstream->properties.data;
 	uprop_end = trans->upstream->properties.data + trans->upstream->properties.size;
@@ -2248,21 +2263,23 @@ razor_transaction_satisfy_installs(struct razor_transaction_resolver *trans)
 			if (!pkg)
 				break;
 
-			/* pkg CONFLICTS with what 'up' PROVIDES. Try
-			 * finding an upgrade
-			 */
-			upgrade = find_upgrade_for_installed_conflict(trans, pkg, up);
-			if (upgrade) {
-				bitarray_set(&trans->syspkgs, pkg - spkgs, 0);
-				add_transaction_package(trans, upgrade,
-							RAZOR_PACKAGE_INSTALL,
-							NULL, up);
-			} else {
-				add_transaction_package(trans, pkg,
-							/* FIXME? */
-							RAZOR_PACKAGE_REMOVE_CONFLICT,
-							NULL, up);
+			if (package_in_set(pkg, trans->system)) {
+				/* pkg CONFLICTS with what 'up' PROVIDES. Try
+				 * finding an upgrade
+				 */
+				upgrade = find_upgrade_for_installed_conflict(trans, pkg, up);
+				if (upgrade) {
+					bitarray_set(&trans->syspkgs, pkg - spkgs, 0);
+					add_transaction_package(trans, upgrade,
+								RAZOR_PACKAGE_INSTALL,
+								&spool[pkg->name], sp);
+				}
+				break;
 			}
+
+			add_transaction_package(trans, pkg,
+						RAZOR_PACKAGE_OLD_CONFLICT,
+						NULL, up);
 			break;
 
 		case RAZOR_PROPERTY_CONFLICTS:
@@ -2280,33 +2297,23 @@ razor_transaction_satisfy_installs(struct razor_transaction_resolver *trans)
 					add_transaction_package(trans, upgrade,
 								RAZOR_PACKAGE_INSTALL,
 								NULL, up);
-				} else {
-					add_transaction_package(trans, pkg,
-								RAZOR_PACKAGE_INSTALL_CONFLICT,
-								NULL, up);
+					break;
 				}
-			} else {
-				/* Conflicts with something already to-be-installed */
-				add_transaction_package(trans, pkg,
-							RAZOR_PACKAGE_INSTALL_CONFLICT,
-							NULL, up);
 			}
+
+			add_transaction_package(trans, pkg,
+						RAZOR_PACKAGE_NEW_CONFLICT,
+						NULL, up);
 			break;
 
 		case RAZOR_PROPERTY_OBSOLETES:
 			pkg = find_installed_package_for_property(trans, &sp, up);
-			if (!pkg)
-				break;
-
-			if (package_in_set(pkg, trans->system)) {
-				/* Obsoletes something installed */
+			if (pkg) {
+				/* If pkg is to-be-installed, this
+				 * will add a CONTRADICTION error as well.
+				 */
 				add_transaction_package(trans, pkg,
 							RAZOR_PACKAGE_REMOVE,
-							NULL, up);
-			} else {
-				/* Obsoletes something that was to-be-installed */
-				add_transaction_package(trans, pkg,
-							RAZOR_PACKAGE_REMOVE_CONFLICT,
 							NULL, up);
 			}
 			break;
@@ -2580,11 +2587,6 @@ const char * const razor_property_types[] = {
 	"requires", "provides", "conflicts with", "obsoletes"
 };
 
-const char * const razor_property_types_removal[] = {
-	/* same order as enum razor_property_type */
-	"required", "provided", "conflicted with", "was obsoleted by"
-};
-
 void
 razor_transaction_describe(struct razor_transaction *trans)
 {
@@ -2599,93 +2601,110 @@ razor_transaction_describe(struct razor_transaction *trans)
 			if (errors_only)
 				break;
 
-			printf ("Installing %s %s", p->name, p->version);
-			if (p->req_package) {
-				printf (" for %s", p->req_package);
-			print_requirement:
-				if (*p->req_version) {
-					printf (", which %s %s %s %s",
-						razor_property_types[p->req_type],
-						p->req_property,
-						razor_version_relations[p->req_relation],
-						p->req_version);
-				} else if (strcmp(p->req_property, p->name) != 0) {
-					printf (", which %s %s",
-						razor_property_types[p->req_type],
-						p->req_property);
+			printf("Installing %s %s", p->name, p->version);
+			if (p->dep_package) {
+				if (p->dep_type == RAZOR_PROPERTY_CONFLICTS &&
+				    !strcmp(p->dep_package, p->name)) {
+					printf(" because installed %s conflicts with %s",
+					       p->name, p->dep_property);
+					if (*p->dep_version) {
+						printf(" %s %s",
+						       razor_version_relations[p->dep_relation],
+						       p->dep_version);
+					}
+				} else {
+					printf(" for %s", p->dep_package);
+					if (*p->dep_version) {
+						printf(", which %s %s %s %s",
+						       razor_property_types[p->dep_type],
+						       p->dep_property,
+						       razor_version_relations[p->dep_relation],
+						       p->dep_version);
+					} else if (strcmp(p->dep_property, p->name) != 0) {
+						printf(", which %s %s",
+						       razor_property_types[p->dep_type],
+						       p->dep_property);
+					}
+				}
+			}
+			printf("\n");
+			break;
+
+		case RAZOR_PACKAGE_REMOVE:
+			if (errors_only)
+				break;
+			printf("Removing %s %s", p->name, p->version);
+			if (p->dep_package) {
+				if (p->dep_type == RAZOR_PROPERTY_OBSOLETES) {
+					printf(" which is obsoleted by %s",
+					       p->dep_package);
+				} else {
+					printf(" which required %s",
+					       p->dep_package);
+					if (strcmp(p->dep_property, p->name) != 0)
+						printf(" for %s", p->dep_property);
 				}
 			}
 			printf("\n");
 			break;
 
 		case RAZOR_PACKAGE_INSTALL_UNAVAILABLE:
-			printf ("Can't find %s", p->name);
-			if (p->req_package) {
-				if (*p->req_version && strcmp(p->req_property, p->name) == 0) {
-					printf ("%s %s, which is required by %s",
-						razor_version_relations[p->req_relation],
-						p->req_version,
-						p->req_package);
-				} else {
-					if (*p->version)
-						printf (" %s", p->version);
-
-					if (p->req_package) {
-						printf ("  which is required by %s",
-							p->req_package);
-						if (strcmp(p->req_property, p->name) != 0)
-							printf (" for %s", p->req_property);
-					}
-				}
-			} else if (p->version && *p->version)
-				printf (" %s", p->version);
-			printf("\n");
+			printf("Error: can't install %s: not found\n", p->name);
 			errors_only = 1;
-			break;
-
-		case RAZOR_PACKAGE_INSTALL_CONFLICT:
-			printf ("Cannot install %s", p->req_package);
-			errors_only = 1;
-			goto print_requirement;
-
-		case RAZOR_PACKAGE_INSTALL_UNSATISFIABLE:
-			printf ("Cannot find package for %s", p->req_property);
-			if (*p->req_version) {
-				printf (" %s %s",
-					razor_version_relations[p->req_relation],
-					p->req_version);
-			}
-			printf (" which is required by %s\n",
-				p->req_package);
-			errors_only = 1;
-			break;
-
-		case RAZOR_PACKAGE_REMOVE:
-			if (errors_only)
-				break;
-			printf ("Removing %s %s", p->name, p->version);
-			if (p->req_package) {
-				printf (" which %s %s",
-					razor_property_types_removal[p->req_type],
-					p->req_package);
-				if (strcmp(p->req_property, p->name) != 0)
-					printf (" for %s", p->req_property);
-			}
-			printf("\n");
 			break;
 
 		case RAZOR_PACKAGE_REMOVE_NOT_INSTALLED:
-			printf ("Package %s is not installed\n", p->name);
+			printf("Error: can't remove %s: not installed\n", p->name);
 			errors_only = 1;
 			break;
 
-		case RAZOR_PACKAGE_REMOVE_BLOCKED:
-			printf ("Cannot remove %s, which is marked for installation but requires %s\n", p->name, p->req_package);
+		case RAZOR_PACKAGE_UP_TO_DATE:
+			printf("Error: can't upgrade %s: no newer version is available", p->name);
 			errors_only = 1;
 			break;
 
-		case RAZOR_PACKAGE_REMOVE_CONFLICT:
-			printf ("Cannot remove %s, which is marked for installation but is obsoleted by %s\n", p->name, p->req_package);
+		case RAZOR_PACKAGE_CONTRADICTION:
+			printf("Error: package %s is marked for both installation and removal", p->name);
+			errors_only = 1;
+			break;
+
+		case RAZOR_PACKAGE_OLD_CONFLICT:
+			printf("Error: can't install %s, because installed package %s conflicts with ",
+			       p->name, p->dep_package);
+			if (*p->dep_version) {
+				printf("%s %s %s",
+				       p->dep_property,
+				       razor_version_relations[p->dep_relation],
+				       p->dep_version);
+			} else
+				printf("it");
+			printf("\n");
+
+			errors_only = 1;
+			break;
+
+		case RAZOR_PACKAGE_NEW_CONFLICT:
+			printf("Error: can't install %s, because it conflicts with %s",
+			       p->name, p->dep_package);
+			if (*p->dep_version) {
+				printf(" %s %s",
+				       razor_version_relations[p->dep_relation],
+				       p->dep_version);
+			}
+			printf("\n");
+
+			errors_only = 1;
+			break;
+
+		case RAZOR_PACKAGE_UNSATISFIABLE:
+			printf("Error: can't find package for %s", p->dep_property);
+			if (*p->dep_version) {
+				printf(" %s %s",
+					razor_version_relations[p->dep_relation],
+					p->dep_version);
+			}
+			printf(" which is required by %s\n",
+				p->dep_package);
 			errors_only = 1;
 			break;
 
@@ -2715,7 +2734,7 @@ razor_transaction_run(struct razor_transaction *trans)
 	array_init(&install_packages);
 	array_init(&remove_packages);
 	for (p = 0; p < trans->package_count; p++) {
-		if (trans->packages[p].state & RAZOR_PACKAGE_INSTALL)
+		if (trans->packages[p].state == RAZOR_PACKAGE_INSTALL)
 			pkg = array_add(&install_packages, sizeof *pkg);
 		else
 			pkg = array_add(&remove_packages, sizeof *pkg);
@@ -2791,7 +2810,7 @@ razor_transaction_destroy(struct razor_transaction *trans)
 	int p;
 
 	for (p = 0; p < trans->package_count; p++) {
-		if (!trans->packages[p].req_package &&
+		if (!trans->packages[p].dep_package &&
 		    (trans->packages[p].state == RAZOR_PACKAGE_INSTALL_UNAVAILABLE ||
 		     trans->packages[p].state == RAZOR_PACKAGE_REMOVE_NOT_INSTALLED))
 			free((char *)trans->packages[p].name);

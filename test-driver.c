@@ -200,11 +200,11 @@ check_unsatisfiable_property(struct test_context *ctx, enum razor_property_type 
 		version = "";
 
 	for (; ctx->unsat < ctx->trans->packages + ctx->trans->package_count; ctx->unsat++) {
-		if (ctx->unsat->state != RAZOR_PACKAGE_INSTALL_UNSATISFIABLE)
+		if (ctx->unsat->state != RAZOR_PACKAGE_UNSATISFIABLE)
 			continue;
-		if (strcmp(name, ctx->unsat->req_property) != 0 ||
-		    rel != ctx->unsat->req_relation ||
-		    strcmp(version, ctx->unsat->req_version) != 0)
+		if (strcmp(name, ctx->unsat->dep_property) != 0 ||
+		    rel != ctx->unsat->dep_relation ||
+		    strcmp(version, ctx->unsat->dep_version) != 0)
 			continue;
 
 		/* OK, found it, so skip over it and continue */
