@@ -21,8 +21,11 @@ razor_create_dir(const char *root, const char *path)
 	strcpy(buffer, root);
 	p = buffer + strlen(buffer);
 	slash = path;
-	for (slash = path; slash[1] != '\0'; slash = next) {
+	for (slash = path; *slash != '\0'; slash = next) {
 		next = strchr(slash + 1, '/');
+		if (next == NULL)
+			next = slash + strlen(slash);
+
 		memcpy(p, slash, next - slash);
 		p += next - slash;
 		*p = '\0';
