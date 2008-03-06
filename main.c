@@ -11,9 +11,12 @@
 #include "razor.h"
 #include "razor-internal.h"
 
-static const char *repo_filename = "system.repo";
-static const char *rawhide_repo_filename = "rawhide.repo";
-static const char *updated_repo_filename = "system-updated.repo";
+static const char system_repo_filename[] = "system.repo";
+static const char rawhide_repo_filename[] = "rawhide.repo";
+static const char updated_repo_filename[] = "system-updated.repo";
+static const char razor_root_path[] = "/var/lib/razor";
+static const char root[] = "install";
+static const char *repo_filename = system_repo_filename;
 
 static int
 command_list(int argc, const char *argv[])
@@ -452,27 +455,98 @@ command_import_rpms(int argc, const char *argv[])
 	return 0;
 }
 
-const static char razor_root_path[] = "/var/lib/razor";
-const static char razor_system_repo[] = "system.repo";
-const static char root[] = "install";
+static struct razor_set *
+create_set_from_rpms(int argc, const char *argv[])
+{
+	struct razor_importer *importer;
+	struct razor_rpm *rpm;
+	int i;
+
+	importer = razor_importer_new();
+	for (i = 0; i < argc; i++) {
+		rpm = razor_rpm_open(argv[i]);
+		if (rpm == NULL) {
+			fprintf(stderr,
+				"failed to open rpm \"%s\"\n", argv[i]);
+			continue;
+		}
+		if (razor_importer_add_rpm(importer, rpm)) {
+			fprintf(stderr, "couldn't import %s\n", argv[i]);
+			break;
+		}
+		razor_rpm_close(rpm);
+	}
+
+	return razor_importer_finish(importer);
+}
+
+static char **
+list_packages(int count, struct razor_set *set)
+{
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *name, *version;
+	char **packages;
+	int i;
+
+	packages = malloc(count * sizeof *packages);
+	pi = razor_package_iterator_create(set);
+	i = 0;
+	while (razor_package_iterator_next(pi, &package, &name, &version))
+		packages[i] = strdup(name);
+	razor_package_iterator_destroy(pi);
+
+	return packages;
+}
 
 static int
 command_install(int argc, const char *argv[])
 {
+	struct razor_set *system, *upstream, *new;
+	struct razor_transaction *trans;
 	struct razor_rpm *rpm;
-	const char *filename = argv[0];
+	const char *filename;
+	char path[PATH_MAX], **packages;
+	int i;
 
-	rpm = razor_rpm_open(filename);
-	if (rpm == NULL) {
-		fprintf(stderr, "failed to open rpm %s\n", filename);
+	upstream = create_set_from_rpms(argc, argv);
+	snprintf(path, sizeof path,
+		 "%s%s/%s", root, razor_root_path, system_repo_filename);
+	system = razor_set_open(path);
+	if (system == NULL) {
+		fprintf(stderr, "couldn't open system package database\n");
 		return -1;
 	}
-	if (razor_rpm_install(rpm, root) < 0) {
-		fprintf(stderr, "failed to install rpm %s\n", filename);
-		return -1;
-	}
-	
-	razor_rpm_close(rpm);
+
+	packages = list_packages(argc, upstream);
+	trans = razor_transaction_create(system, upstream,
+					 argc, packages, 0, NULL);
+	razor_transaction_describe(trans);
+	if (trans->errors)
+		return 1;
+
+	/* FIXME: Use _finish() convention here?  That is, a function
+	 * that starts the computation and returns the result while
+	 * destroying the transaction.  Nice for transient objects
+	 * such as the merger and the importer.  Should we do that for
+	 * transactions too, that is, razor_transaction_finish()? */
+	new = razor_transaction_run(trans);
+	razor_transaction_destroy(trans);
+
+	for (i = 0; i < argc; i++) {
+		filename = argv[i];
+		rpm = razor_rpm_open(argv[i]);
+		if (rpm == NULL) {
+			fprintf(stderr, "failed to open rpm %s\n", filename);
+			return -1;
+		}
+		if (razor_rpm_install(rpm, root) < 0) {
+			fprintf(stderr,
+				"failed to install rpm %s\n", filename);
+			return -1;
+		}
+		razor_rpm_close(rpm);
+	}	
 
 	return 0;
 }
@@ -507,7 +581,7 @@ command_init(int argc, const char *argv[])
 
 	set = razor_set_create();
 	snprintf(path, sizeof path, "%s%s/%s",
-		 root, razor_root_path, razor_system_repo);
+		 root, razor_root_path, system_repo_filename);
 	if (razor_set_write(set, path) < 0) {
 		fprintf(stderr, "could not write initial package set\n");
 		return -1;
