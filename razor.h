@@ -98,8 +98,8 @@ enum razor_transaction_package_state {
 };
 
 struct razor_transaction_package {
-	struct razor_package *package;
-	const char *name, *version;
+	const char *name, *old_version, *new_version;
+	struct razor_package *old_package, *new_package;
 	enum razor_transaction_package_state state;
 
 	/* dep_package is the name of the package that resulted in
