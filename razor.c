@@ -1674,6 +1674,52 @@ razor_merger_finish(struct razor_merger *merger)
 	return result;
 }
 
+/* The diff order matters.  We should sort the packages so that a
+ * REMOVE of a package comes before the INSTALL, and so that all
+ * requires for a package have been installed before the package.
+ **/
+
+void
+razor_set_diff(struct razor_set *set, struct razor_set *upstream,
+	       razor_package_callback_t callback, void *data)
+{
+	struct razor_package_iterator *pi1, *pi2;
+	struct razor_package *p1, *p2;
+	const char *name1, *name2, *version1, *version2;
+	int res;
+
+	pi1 = razor_package_iterator_create(set);
+	pi2 = razor_package_iterator_create(upstream);
+
+	razor_package_iterator_next(pi1, &p1, &name1, &version1);
+	razor_package_iterator_next(pi2, &p2, &name2, &version2);
+
+	while (p1 || p2) {
+		if (p1 && p2) {
+			res = strcmp(name1, name2);
+			if (res == 0)
+				res = versioncmp(version1, version2);
+		} else {
+			res = 0;
+		}
+
+		if (p2 == NULL || res < 0)
+			callback(name1, version1, NULL, data);
+		else if (p1 == NULL || res > 0)
+			callback(name2, NULL, version2, data);
+
+		if (p1 != NULL && res <= 0)
+			razor_package_iterator_next(pi1, &p1,
+						    &name1, &version1);
+		if (p2 != NULL && res >= 0)
+			razor_package_iterator_next(pi2, &p2,
+						    &name2, &version2);
+	}
+
+	razor_package_iterator_destroy(pi1);
+	razor_package_iterator_destroy(pi2);
+}
+
 
 struct razor_transaction_resolver {
 	struct razor_set *system, *upstream;
@@ -2486,52 +2532,6 @@ razor_transaction_satisfy_removes(struct razor_transaction_resolver *trans,
 		lose_required_package(trans, req, &entry->packages);
 	}
 	array_release(&lost_files);
-}
-
-/* The diff order matters.  We should sort the packages so that a
- * REMOVE of a package comes before the INSTALL, and so that all
- * requires for a package have been installed before the package.
- **/
-
-void
-razor_set_diff(struct razor_set *set, struct razor_set *upstream,
-	       razor_package_callback_t callback, void *data)
-{
-	struct razor_package_iterator *pi1, *pi2;
-	struct razor_package *p1, *p2;
-	const char *name1, *name2, *version1, *version2;
-	int res;
-
-	pi1 = razor_package_iterator_create(set);
-	pi2 = razor_package_iterator_create(upstream);
-
-	razor_package_iterator_next(pi1, &p1, &name1, &version1);
-	razor_package_iterator_next(pi2, &p2, &name2, &version2);
-
-	while (p1 || p2) {
-		if (p1 && p2) {
-			res = strcmp(name1, name2);
-			if (res == 0)
-				res = versioncmp(version1, version2);
-		} else {
-			res = 0;
-		}
-
-		if (p2 == NULL || res < 0)
-			callback(name1, version1, NULL, data);
-		else if (p1 == NULL || res > 0)
-			callback(name2, NULL, version2, data);
-
-		if (p1 != NULL && res <= 0)
-			razor_package_iterator_next(pi1, &p1,
-						    &name1, &version1);
-		if (p2 != NULL && res >= 0)
-			razor_package_iterator_next(pi2, &p2,
-						    &name2, &version2);
-	}
-
-	razor_package_iterator_destroy(pi1);
-	razor_package_iterator_destroy(pi2);
 }
 
 struct razor_transaction *
