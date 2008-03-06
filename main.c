@@ -9,6 +9,7 @@
 #include <curl/curl.h>
 #include <fnmatch.h>
 #include "razor.h"
+#include "razor-internal.h"
 
 static const char *repo_filename = "system.repo";
 static const char *rawhide_repo_filename = "rawhide.repo";
@@ -451,13 +452,37 @@ command_import_rpms(int argc, const char *argv[])
 	return 0;
 }
 
+const static char razor_root_path[] = "/var/lib/razor";
+const static char razor_system_repo[] = "system.repo";
+const static char root[] = "install";
+
 static int
 command_install(int argc, const char *argv[])
 {
 	struct razor_rpm *rpm;
 	const char *filename = argv[0];
+
+	rpm = razor_rpm_open(filename);
+	if (rpm == NULL) {
+		fprintf(stderr, "failed to open rpm %s\n", filename);
+		return -1;
+	}
+	if (razor_rpm_install(rpm, root) < 0) {
+		fprintf(stderr, "failed to install rpm %s\n", filename);
+		return -1;
+	}
+	
+	razor_rpm_close(rpm);
+
+	return 0;
+}
+
+static int
+command_init(int argc, const char *argv[])
+{
 	struct stat buf;
-	const char root[] = "install";
+	struct razor_set *set;
+	char path[PATH_MAX];
 
 	if (stat(root, &buf) < 0) {
 		if (mkdir(root, 0777) < 0) {
@@ -474,17 +499,20 @@ command_install(int argc, const char *argv[])
 		return -1;
 	}
 
-	rpm = razor_rpm_open(filename);
-	if (rpm == NULL) {
-		fprintf(stderr, "failed to open rpm %s\n", filename);
+	if (razor_create_dir(root, razor_root_path) < 0) {
+		fprintf(stderr, "could not create %s%s\n",
+			root, razor_root_path);
 		return -1;
 	}
-	if (razor_rpm_install(rpm, root) < 0) {
-		fprintf(stderr, "failed to install rpm %s\n", filename);
+
+	set = razor_set_create();
+	snprintf(path, sizeof path, "%s%s/%s",
+		 root, razor_root_path, razor_system_repo);
+	if (razor_set_write(set, path) < 0) {
+		fprintf(stderr, "could not write initial package set\n");
 		return -1;
 	}
-	
-	razor_rpm_close(rpm);
+	razor_set_destroy(set);
 
 	return 0;
 }
@@ -511,7 +539,8 @@ static struct {
 	{ "update", "update all or specified packages", command_update },
 	{ "remove", "remove specified packages", command_remove },
 	{ "diff", "show diff between two package sets", command_diff },
-	{ "install", "install rpm", command_install }
+	{ "install", "install rpm", command_install },
+	{ "init", "init razor root", command_init }
 };
 
 static int
