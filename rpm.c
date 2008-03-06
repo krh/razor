@@ -524,15 +524,22 @@ razor_rpm_close(struct razor_rpm *rpm)
 int
 razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 {
-	const char *name, *epoch, *version, *release;
-	char evr[128];
+	const char *name, *version, *release;
+	const uint_32 *epoch;
+	struct rpm_header_index *epoch_header;
+	char evr[128], buf[16];
 
 	name = razor_rpm_get_indirect(rpm, RPMTAG_NAME, NULL);
 	epoch = razor_rpm_get_indirect(rpm, RPMTAG_EPOCH, NULL);
 	version = razor_rpm_get_indirect(rpm, RPMTAG_VERSION, NULL);
 	release = razor_rpm_get_indirect(rpm, RPMTAG_RELEASE, NULL);
 
-	razor_build_evr(evr, sizeof evr, epoch, version, release);
+	if (epoch_header) {
+		snprintf(buf, sizeof buf, "%u", ntohl(*epoch));
+		razor_build_evr(evr, sizeof evr, buf, version, release);
+	} else {
+		razor_build_evr(evr, sizeof evr, NULL, version, release);
+	}
 	razor_importer_begin_package(importer, name, evr);
 
 	import_properties(importer, RAZOR_PROPERTY_REQUIRES, rpm,
@@ -567,6 +574,7 @@ union rpm_entry {
 	char *string;
 	char **list;
 	uint_32 *flags;
+	uint_32 integer;
 };
 
 static void
@@ -598,7 +606,7 @@ razor_set_create_from_rpmdb(void)
 	int_32 type, count, i;
 	union rpm_entry name, epoch, version, release;
 	union rpm_entry basenames, dirnames, dirindexes;
-	char filename[PATH_MAX], evr[128];
+	char filename[PATH_MAX], evr[128], buf[16];
 	rpmdb db;
 
 	rpmReadConfigFiles(NULL, NULL);
@@ -616,8 +624,16 @@ razor_set_create_from_rpmdb(void)
 		headerGetEntry(h, RPMTAG_EPOCH, &type, &epoch.p, &count);
 		headerGetEntry(h, RPMTAG_VERSION, &type, &version.p, &count);
 		headerGetEntry(h, RPMTAG_RELEASE, &type, &release.p, &count);
-		razor_build_evr(evr, sizeof evr, epoch.string, version.string,
-				release.string);
+
+		if (epoch.flags != NULL) {
+			snprintf(buf, sizeof buf, "%u", *epoch.flags);
+			razor_build_evr(evr, sizeof evr,
+					buf, version.string, release.string);
+		} else {
+			razor_build_evr(evr, sizeof evr,
+					NULL, version.string, release.string);
+		}
+
 		razor_importer_begin_package(importer, name.string, evr);
 
 		add_properties(importer, RAZOR_PROPERTY_REQUIRES, h,
