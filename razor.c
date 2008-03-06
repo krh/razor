@@ -122,7 +122,19 @@ struct razor_set_section razor_sections[] = {
 struct razor_set *
 razor_set_create(void)
 {
-	return zalloc(sizeof(struct razor_set));
+	struct razor_set *set;
+	struct razor_entry *e;
+
+	set = zalloc(sizeof *set);
+
+	array_init(&set->files);
+	e = array_add(&set->files, sizeof *e);
+	e->name = 0;
+	e->flags = RAZOR_ENTRY_LAST;
+	e->start = 0;
+	list_set_empty(&e->packages);
+
+	return set;
 }
 
 struct razor_set *
@@ -694,9 +706,7 @@ build_file_tree(struct razor_importer *importer)
 	}
 
 	count_entries(&root);
-	array_init(&importer->set->files);
-
-	e = array_add(&importer->set->files, sizeof *e);
+	e = importer->set->files.data;
 	e->name = root.name;
 	e->flags = RAZOR_ENTRY_LAST;
 	e->start = importer->files.size ? 1 : 0;
