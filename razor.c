@@ -448,8 +448,8 @@ versioncmp(const char *s1, const char *s2)
 	long n1, n2;
 	int res;
 
-	n1 = strtol(s1, (char **) &p1, 0);
-	n2 = strtol(s2, (char **) &p2, 0);
+	n1 = strtol(s1, (char **) &p1, 10);
+	n2 = strtol(s2, (char **) &p2, 10);
 
 	/* Epoch; if one but not the other has an epoch set, default
 	 * the epoch-less version to 0. */
@@ -2021,7 +2021,7 @@ find_package_matching(struct razor_transaction_resolver *trans, int installed,
 			prop--;
 	}
 
-	/* Scan matching proeprties */
+	/* Scan matching properties */
 	while (prop < prop_end && prop->type == match_type &&
 	       strcmp(&pool[prop->name], &rpool[req->name]) == 0) {
 		if (match_type == RAZOR_PROPERTY_PROVIDES)
