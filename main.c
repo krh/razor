@@ -520,7 +520,9 @@ command_install(int argc, const char *argv[])
 
 	packages = list_packages(argc, upstream);
 	trans = razor_transaction_create(system, upstream,
-					 argc, packages, 0, NULL);
+					 argc, (const char **)packages,
+					 0, NULL);
+	free(packages);
 	razor_transaction_describe(trans);
 	if (trans->errors)
 		return 1;
