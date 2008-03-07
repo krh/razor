@@ -2110,50 +2110,16 @@ find_uninstalled_package_for_property(struct razor_transaction_resolver *trans,
 	return pkg;
 }
 
-static struct razor_package *
-find_upgrade(struct razor_transaction_resolver *trans,
-	     struct razor_property *sp, struct razor_property *up)
-{
-	struct razor_property *conflict, req;
-	struct razor_set *set;
-	const char *pool;
-
-	if (sp->type == RAZOR_PROPERTY_CONFLICTS) {
-		conflict = sp;
-		set = trans->system;
-	} else {
-		conflict = up;
-		set = trans->upstream;
-	}
-	pool = set->string_pool.data;
-
-	if (conflict->relation > RAZOR_VERSION_EQUAL ||
-	    !pool[conflict->version])
-		return NULL;
-
-	memcpy(&req, conflict, sizeof req);
-	req.type = RAZOR_PROPERTY_REQUIRES;
-	if (conflict->relation == RAZOR_VERSION_LESS)
-		req.relation = RAZOR_VERSION_GREATER_OR_EQUAL;
-	else
-		req.relation = RAZOR_VERSION_GREATER;
-
-	return find_package_matching(trans, 0, up, &req, set);
-}
-
 /* FIXME */
 static struct razor_package *
 find_upgrade_for_installed_conflict(struct razor_transaction_resolver *trans,
 				    struct razor_package *conflicting_pkg,
-				    struct razor_property *provider)
+				    struct razor_property *prop)
 {
 	struct razor_package *upkgs, *up, *uend;
 	struct razor_property *uprops;
 	const char *spool, *upool;
-	struct list *prop;
-
-	if (!package_in_set(conflicting_pkg, trans->system))
-		return NULL;
+	struct list *p;
 
 	up = upkgs = trans->upstream->packages.data;
 	uend = trans->upstream->packages.data + trans->upstream->packages.size;
@@ -2167,9 +2133,14 @@ find_upgrade_for_installed_conflict(struct razor_transaction_resolver *trans,
 	if (up == uend || strcmp(&upool[up->name], &spool[conflicting_pkg->name]) != 0)
 		return NULL;
 
-	for (prop = list_first(&up->properties, &trans->system->property_pool); prop; prop = list_next(prop)) {
-		if (uprops[prop->data].type == RAZOR_PROPERTY_CONFLICTS &&
-		    provider_satisfies_requirement(provider, upool, &uprops[prop->data], upool))
+	for (p = list_first(&up->properties, &trans->upstream->property_pool); p; p = list_next(p)) {
+		if (prop->type == RAZOR_PROPERTY_PROVIDES &&
+		    uprops[p->data].type == RAZOR_PROPERTY_CONFLICTS &&
+		    provider_satisfies_requirement(prop, upool, &uprops[p->data], upool))
+			return NULL;
+		else if (prop->type == RAZOR_PROPERTY_CONFLICTS &&
+			 uprops[p->data].type == RAZOR_PROPERTY_PROVIDES &&
+			 provider_satisfies_requirement(&uprops[p->data], upool, prop, upool))
 			return NULL;
 	}
 	return up;
@@ -2441,7 +2412,7 @@ razor_transaction_satisfy_installs(struct razor_transaction_resolver *trans)
 				/* Conflicts with something already installed.
 				 * Try to upgrade out.
 				 */
-				upgrade = find_upgrade(trans, sp, up);
+				upgrade = find_upgrade_for_installed_conflict(trans, pkg, up);
 				if (upgrade) {
 					add_transaction_package(trans, upgrade, pkg,
 								RAZOR_PACKAGE_INSTALL,
@@ -2803,32 +2774,6 @@ razor_transaction_satisfy_removes(struct razor_transaction_resolver *trans)
 				}
 			}
 		}
-
-#if 0
-		/* Likewise with to-be-installed packages (in this
-		 * case we can't actually remove them, but
-		 * add_transaction_package will handle creating the
-		 * error entry).
-		 */
-		ur = first_up;
-		while (ur > uprops + 1 && (ur - 1)->name == ur->name)
-			ur--;
-		for (; ur->type == RAZOR_PROPERTY_REQUIRES; ur++) {
-			if (!prop_is_being_installed(trans, ur))
-				continue;
-			if (find_installed_package_for_property(trans, sp, up, ur))
-				continue;
-
-			for (reqpkg = list_first(&ur->packages, &trans->upstream->package_pool); reqpkg; reqpkg = list_next(reqpkg)) {
-				if (!bitarray_get(&trans->uppkgs, reqpkg->data))
-					continue;
-				pkg = &upkgs[reqpkg->data];
-				add_transaction_package(trans, NULL, pkg,
-							RAZOR_PACKAGE_REMOVE,
-							NULL, sr);
-			}
-		}
-#endif
 	}
 }
 
