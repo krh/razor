@@ -1,0 +1,170 @@
+We start with two razor_sets, system and upstream, and a list of
+requested installations and removals.
+
+    FIXME: what about multiple upstream repos? Having to deal with
+    arbitrary numbers of razor_sets is possible, but will probably be
+    messy... It might be easier to either store all upstream repo data
+    in a single .repo file, or else merge all upstream .repo files
+    together into a single razor_set at startup. (Or some combination
+    of those.)
+
+We create a bit array of the packages in each set, indicating which
+ones are installed; the system bitarray starts out all 1s, and the
+upstream bitarray all 0s. Each bit is only allowed to change state
+once during the transaction; an installed package can be removed, or
+an uninstalled package installed, but trying to reinstall a removed
+package, or uninstall a newly-installed package is an error. This
+means the packages break down into four categories:
+
+    - installed       (1 bit in the system bit array)
+    - to-be-removed   (0 bit in the system bit array)
+    - to-be-installed (1 bit in the upstream bit array)
+    - installable     (0 bit in the upstream bit array)
+
+
+The depsolver repeats the following three steps until there are no new
+requested installs or removals.
+
+New packages phase. Walk the system and upstream package lists in
+parallel, and:
+
+    - For each package
+
+	- If it has newly been added to the requested-installs list,
+          create a razor_transaction_package for it, and set the
+          appropriate bit in the upstream bitarray; if it is an
+          update, clear the appropriate bit in the system bitarray
+
+	- If it has newly been added to the requested-removals list,
+          create a razor_transaction_package for it, and clear the
+          appropriate bit in the system bitarray
+
+Properties phase. Walk the system and upstream property lists in
+parallel, and:
+
+    - For each to-be-installed non-file REQUIRES:
+
+	- See if there's an installed or to-be-installed package that
+	  PROVIDES that property.
+
+	- If not, see if there's an installable package that PROVIDES
+	  that property, and add it to the requested-installs list if
+	  so.
+
+	- If not, see if there's a to-be-removed package that PROVIDES
+	  that property. (If we find such a package, we have a
+	  CONTRADICTION error.)
+
+	- If none of the above, then we have an UNSATISFIABLE error
+
+    - For each to-be-installed file REQUIRES:
+
+	- Same as for property REQUIRES, except that since we have to
+	  search the file tree, this is not O(1). (See below for more
+	  discussion.)
+
+    - For each to-be-installed PROVIDES:
+
+	- Check if the new PROVIDES conflicts with an installed
+	  CONFLICTS. If so, add the installed package to the
+	  requested-installs list, so we can try to upgrade it to a
+	  non-conflicting version.
+
+	- Check if the new PROVIDES conflicts with a to-be-installed
+	  CONFLICTS. If so, we have an OLD_CONFLICT error.
+
+    - For each to-be-installed CONFLICTS:
+
+	- Basically the reverse of the previous case: check if the new
+	  CONFLICTS conflicts with an installed PROVIDES. If so, add
+	  the installed package to the requested-installs list to try
+	  to upgrade it.
+
+	- Check if the new CONFLICTS conflicts with a to-be-installed
+	  PROVIDES. If so, we have an NEW_CONFLICT error.
+
+    - For each to-be-installed OBSOLETES:
+
+	- Check if there's an installed package that PROVIDES that
+	  property. If so, add that package to the requested-removals
+	  list, noting it should be marked obsolete. ("Obsolete" means
+	  that the to-be-removed PROVIDES step below will treat it
+	  like it was upgraded, not removed.)
+
+	- If not, check if there's a to-be-installed package that
+	  PROVIDES that property. If so, we have a CONTRADICTION
+	  error.
+
+    - For each to-be-removed PROVIDES:
+
+	- If there's also an identical to-be-installed PROVIDES, we're
+	  ok and can skip this
+
+	- Otherwise, for each installed REQUIRES of this property:
+
+	    - Look for some other installed or to-be-installed package
+	      that satisfies the REQUIRES.
+
+	    - If there isn't one, then for each installed package in
+	      this REQUIRES's package list:
+
+		- If the PROVIDES was lost because the old package was
+		  removed (not updated or obsoleted), then add the
+		  requiring package to the requested-removals list.
+
+		- Otherwise, add the requiring package to the
+		  requested-installs list so it can be updated as
+		  well.
+
+	- (We don't need to look at to-be-installed REQUIRES of this
+	  property, because if there are any, they will cause a
+	  CONTRADICTION error when we try to re-satisfy them the next
+	  time through.)
+
+    - For each installed file REQUIRES:
+
+	- Check that the file is still installed. If not, check if
+	  a to-be-installed package also provides it.
+
+	- If not:
+
+	    - If the package originally providing it was removed (not
+              updated or obsoleted), then add the requiring package to
+              the requested-removals list.
+
+	    - Otherwise, add the requiring package to the
+              requested-installs list, in the hope that an upgrade
+              will no longer require the file
+
+(End)
+
+
+Note on file dependencies
+
+    - With this algorithm, the total time spent satisfying file
+      dependencies is O(D * log F), where D is the total number of
+      file dependencies being added or removed, and F is the total
+      number of files.
+
+    - If we sorted the file list differently, we could walk it in
+      parallel with the property lists, resulting in an overall
+      file-require-satisfying time of O(F). However, F is likely to be
+      much much greater than D * log F, so this would probably end up
+      actually being a pessimization.
+
+    - A better solution (assuming that we do actually need an O(1)
+      algorithm here) would be to add explicit file PROVIDES
+      properties to the set as needed. That is, whenever we add a
+      package containing a "REQUIRES /foo" property to a set, we also
+      add a "PROVIDES /foo" property to the set, pointing to the
+      correct provider packages. More than half of all file requires
+      are on /bin/sh or /sbin/ldconfig, and of the 7263 file requires
+      in 9306 packages currently in rawhide.repo, only 154 are not
+      satisfied by my system.repo. So storing file provides in the
+      property list as they are needed would eliminate the need to
+      search through the file list 99% of the time.
+
+      (We might need a separate optimization for the
+      building-the-system-up-from-empty case in the installer, since
+      we'd be resolving the whole transaction without having explicit
+      PROVIDES listed for /bin/sh, etc.)
