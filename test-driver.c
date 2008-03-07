@@ -64,9 +64,9 @@ struct test_context {
 	char *install_pkgs[3], *remove_pkgs[3];
 	int n_install_pkgs, n_remove_pkgs;
 
-	int in_result, result_errors;
+	int in_result;
 
-	int debug;
+	int debug, errors;
 };
 
 static void
@@ -214,7 +214,7 @@ check_unsatisfiable_property(struct test_context *ctx, enum razor_property_type 
 
 	fprintf(stderr, "  didn't get unsatisfiable '%s %s %s'\n",
 		name, razor_version_relations[rel], version);
-	exit(1);
+	ctx->errors++;
 }
 
 static void
@@ -317,7 +317,7 @@ diff_callback(const char *name,
 {
 	struct test_context *ctx = data;
 
-	ctx->result_errors++;
+	ctx->errors++;
 	if (old_version) {
 		fprintf(stderr, "  result set should not contain %s %s\n",
 			name, old_version);
@@ -335,11 +335,8 @@ end_result(struct test_context *ctx)
 	if (ctx->result_set) {
 		if (!ctx->system_set)
 			ctx->system_set = razor_set_create();
-		ctx->result_errors = 0;
 		razor_set_diff(ctx->system_set, ctx->result_set,
 			       diff_callback, ctx);
-		if (ctx->result_errors)
-			exit(1);
 	}
 }
 
@@ -443,5 +440,9 @@ int main(int argc, char *argv[])
 
 	parse_xml_file(test_file, start_test_element, end_test_element, &ctx);
 
-	return 0;
+	if (ctx.errors) {
+		fprintf(stderr, "\n%d errors\n", ctx.errors);
+		return 1;
+	} else
+		return 0;
 }

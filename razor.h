@@ -77,7 +77,9 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 enum razor_transaction_package_state {
 	/* Basic states */
 	RAZOR_PACKAGE_INSTALL,
+	RAZOR_PACKAGE_FORCED_UPDATE,
 	RAZOR_PACKAGE_REMOVE,
+	RAZOR_PACKAGE_OBSOLETED,
 
 	/* Error states */
 
@@ -94,7 +96,7 @@ enum razor_transaction_package_state {
 	/* Already-installed package has a conflict against this package */
 	RAZOR_PACKAGE_OLD_CONFLICT,
 	/* Requirement of to-be-installed package can't be satisfied */
-	RAZOR_PACKAGE_UNSATISFIABLE
+	RAZOR_PACKAGE_UNSATISFIABLE,
 };
 
 struct razor_transaction_package {
