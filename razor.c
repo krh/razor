@@ -96,6 +96,7 @@ struct razor_importer {
 	struct razor_package *package;
 	struct array properties;
 	struct array files;
+	struct array file_requires;
 };
 
 static void *
@@ -310,6 +311,11 @@ razor_importer_add_property(struct razor_importer *importer,
 
 	r = array_add(&importer->properties, sizeof *r);
 	*r = p - (struct razor_property *) importer->set->properties.data;
+
+	if (type == RAZOR_PROPERTY_REQUIRES && *name == '/') {
+		r = array_add(&importer->file_requires, sizeof *r);
+		*r = p->name;
+	}
 }
 
 void
@@ -717,6 +723,86 @@ build_file_tree(struct razor_importer *importer)
 	array_release(&importer->files);
 }
 
+static struct razor_entry *
+find_entry(struct razor_set *set, struct razor_entry *dir, const char *pattern);
+
+static void
+list_to_array(struct list *list, struct array *array)
+{
+	uint32_t *item;
+
+	while (list) {
+		 item = array_add(array, sizeof *item);
+		 *item = list->data;
+		 list = list_next(list);
+	}
+}
+
+static int
+compare_file_requires(const void *p1, const void *p2, void *data)
+{
+	uint32_t *f1 = (void *)p1, *f2 = (void *)p2;
+	const char *pool = data;
+
+	return strcmp(&pool[*f1], &pool[*f2]);
+}
+
+static void
+find_file_provides(struct razor_importer *importer)
+{
+	struct razor_property *prop;
+	struct razor_entry *top, *entry;
+	struct razor_package *packages;
+	struct array pkgarray, pkgprops;
+	uint32_t *req, *req_start, *req_end, *pkg, *pkg_end;
+	uint32_t *map, newprop_id, *newprop;
+	char *pool;
+
+	pool = importer->set->string_pool.data;
+	packages = importer->set->packages.data;
+	top = importer->set->files.data;
+
+	req = req_start = importer->file_requires.data;
+	req_end = importer->file_requires.data + importer->file_requires.size;
+	map = qsort_with_data(req, req_end - req, sizeof *req,
+			      compare_file_requires, pool);
+	free(map);
+
+	for (req = req_start; req < req_end; req++) {
+		if (req > req_start && req[0] == req[-1])
+			continue;
+		entry = find_entry(importer->set, top, &pool[*req]);
+		if (entry) {
+			prop = array_add(&importer->set->properties, sizeof *prop);
+			prop->name = *req;
+			prop->type = RAZOR_PROPERTY_PROVIDES;
+			prop->relation = RAZOR_VERSION_EQUAL;
+			prop->version = hashtable_tokenize(&importer->table, "");
+
+			/* Copy package list from entry to property */
+			array_init(&pkgarray);
+			list_to_array(list_first(&entry->packages, &importer->set->package_pool), &pkgarray);
+			list_set_array(&prop->packages, &importer->set->package_pool, &pkgarray, 0);
+
+			/* Update property list of each providing package */
+			pkg_end = pkgarray.data + pkgarray.size;
+			newprop_id = prop - (struct razor_property *)importer->set->properties.data;
+
+			for (pkg = pkgarray.data; pkg < pkg_end; pkg++) {
+				array_init(&pkgprops);
+				list_to_array(list_first(&packages[*pkg].properties, &importer->set->property_pool), &pkgprops);
+				newprop = array_add(&pkgprops, sizeof *newprop);
+				*newprop = newprop_id;
+				list_set_array(&packages[*pkg].properties, &importer->set->property_pool, &pkgprops, 1);
+				array_release(&pkgprops);
+			}
+			array_release(&pkgarray);
+		}
+	}
+
+	array_release(&importer->file_requires);
+}
+
 static void
 build_package_file_lists(struct razor_set *set, uint32_t *rmap)
 {
@@ -756,6 +842,9 @@ razor_importer_finish(struct razor_importer *importer)
 	uint32_t *map, *rmap;
 	int i, count;
 
+	build_file_tree(importer);
+	find_file_provides(importer);
+
 	map = uniqueify_properties(importer->set);
 	list_remap_pool(&importer->set->property_pool, map);
 	free(map);
@@ -772,7 +861,6 @@ razor_importer_finish(struct razor_importer *importer)
 		rmap[map[i]] = i;
 	free(map);
 
-	build_file_tree(importer);
 	list_remap_pool(&importer->set->package_pool, rmap);
 	build_package_file_lists(importer->set, rmap);
 	remap_property_package_links(&importer->set->properties, rmap);
