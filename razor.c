@@ -2437,7 +2437,7 @@ razor_transaction_satisfy(struct razor_transaction_resolver *trans)
 				 */
 				add_transaction_package(trans, NULL, pkg,
 							RAZOR_PACKAGE_FORCED_UPDATE,
-							&spool[pkg->name], sp);
+							&upool[up->name], sp);
 			} else {
 				add_transaction_package(trans, NULL, pkg,
 							RAZOR_PACKAGE_CONTRADICTION,
