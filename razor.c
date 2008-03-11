@@ -753,9 +753,10 @@ find_file_provides(struct razor_importer *importer)
 	struct razor_property *prop;
 	struct razor_entry *top, *entry;
 	struct razor_package *packages;
-	struct array pkgarray, pkgprops;
-	uint32_t *req, *req_start, *req_end, *pkg, *pkg_end;
-	uint32_t *map, newprop_id, *newprop;
+	struct array pkgprops;
+	struct list *pkg;
+	uint32_t *req, *req_start, *req_end;
+	uint32_t *map, *newprop;
 	char *pool;
 
 	pool = importer->set->string_pool.data;
@@ -772,31 +773,24 @@ find_file_provides(struct razor_importer *importer)
 		if (req > req_start && req[0] == req[-1])
 			continue;
 		entry = find_entry(importer->set, top, &pool[*req]);
-		if (entry) {
+		if (!entry)
+			continue;
+
+		for (pkg = list_first(&entry->packages, &importer->set->package_pool); pkg; pkg = list_next(pkg)) {
 			prop = array_add(&importer->set->properties, sizeof *prop);
 			prop->name = *req;
 			prop->type = RAZOR_PROPERTY_PROVIDES;
 			prop->relation = RAZOR_VERSION_EQUAL;
 			prop->version = hashtable_tokenize(&importer->table, "");
+			list_set_ptr(&prop->packages, pkg->data);
 
-			/* Copy package list from entry to property */
-			array_init(&pkgarray);
-			list_to_array(list_first(&entry->packages, &importer->set->package_pool), &pkgarray);
-			list_set_array(&prop->packages, &importer->set->package_pool, &pkgarray, 0);
-
-			/* Update property list of each providing package */
-			pkg_end = pkgarray.data + pkgarray.size;
-			newprop_id = prop - (struct razor_property *)importer->set->properties.data;
-
-			for (pkg = pkgarray.data; pkg < pkg_end; pkg++) {
-				array_init(&pkgprops);
-				list_to_array(list_first(&packages[*pkg].properties, &importer->set->property_pool), &pkgprops);
-				newprop = array_add(&pkgprops, sizeof *newprop);
-				*newprop = newprop_id;
-				list_set_array(&packages[*pkg].properties, &importer->set->property_pool, &pkgprops, 1);
-				array_release(&pkgprops);
-			}
-			array_release(&pkgarray);
+			/* Update property list of pkg */
+			array_init(&pkgprops);
+			list_to_array(list_first(&packages[pkg->data].properties, &importer->set->property_pool), &pkgprops);
+			newprop = array_add(&pkgprops, sizeof *newprop);
+			*newprop = prop - (struct razor_property *)importer->set->properties.data;
+			list_set_array(&packages[pkg->data].properties, &importer->set->property_pool, &pkgprops, 1);
+			array_release(&pkgprops);
 		}
 	}
 
