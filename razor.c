@@ -1608,7 +1608,9 @@ merge_files(struct razor_merger *merger)
 	map1 = merger->source1.file_map;
 	map2 = merger->source2.file_map;
 
-	md.merged = add_file(merger, "");
+	md.merged = 0;
+	root = (struct razor_entry *) merger->set->files.data;
+	root->name = hashtable_tokenize(&merger->table, "");
 
 	if (merger->source1.set->files.size) {
 		root = (struct razor_entry *) merger->source1.set->files.data;
