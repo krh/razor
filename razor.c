@@ -125,11 +125,13 @@ razor_set_create(void)
 {
 	struct razor_set *set;
 	struct razor_entry *e;
+	char *empty;
 
 	set = zalloc(sizeof *set);
 
-	array_init(&set->files);
 	e = array_add(&set->files, sizeof *e);
+	empty = array_add(&set->string_pool, 1);
+	*empty = '\0';
 	e->name = 0;
 	e->flags = RAZOR_ENTRY_LAST;
 	e->start = 0;
@@ -1609,8 +1611,6 @@ merge_files(struct razor_merger *merger)
 	map2 = merger->source2.file_map;
 
 	md.merged = 0;
-	root = (struct razor_entry *) merger->set->files.data;
-	root->name = hashtable_tokenize(&merger->table, "");
 
 	if (merger->source1.set->files.size) {
 		root = (struct razor_entry *) merger->source1.set->files.data;
