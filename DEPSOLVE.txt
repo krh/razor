@@ -25,23 +25,26 @@ means the packages break down into four categories:
 Depsolver:
 
     - Create new razor_transaction_packages ("rtp"s) for each
-      requested install or remove.
+      requested install or remove. These will be "unresolved", because
+      we haven't yet found the razor_packages that correspond to them.
 
     - while there are new rtps:
 
-	- qsort the new rtps
+	- sort the new rtps
 
-	- Walk the system package list, upstream package list, and new
-          rtps in parallel. For each new INSTALL/FORCED_UPDATE rtp,
-          set the "new_package" field and the appropriate bit in the
-          upstream bit array. (For any not-found packages, set an
-          UNAVAILABLE error.) For each new rtp of any type (INSTALL,
-          REMOVE, FORCED_UPDATE, OBSOLETED), if there's a matching
-          system package, set the "old_package" field and clear the
-          appropriate bit in the system bit array.
+	- Walk the system property list, upstream property list, and
+          new rtp list in parallel, and:
 
-	- Walk the system and upstream property lists in parallel,
-          and:
+	    - For each uninstalled PROVIDES:
+
+		- If the property is a valid package name (that is,
+                  either it's a package providing its own name, or it
+                  has a matching OBSOLETES), and it matches the name
+                  of a new rtp of type INSTALL or FORCED_UPDATE with
+                  an unresolved new_package, then set the rtp's
+                  new_package to point to the package providing this
+                  property and set the appropriate bit in the upstream
+                  bit array.
 
 	    - For each to-be-installed non-file REQUIRES:
 
@@ -137,6 +140,16 @@ Depsolver:
 		- If not, check if there's a to-be-installed package
 		  that PROVIDES that property. If so, we have a
 		  CONTRADICTION error.
+
+
+	    - For each installed PROVIDES:
+
+		- If the property is a valid package name (that is,
+                  it's a package providing its own name), and it
+                  matches the name of a new rtp with an unresolved
+                  old_package, then set the rtp's old_package to point
+                  to the package providing this property and clear the
+                  appropriate bit in the system bit array.
 
 	    - For each to-be-removed PROVIDES:
 
