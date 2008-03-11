@@ -2292,7 +2292,12 @@ add_transaction_package(struct razor_transaction_resolver *trans,
 			if (already->new_package == new_package) {
 				/* Already taken care of */
 				return;
+			} else if (new_package_set == trans->upstream &&
+				   already->state == RAZOR_PACKAGE_FORCED_UPDATE) {
+				already->new_package = new_package;
+				return;
 			}
+
 			/* Oops. We lose */
 			if (state != RAZOR_PACKAGE_CONTRADICTION)
 				contradiction = 1;
@@ -2304,7 +2309,11 @@ add_transaction_package(struct razor_transaction_resolver *trans,
 			if (already->old_package == old_package) {
 				/* Already taken care of */
 				return;
+			} else if (old_package_set == trans->system) {
+				already->old_package = old_package;
+				return;
 			}
+
 			/* Oops. We lose */
 			if (state != RAZOR_PACKAGE_CONTRADICTION)
 				contradiction = 1;
