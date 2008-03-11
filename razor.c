@@ -52,8 +52,8 @@ struct razor_package {
 struct razor_property {
 	uint name  : 24;
 	uint flags : 6;
-	uint type  : 2;
-	uint32_t relation;
+	enum razor_property_type type : 2;
+	enum razor_version_relation relation : 32;
 	uint32_t version;
 	struct list_head packages;
 };
@@ -2683,7 +2683,7 @@ razor_transaction_describe(struct razor_transaction *trans)
 			if (p->dep_package) {
 				printf(" which required %s",
 				       p->dep_package);
-				if (strcmp(p->dep_property, p->name) != 0)
+				if (strcmp(p->dep_property, p->dep_package) != 0)
 					printf(" for %s", p->dep_property);
 			}
 			printf("\n");
