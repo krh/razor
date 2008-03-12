@@ -1,3 +1,74 @@
+YUM vs RAZOR
+------------
+
+At a very high level, yum's depsolver does something roughly
+equivalent to:
+
+    - For each package being installed or removed
+
+	- For each relevant property (provides, requires, conflicts,
+          obsoletes):
+
+	    - Figure out what additional packages need to be added to
+	      or removed from the system to satisfy this property
+
+which ends up being roughly O(N^2 * M) where N is the total number of
+properties and M is the number of packages being acted on.
+
+(I just figured that out off the top of my head, and I'm not totally
+familiar with the yum code, so it may be wrong.)
+
+Razor's depsolver is something like:
+
+    - do {
+
+	- For each property to be added to or removed from the system:
+
+	    - Figure out what packages need to be added to or removed
+	      from the system to satisfy this property
+
+    - } until we stop adding/remove more packages
+
+with the key being that it's very easy to find the PROVIDES
+corresponding to a REQUIRES and vice versa, because the property
+arrays are sorted, and so all properties with the same "name" will be
+adjacent to one another in the array, allowing many dependencies to be
+satisified in essentially constant time. (Actually... we've been
+calling it constant, but it's really O(log N) for heavily-depended-on
+packages, because the more packages you have, the more variations on
+"requires foo", "requires foo = 1.1", "requires foo > 1.0", etc you're
+going to have to scan through.)
+
+Ideally though, each iteration of the inner loop body happens in
+constant time, and thus the inner loop as a whole is O(N), and thus
+the depsolver as a whole is O(N * M) (or at least, less than
+O(N * M * log N).
+
+
+FILE DEPENDENCIES
+-----------------
+
+Whenever we add a package with a file REQUIRES to a razor_set, we also
+add a PROVIDES for that file to the package or packages which provide
+that file. This means that if we later add another package that
+requires the same file (eg, /bin/sh or /usr/bin/perl), we can resolve
+its file requirement exactly like we would resolve a property
+requirement, in nearly constant time.
+
+When adding a *new* file requirement (ie, a requirement on a file that
+no existing package depends on), we still have to scan through the
+file tree, which is O(log N) in the number of files.
+
+(AFAICT, there's no reason yum couldn't do the same optimization.
+Also, AFAICT, yum currently sticks property dependencies and file
+dependencies into the same hash table, so that if any package in the
+transaction has a file dependency, it causes *property* dependencies
+to become slower to resolve as well...)
+
+
+THE DEPSOLVER
+-------------
+
 We start with two razor_sets, system and upstream, and a list of
 requested installations and removals.
 
@@ -22,7 +93,7 @@ means the packages break down into four categories:
     - installable     (0 bit in the upstream bit array)
 
 
-Depsolver:
+Depsolver algorithm:
 
     - Create new razor_transaction_packages ("rtp"s) for each
       requested install or remove. These will be "unresolved", because
@@ -41,10 +112,20 @@ Depsolver:
                   either it's a package providing its own name, or it
                   has a matching OBSOLETES), and it matches the name
                   of a new rtp of type INSTALL or FORCED_UPDATE with
-                  an unresolved new_package, then set the rtp's
-                  new_package to point to the package providing this
-                  property and set the appropriate bit in the upstream
-                  bit array.
+                  an unresolved new_package:
+
+		    - If the upstream package has the same version as
+		      the system package, we have an UP_TO_DATE error
+		      (FIXME: not quite right. This doesn't deal with
+		      the case where we try to update an application
+		      because of a library update, and it turns out
+		      there's no new version of the application, but
+		      there IS a compat package containing the old
+		      version of the library.)
+
+		    - Otherwise, set the rtp's new_package to point to
+		      the package providing this property and set the
+		      appropriate bit in the upstream bit array.
 
 	    - For each to-be-installed non-file REQUIRES:
 
