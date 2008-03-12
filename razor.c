@@ -2031,6 +2031,12 @@ provider_satisfies_requirement(struct razor_property *provider,
 
 	if (!*required)
 		return 1;
+	if (!*provided) {
+		if (requirement->relation >= RAZOR_VERSION_EQUAL)
+			return 1;
+		else
+			return 0;
+	}
 
 	cmp = versioncmp(provided, required);
 
