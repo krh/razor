@@ -1836,6 +1836,42 @@ property_in_set(void *property, struct razor_set *set)
 		property < set->properties.data + set->properties.size;
 }
 
+static struct razor_package *
+property_provider_package(struct razor_transaction_resolver *trans,
+			  struct razor_property *prop,
+			  int installed)
+{
+	struct razor_set *set;
+	struct bitarray *pkgbits;
+	struct razor_package *pkgs;
+	struct list *p;
+
+	if (installed && prop->type != RAZOR_PROPERTY_PROVIDES)
+		return NULL;
+	else if (!installed &&
+		 prop->type != RAZOR_PROPERTY_PROVIDES &&
+		 prop->type != RAZOR_PROPERTY_OBSOLETES)
+		return NULL;
+
+	if (property_in_set(prop, trans->system)) {
+		set = trans->system;
+		pkgbits = &trans->syspkgs;
+	} else {
+		set = trans->upstream;
+		pkgbits = &trans->uppkgs;
+	}
+	pkgs = set->packages.data;
+
+	for (p = list_first(&prop->packages, &set->package_pool); p; p = list_next(p)) {
+		if (bitarray_get(pkgbits, p->data) != installed)
+			continue;
+		if (prop->type == RAZOR_PROPERTY_OBSOLETES ||
+		    pkgs[p->data].name == prop->name)
+			return &pkgs[p->data];
+	}
+	return NULL;
+}
+
 static int
 compare_transaction_packages(const void *one, const void *two)
 {
@@ -1850,66 +1886,95 @@ compare_transaction_packages(const void *one, const void *two)
 		return strcmp((*tp1)->name, (*tp2)->name);
 }
 
+/* FIXME: merge this into the other property loop in razor_transaction_satisfy */
 static void
 resolve_new_packages(struct razor_transaction_resolver *trans,
 		     int start, int end)
 {
-	struct razor_package *sp, *spkgs, *up, *upkgs, *send, *uend;
+	struct razor_property *sp, *up, *sp_end, *up_end;
+	struct razor_package *spkg, *spkgs, *upkg, *upkgs;
 	struct razor_transaction_package **packages;
 	const char *spool, *upool;
 	int i;
 
-	spkgs = trans->system->packages.data;
-	send = trans->system->packages.data + trans->system->packages.size;
+	sp_end = trans->system->properties.data + trans->system->properties.size;
 	spool = trans->system->string_pool.data;
-	upkgs = trans->upstream->packages.data;
-	uend = trans->upstream->packages.data + trans->upstream->packages.size;
+	spkgs = trans->system->packages.data;
+	up_end = trans->upstream->properties.data + trans->upstream->properties.size;
 	upool = trans->upstream->string_pool.data;
+	upkgs = trans->upstream->packages.data;
 
+	/* FIXME, check if sorting the packages directly (rather than
+	 * sorting pointers-to-packages) still results in confusing
+	 * descriptions.
+	 */
 	packages = calloc(end - start, sizeof *packages);
 	for (i = start; i < end; i++)
 		packages[i - start] = ((struct razor_transaction_package *)trans->packages.data) + i;
 	qsort(packages, end - start, sizeof *packages,
 	      compare_transaction_packages);
 
-	sp = spkgs;
-	up = upkgs;
+	sp = trans->system->properties.data;
+	up = trans->upstream->properties.data;
 	for (i = 0; i < end - start; i++) {
 		if (!packages[i]->name)
 			continue;
-		while (sp < send && strcmp(&spool[sp->name], packages[i]->name) < 0)
+
+		spkg = NULL;
+		while (sp < sp_end &&
+		       strcmp(&spool[sp->name], packages[i]->name) < 0)
 			sp++;
-		while (up < uend && strcmp(&upool[up->name], packages[i]->name) < 0)
+		while (sp < sp_end &&
+		       strcmp(&spool[sp->name], packages[i]->name) == 0 &&
+		       !(spkg = property_provider_package(trans, sp, 1)))
+			sp++;
+
+		upkg = NULL;
+		while (up < up_end &&
+		       strcmp(&upool[up->name], packages[i]->name) < 0)
+			up++;
+		while (up < up_end &&
+		       strcmp(&upool[up->name], packages[i]->name) == 0 &&
+		       !(upkg = property_provider_package(trans, up, 0)))
 			up++;
 
 		if (packages[i]->state == RAZOR_PACKAGE_REMOVE ||
 		    packages[i]->state == RAZOR_PACKAGE_OBSOLETED) {
-			if (sp < send && strcmp(packages[i]->name, &spool[sp->name]) == 0) {
-				packages[i]->old_package = sp;
-				packages[i]->name = &spool[sp->name];
-				packages[i]->old_version = &spool[sp->version];
-				bitarray_set(&trans->syspkgs, sp - spkgs, 0);
+			if (spkg) {
+				packages[i]->old_package = spkg;
+				packages[i]->name = &spool[spkg->name];
+				packages[i]->old_version = &spool[spkg->version];
+				bitarray_set(&trans->syspkgs, spkg - spkgs, 0);
 			} else {
 				packages[i]->name = strdup(packages[i]->name);
 				packages[i]->state = RAZOR_PACKAGE_REMOVE_NOT_INSTALLED;
 				trans->errors++;
 			}
 		} else {
-			if (up < uend && strcmp(packages[i]->name, &upool[up->name]) == 0) {
-				packages[i]->new_package = up;
-				packages[i]->name = &upool[up->name];
-				packages[i]->new_version = &upool[up->version];
-				if (sp < send && strcmp(packages[i]->name, &spool[sp->name]) == 0) {
-					packages[i]->old_package = sp;
-					packages[i]->old_version = &spool[sp->version];
-					if (versioncmp(&spool[sp->version], &upool[up->version]) >= 0) {
+			if (upkg) {
+				packages[i]->new_package = upkg;
+				packages[i]->name = &upool[upkg->name];
+				packages[i]->new_version = &upool[upkg->version];
+
+				if (up->name != upkg->name) {
+					packages[i]->dep_package = &upool[upkg->name];
+					packages[i]->dep_type = up->type;
+					packages[i]->dep_property = &upool[up->name];
+					packages[i]->dep_relation = up->relation;
+					packages[i]->dep_version = &upool[up->version];
+				}
+
+				if (spkg) {
+					packages[i]->old_package = spkg;
+					packages[i]->old_version = &spool[spkg->version];
+					if (versioncmp(&spool[spkg->version], &upool[up->version]) >= 0) {
 						packages[i]->state = RAZOR_PACKAGE_UP_TO_DATE;
 						trans->errors++;
 						continue;
 					}
-					bitarray_set(&trans->syspkgs, sp - spkgs, 0);
+					bitarray_set(&trans->syspkgs, spkg - spkgs, 0);
 				}
-				bitarray_set(&trans->uppkgs, up - upkgs, 1);
+				bitarray_set(&trans->uppkgs, upkg - upkgs, 1);
 			} else {
 				packages[i]->name = strdup(packages[i]->name);
 				packages[i]->state = RAZOR_PACKAGE_INSTALL_UNAVAILABLE;
