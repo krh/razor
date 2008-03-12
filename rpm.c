@@ -123,7 +123,7 @@ static void
 import_files(struct razor_importer *importer, struct razor_rpm *rpm)
 {
 	const char *name;
-	const unsigned long *index;
+	const uint32_t *index;
 	unsigned int i, count;
 	char buffer[256];
 
@@ -450,7 +450,7 @@ razor_rpm_install(struct razor_rpm *rpm, const char *root)
 	struct installer installer;
 	unsigned int count, i, length;
 	struct cpio_file_header *header;
-	const unsigned long *size, *index, *flags;
+	const uint32_t *size, *index, *flags;
 	const unsigned short *mode;
 	const char *name, *dir;
 	struct stat buf;
