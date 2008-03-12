@@ -12,6 +12,7 @@
 #include "razor-internal.h"
 
 static const char system_repo_filename[] = "system.repo";
+static const char next_repo_filename[] = "system-next.repo";
 static const char rawhide_repo_filename[] = "rawhide.repo";
 static const char updated_repo_filename[] = "system-updated.repo";
 static const char razor_root_path[] = "/var/lib/razor";
@@ -502,11 +503,11 @@ list_packages(int count, struct razor_set *set)
 static int
 command_install(int argc, const char *argv[])
 {
-	struct razor_set *system, *upstream, *new;
+	struct razor_set *system, *upstream, *next;
 	struct razor_transaction *trans;
 	struct razor_rpm *rpm;
 	const char *filename;
-	char path[PATH_MAX], **packages;
+	char path[PATH_MAX], new_path[PATH_MAX], **packages;
 	int i;
 
 	upstream = create_set_from_rpms(argc, argv);
@@ -532,8 +533,20 @@ command_install(int argc, const char *argv[])
 	 * destroying the transaction.  Nice for transient objects
 	 * such as the merger and the importer.  Should we do that for
 	 * transactions too, that is, razor_transaction_finish()? */
-	new = razor_transaction_run(trans);
+	next = razor_transaction_run(trans);
 	razor_transaction_destroy(trans);
+
+	/* FIXME: Need razor_set_write_to_fd() so we can open it excl
+	 * up front here or fail if it already exists. */
+	snprintf(new_path, sizeof new_path,
+		 "%s%s/%s", root, razor_root_path, next_repo_filename);
+	razor_set_write(next, path);
+
+	razor_set_destroy(next);
+	razor_set_destroy(system);
+	razor_set_destroy(upstream);
+
+	printf("wrote %s\n", new_path);
 
 	for (i = 0; i < argc; i++) {
 		filename = argv[i];
@@ -549,6 +562,10 @@ command_install(int argc, const char *argv[])
 		}
 		razor_rpm_close(rpm);
 	}	
+
+	/* Make it so. */
+	rename(new_path, path);
+	printf("renamed %s to %s\n", new_path, path);
 
 	return 0;
 }
