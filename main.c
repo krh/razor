@@ -494,7 +494,7 @@ list_packages(int count, struct razor_set *set)
 	pi = razor_package_iterator_create(set);
 	i = 0;
 	while (razor_package_iterator_next(pi, &package, &name, &version))
-		packages[i] = strdup(name);
+		packages[i++] = strdup(name);
 	razor_package_iterator_destroy(pi);
 
 	return packages;
