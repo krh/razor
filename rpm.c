@@ -100,20 +100,20 @@ import_properties(struct razor_importer *importer, unsigned long type,
 		  int name_tag, int version_tag, int flags_tag)
 {
 	const char *name, *version;
-	uint_32 flags;
+	const uint_32 *flags;
+	uint_32 f;
 	unsigned int i, count;
 
 	name = razor_rpm_get_indirect(rpm, name_tag, &count);
 	if (name == NULL)
 		return;
 
-	flags = *(uint_32 *)razor_rpm_get_indirect(rpm, flags_tag, &count);
+	flags = razor_rpm_get_indirect(rpm, flags_tag, &count);
 
 	version = razor_rpm_get_indirect(rpm, version_tag, &count);
 	for (i = 0; i < count; i++) {
-		razor_importer_add_property(importer, name,
-					    rpm_to_razor_flags (flags),
-					    version, type);
+		f = rpm_to_razor_flags(ntohl(flags[i]));
+		razor_importer_add_property(importer, name, f, version, type);
 		name += strlen(name) + 1;
 		version += strlen(version) + 1;
 	}
