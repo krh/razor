@@ -1917,7 +1917,8 @@ resolve_new_packages(struct razor_transaction_resolver *trans,
 	sp = trans->system->properties.data;
 	up = trans->upstream->properties.data;
 	for (i = 0; i < end - start; i++) {
-		if (!packages[i]->name)
+		if (!packages[i]->name ||
+		    packages[i]->state >= RAZOR_PACKAGE_FIRST_ERROR_STATE)
 			continue;
 
 		spkg = NULL;
@@ -1945,9 +1946,10 @@ resolve_new_packages(struct razor_transaction_resolver *trans,
 				packages[i]->name = &spool[spkg->name];
 				packages[i]->old_version = &spool[spkg->version];
 				bitarray_set(&trans->syspkgs, spkg - spkgs, 0);
-			} else {
+			}
+			if (!packages[i]->old_package) {
 				packages[i]->name = strdup(packages[i]->name);
-				packages[i]->state = RAZOR_PACKAGE_REMOVE_NOT_INSTALLED;
+				packages[i]->state |= RAZOR_PACKAGE_UNAVAILABLE_FLAG;
 				trans->errors++;
 			}
 		} else {
@@ -1975,9 +1977,10 @@ resolve_new_packages(struct razor_transaction_resolver *trans,
 					bitarray_set(&trans->syspkgs, spkg - spkgs, 0);
 				}
 				bitarray_set(&trans->uppkgs, upkg - upkgs, 1);
-			} else {
+			}
+			if (!packages[i]->new_package) {
 				packages[i]->name = strdup(packages[i]->name);
-				packages[i]->state = RAZOR_PACKAGE_INSTALL_UNAVAILABLE;
+				packages[i]->state |= RAZOR_PACKAGE_UNAVAILABLE_FLAG;
 				trans->errors++;
 			}
 		}
@@ -2695,6 +2698,35 @@ const char * const razor_property_types[] = {
 	"requires", "provides", "conflicts with", "obsoletes"
 };
 
+static void
+print_requirement(struct razor_transaction_package *p)
+{
+	if (p->dep_type == RAZOR_PROPERTY_CONFLICTS &&
+	    !strcmp(p->dep_package, p->name)) {
+		printf(" because %s %s conflicts with %s",
+		       p->name, p->old_version, p->dep_property);
+		if (*p->dep_version) {
+			printf(" %s %s",
+			       razor_version_relations[p->dep_relation],
+			       p->dep_version);
+		}
+	} else {
+		if (strcmp(p->name, p->dep_package) != 0)
+			printf(" for %s", p->dep_package);
+		if (*p->dep_version) {
+			printf(", which %s %s %s %s",
+			       razor_property_types[p->dep_type],
+			       p->dep_property,
+			       razor_version_relations[p->dep_relation],
+			       p->dep_version);
+		} else if (strcmp(p->dep_property, p->name) != 0) {
+			printf(", which %s %s",
+			       razor_property_types[p->dep_type],
+			       p->dep_property);
+		}
+	}
+}
+
 void
 razor_transaction_describe(struct razor_transaction *trans)
 {
@@ -2710,31 +2742,8 @@ razor_transaction_describe(struct razor_transaction *trans)
 				break;
 
 			printf("Installing %s %s", p->name, p->new_version);
-			if (p->dep_package) {
-				if (p->dep_type == RAZOR_PROPERTY_CONFLICTS &&
-				    !strcmp(p->dep_package, p->name)) {
-					printf(" because %s %s conflicts with %s",
-					       p->name, p->old_version, p->dep_property);
-					if (*p->dep_version) {
-						printf(" %s %s",
-						       razor_version_relations[p->dep_relation],
-						       p->dep_version);
-					}
-				} else {
-					printf(" for %s", p->dep_package);
-					if (*p->dep_version) {
-						printf(", which %s %s %s %s",
-						       razor_property_types[p->dep_type],
-						       p->dep_property,
-						       razor_version_relations[p->dep_relation],
-						       p->dep_version);
-					} else if (strcmp(p->dep_property, p->name) != 0) {
-						printf(", which %s %s",
-						       razor_property_types[p->dep_type],
-						       p->dep_property);
-					}
-				}
-			}
+			if (p->dep_package)
+				print_requirement(p);
 			printf("\n");
 			break;
 
@@ -2771,7 +2780,19 @@ razor_transaction_describe(struct razor_transaction *trans)
 			break;
 
 		case RAZOR_PACKAGE_INSTALL_UNAVAILABLE:
-			printf("Error: can't install %s: not found\n", p->name);
+			printf("Error: can't find %s", p->name);
+			if (p->dep_package) {
+				printf(" (which is required");
+				print_requirement(p);
+				printf(")");
+			}
+			printf("\n");
+			errors_only = 1;
+			break;
+
+		case RAZOR_PACKAGE_UPDATE_UNAVAILABLE:
+			printf("Error: can't find an updated version of %s (which must be updated due to update of %s)\n",
+			       p->name, p->dep_package);
 			errors_only = 1;
 			break;
 
@@ -2781,7 +2802,10 @@ razor_transaction_describe(struct razor_transaction *trans)
 			break;
 
 		case RAZOR_PACKAGE_UP_TO_DATE:
-			printf("Error: can't upgrade %s: %s is most recent version\n", p->name, p->old_version);
+			printf("Error: can't update %s", p->name);
+			if (p->dep_package)
+				printf(" (which must be updated due to update of %s)", p->dep_package);
+			printf(": %s is most recent version\n", p->old_version);
 			errors_only = 1;
 			break;
 

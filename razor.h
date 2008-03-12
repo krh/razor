@@ -83,10 +83,18 @@ enum razor_transaction_package_state {
 
 	/* Error states */
 
+	RAZOR_PACKAGE_FIRST_ERROR_STATE = 0x4,
+	RAZOR_PACKAGE_UNAVAILABLE_FLAG = 0x4,
+
 	/* Package requested for install does not exist */
-	RAZOR_PACKAGE_INSTALL_UNAVAILABLE,
+	RAZOR_PACKAGE_INSTALL_UNAVAILABLE = RAZOR_PACKAGE_INSTALL | RAZOR_PACKAGE_UNAVAILABLE_FLAG,
+	/* Package requiring update does not have any update */
+	RAZOR_PACKAGE_UPDATE_UNAVAILABLE = RAZOR_PACKAGE_FORCED_UPDATE | RAZOR_PACKAGE_UNAVAILABLE_FLAG,
 	/* Package requested for removal does not exist */
-	RAZOR_PACKAGE_REMOVE_NOT_INSTALLED,
+	RAZOR_PACKAGE_REMOVE_NOT_INSTALLED = RAZOR_PACKAGE_REMOVE | RAZOR_PACKAGE_UNAVAILABLE_FLAG,
+	/* (not used) */
+	RAZOR_PACKAGE_OBSOLETE_UNAVAILABLE = RAZOR_PACKAGE_OBSOLETED | RAZOR_PACKAGE_UNAVAILABLE_FLAG,
+
 	/* No newer version of package is available */
 	RAZOR_PACKAGE_UP_TO_DATE,
 	/* Package marked for both install and remove */
