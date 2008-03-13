@@ -13,5 +13,9 @@ test-driver : razor.o types.o util.o test-driver.o
 test : test-driver
 	./test-driver test.xml
 
+reset : ./razor
+	rm -rf install
+	./razor init
+
 clean :
 	rm -f *.o razor

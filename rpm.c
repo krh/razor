@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <string.h>
+#include <errno.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -265,16 +266,20 @@ create_path(struct installer *installer,
 	    const char *path, const char *name, unsigned int mode)
 {
 	char buffer[PATH_MAX];
-	int fd;
+	struct stat buf;
+	int fd, ret;
 
 	if (razor_create_dir(installer->root, path) < 0)
 		return -1;
 
-	snprintf(buffer, sizeof buffer, "%s%s/%s",
+	/* assertion: root doesn't end in a slash, path begins and end
+	 * with a slash, name does not begin with a slash. */
+	snprintf(buffer, sizeof buffer, "%s%s%s",
 		 installer->root, path, name);
 
 	switch (mode >> 12) {
 	case REG:
+		/* FIXME: handle the case where a file is already there. */
 		fd = open(buffer, O_WRONLY | O_CREAT | O_TRUNC, mode & 0x1ff);
 		if (fd < 0){
 			fprintf(stderr, "failed to create file %s\n", buffer);
@@ -297,7 +302,16 @@ create_path(struct installer *installer,
 		}
 		return 0;
 	case XDIR:
-		return mkdir(buffer, mode & 0x1ff);
+		ret = mkdir(buffer, mode & 0x1ff);
+		if (ret == 0 || errno != EEXIST)
+			return ret;
+		if (stat(buffer, &buf) || !S_ISDIR(buf.st_mode)) {
+			/* FIXME: also check that mode match. */
+			fprintf(stderr,
+				"%s exists but is not a directory\n", buffer);
+			return -1;
+		}
+		return 0;
 	case PIPE:
 	case CDEV:
 	case BDEV:
