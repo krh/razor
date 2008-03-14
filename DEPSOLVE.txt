@@ -66,6 +66,110 @@ transaction has a file dependency, it causes *property* dependencies
 to become slower to resolve as well...)
 
 
+THE RULES
+---------
+
+This is what we have figured out for transaction-solving rules;
+neither yum nor rpm's algorithm seems to be explained in full
+anywhere...
+
+    1. Every requested install in the initial package set must be
+       satisfied as either a new install or an update:
+
+	- if the requested package name is the name of an upstream
+          package:
+
+	    - if there is not a corresponding already-installed
+              package, then install the upstream package
+
+	    - else if the upstream package is newer than the
+              already-installed package, then update the package
+
+	    - else it's an error (UP_TO_DATE)
+
+	- else if the requested package name is the name of an
+          already-installed package:
+
+	    - if there is an upstream package that obsoletes the
+              already-installed package, then behave as though the
+              user had requested that that package be installed
+              instead.
+
+	    - else it's an error (UP_TO_DATE or INSTALL_UNAVAILABLE?)
+
+	- else it's an error (INSTALL_UNAVAILABLE)
+
+    2. Every requested removal in the initial package set must be
+       satisfied as a removal. If any requested package name is not
+       the name of an installed package, it's an error
+       (REMOVE_NOT_INSTALLED)
+
+    REQUIRES processing:
+
+    3. If a package being installed or updated-to REQUIRES a property
+       that is not provided by any installed or to-be-installed
+       package, we need to find an installable package that provides
+       that property. If we find one, install/update it. If not, it's
+       an error (UNSATISFIABLE). (If we find an upstream package
+       providing the property that corresponds to a system package
+       that's being removed, then it's a CONTRADICTION.)
+
+    4. If an already-installed package REQUIRES a property which is
+       only provided by a package that is being removed, then that
+       package needs to be removed as well.
+
+    5. If an already-installed package REQUIRES a property which is
+       only provided by a package that is being upgraded or obsoleted
+       (to a new package which does not provide that property), then:
+
+	- if there is an update for the installed package, then update
+          the installed package
+
+	- else if there is another installable package that provides
+          the required property, then install that.
+
+	- else it's an error (UNSATISFIABLE?)
+
+    CONFLICTS processing
+
+    6. If a package being installed or updated-to CONFLICTS with a
+       property provided by an installed package:
+
+	- if there is an update for the installed package, which the
+          new package does not conflict with, then update the
+          installed package.
+
+	- else it's an error (NEW_CONFLICT)
+
+    7. If an already-installed package CONFLICTS with a property
+       provided by a to-be-installed package:
+
+	- if there is an update for the installed package, which does
+          not conflict with the new package, then update the installed
+          package.
+
+	- else it's an error (NEW_CONFLICT)
+
+    8. If a package being installed or updated-to CONFLICTS with a
+       property provided by a to-be-installed package, then it's an
+       error (CONTRADICTION).
+
+    OBSOLETES processing. NOTE: OBSOLETES are only matched against
+    package names, not against arbitrary provided properties
+
+    9. If a package being installed or updated-to OBSOLETES an
+       installed package, then obsolete that package. (ie, remove it,
+       but treat it as updated for purposes of dangling REQUIRES).
+
+   10. If an already-installed package OBSOLETES a to-be-installed
+       package, then it's an error. (ALREADY_OBSOLETE)
+
+   11. If a package being installed or updated-to OBSOLETES another
+       package being installed or updated-to, then it's an error
+       (CONTRADICTION).
+
+
+
 THE DEPSOLVER
 -------------
 
