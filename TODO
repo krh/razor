@@ -11,11 +11,7 @@ Towards replacing rpm + yum (0.1):
 
    - store rpm headers for installed packages.
 
-- versions in depsolving
-
 - signed packages
-
-- merge file lists when merging package sets
 
 - download (libcurl?)
 
@@ -26,7 +22,7 @@ Towards replacing rpm + yum (0.1):
 
 - pre-link changing binaries and libs on disk screwing up checksum?
 
-- nail down byte-order and word sizes of repo file.
+- nail down byte-order of repo file.
 
 - version the sections in the file, put the element size in the header
   so we can add stuff to elements in a backwards compatible way.
@@ -112,5 +108,3 @@ Misc ideas:
 Bugs:
 
 - eliminate duplicate entries in package property lists.
-
-- corner cases such as no files/properties in repo etc segfault.
