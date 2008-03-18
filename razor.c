@@ -2004,7 +2004,8 @@ find_all_packages(struct razor_transaction_resolver *trans)
 	for (sp = spkgs; sp < send; sp++) {
 		while (up < uend && strcmp(&spool[sp->name], &upool[up->name]) > 0)
 			up++;
-		if (strcmp(&spool[sp->name], &upool[up->name]) == 0) {
+		if (strcmp(&spool[sp->name], &upool[up->name]) == 0 &&
+		    versioncmp(&spool[sp->version], &upool[up->version]) < 0) {
 			tp = array_add(&trans->packages, sizeof *tp);
 			memset(tp, 0, sizeof *tp);
 			tp->old_package = sp;
