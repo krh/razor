@@ -2209,7 +2209,8 @@ find_package_matching(struct razor_transaction_resolver *trans, int installed,
 	} else {
 		while (prop >= props && prop->type != match_type)
 			prop--;
-		while (prop > props + 1 && (prop - 1)->type == match_type)
+		while (prop > props + 1 && (prop - 1)->name == prop->name &&
+		       (prop - 1)->type == match_type)
 			prop--;
 	}
 
