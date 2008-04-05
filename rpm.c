@@ -188,15 +188,19 @@ razor_rpm_open(const char *filename)
 
 	/* Look up dir names now so we can index them directly. */
 	name = razor_rpm_get_indirect(rpm, RPMTAG_DIRNAMES, &count);
-	if (name == NULL) {
-		fprintf(stderr, "old filename style not handled\n");
-		return NULL;
-	}
-
-	rpm->dirs = calloc(count, sizeof *rpm->dirs);
-	for (i = 0; i < count; i++) {
-		rpm->dirs[i] = name;
-		name += strlen(name) + 1;
+	if (name) {
+		rpm->dirs = calloc(count, sizeof *rpm->dirs);
+		for (i = 0; i < count; i++) {
+			rpm->dirs[i] = name;
+			name += strlen(name) + 1;
+		}
+	} else {
+		name = razor_rpm_get_indirect(rpm, RPMTAG_OLDFILENAMES,
+					      &count);
+		if (name) {
+			fprintf(stderr, "old filenames not supported\n");
+			return NULL;
+		}
 	}
 
 	return rpm;
