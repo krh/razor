@@ -351,104 +351,6 @@ razor_importer_destroy(struct razor_importer *importer)
 	/* FIXME: write this */
 }
 
-
-typedef int (*compare_with_data_func_t)(const void *p1,
-					const void *p,
-					void *data);
-
-struct qsort_context {
-	size_t size;
-	compare_with_data_func_t compare;
-	void *data;
-};
-
-static void
-qsort_swap(void *p1, void *p2, size_t size)
-{
-	char buffer[size];
-
-	memcpy(buffer, p1, size);
-	memcpy(p1, p2, size);
-	memcpy(p2, buffer, size);
-}
-
-static void
-__qsort_with_data(void *base, size_t nelem, uint32_t *map,
-		  struct qsort_context *ctx)
-{
-	void *p, *start, *end, *pivot;
-	uint32_t *mp, *mstart, *mend, tmp;
-	int left, right, result;
-	size_t size = ctx->size;
-
-	p = base;
-	start = base;
-	end = base + nelem * size;
-	mp = map;
-	mstart = map;
-	mend = map + nelem;
-	pivot = base + (random() % nelem) * size;
-
-	while (p < end) {
-		result = ctx->compare(p, pivot, ctx->data);
-		if (result < 0) {
-			qsort_swap(p, start, size);
-			tmp = *mp;
-			*mp = *mstart;
-			*mstart = tmp;
-			if (start == pivot)
-				pivot = p;
-			start += size;
-			mstart++;
-			p += size;
-			mp++;
-		} else if (result == 0) {
-			p += size;
-			mp++;
-		} else {
- 			end -= size;
-			mend--;
-			qsort_swap(p, end, size);
-			tmp = *mp;
-			*mp = *mend;
-			*mend = tmp;
-			if (end == pivot)
-				pivot = p;
-		}
-	}
-
-	left = (start - base) / size;
-	right = (base + nelem * size - end) / size;
-	if (left > 1)
-		__qsort_with_data(base, left, map, ctx);
-	if (right > 1)
-		__qsort_with_data(end, right, mend, ctx);
-}
-
-static uint32_t *
-qsort_with_data(void *base, size_t nelem, size_t size,
-		compare_with_data_func_t compare, void *data)
-{
-	struct qsort_context ctx;
-	uint32_t *map;
-	int i;
-
-	if (nelem == 0)
-		return NULL;
-
-	ctx.size = size;
-	ctx.compare = compare;
-	ctx.data = data;
-
-	map = malloc(nelem * sizeof (uint32_t));
-	for (i = 0; i < nelem; i++)
-		map[i] = i;
-
-	__qsort_with_data(base, nelem, map, &ctx);
-
-	return map;
-}
-
 static int
 versioncmp(const char *s1, const char *s2)
 {
@@ -527,11 +429,11 @@ uniqueify_properties(struct razor_set *set)
 	int i, count, unique;
 
 	count = set->properties.size / sizeof(struct razor_property);
-	map = qsort_with_data(set->properties.data,
-			      count,
-			      sizeof(struct razor_property),
-			      compare_properties,
-			      set);
+	map = razor_qsort_with_data(set->properties.data,
+				    count,
+				    sizeof(struct razor_property),
+				    compare_properties,
+				    set);
 
 	rp_end = set->properties.data + set->properties.size;
 	rmap = malloc(count * sizeof *map);
@@ -668,11 +570,11 @@ build_file_tree(struct razor_importer *importer)
 	struct razor_entry *e;
 
 	count = importer->files.size / sizeof (struct import_entry);
-	qsort_with_data(importer->files.data,
-			count,
-			sizeof (struct import_entry),
-			compare_filenames,
-			NULL);
+	razor_qsort_with_data(importer->files.data,
+			      count,
+			      sizeof (struct import_entry),
+			      compare_filenames,
+			      NULL);
 
 	root.name = hashtable_tokenize(&importer->table, "");
 	array_init(&root.files);
@@ -767,8 +669,8 @@ find_file_provides(struct razor_importer *importer)
 
 	req = req_start = importer->file_requires.data;
 	req_end = importer->file_requires.data + importer->file_requires.size;
-	map = qsort_with_data(req, req_end - req, sizeof *req,
-			      compare_file_requires, pool);
+	map = razor_qsort_with_data(req, req_end - req, sizeof *req,
+				    compare_file_requires, pool);
 	free(map);
 
 	for (req = req_start; req < req_end; req++) {
@@ -846,11 +748,11 @@ razor_importer_finish(struct razor_importer *importer)
 	free(map);
 
 	count = importer->set->packages.size / sizeof(struct razor_package);
-	map = qsort_with_data(importer->set->packages.data,
-			      count,
-			      sizeof(struct razor_package),
-			      compare_packages,
-			      importer->set);
+	map = razor_qsort_with_data(importer->set->packages.data,
+				    count,
+				    sizeof(struct razor_package),
+				    compare_packages,
+				    importer->set);
 
 	rmap = malloc(count * sizeof *rmap);
 	for (i = 0; i < count; i++)
@@ -2896,17 +2798,17 @@ razor_transaction_run(struct razor_transaction *trans)
 			*pkg = *trans->packages[p].old_package;
 		}
 	}
-	map = qsort_with_data(install_packages.data,
-			      install_packages.size / sizeof *pkg,
-			      sizeof *pkg,
-			      compare_packages,
-			      trans->upstream);
+	map = razor_qsort_with_data(install_packages.data,
+				    install_packages.size / sizeof *pkg,
+				    sizeof *pkg,
+				    compare_packages,
+				    trans->upstream);
 	free(map);
-	map = qsort_with_data(remove_packages.data,
-			      remove_packages.size / sizeof *pkg,
-			      sizeof *pkg,
-			      compare_packages,
-			      trans->system);
+	map = razor_qsort_with_data(remove_packages.data,
+				    remove_packages.size / sizeof *pkg,
+				    sizeof *pkg,
+				    compare_packages,
+				    trans->system);
 	free(map);
 
 	merger = razor_merger_create(trans->system, trans->upstream);

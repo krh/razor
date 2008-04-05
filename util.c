@@ -3,6 +3,7 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <unistd.h>
 
 #include "razor-internal.h"
@@ -70,4 +71,97 @@ razor_write(int fd, const void *data, size_t size)
 	}
 
 	return 0;
+}
+
+struct qsort_context {
+	size_t size;
+	razor_compare_with_data_func_t compare;
+	void *data;
+};
+
+static void
+qsort_swap(void *p1, void *p2, size_t size)
+{
+	char buffer[size];
+
+	memcpy(buffer, p1, size);
+	memcpy(p1, p2, size);
+	memcpy(p2, buffer, size);
+}
+
+static void
+__qsort_with_data(void *base, size_t nelem, uint32_t *map,
+		  struct qsort_context *ctx)
+{
+	void *p, *start, *end, *pivot;
+	uint32_t *mp, *mstart, *mend, tmp;
+	int left, right, result;
+	size_t size = ctx->size;
+
+	p = base;
+	start = base;
+	end = base + nelem * size;
+	mp = map;
+	mstart = map;
+	mend = map + nelem;
+	pivot = base + (random() % nelem) * size;
+
+	while (p < end) {
+		result = ctx->compare(p, pivot, ctx->data);
+		if (result < 0) {
+			qsort_swap(p, start, size);
+			tmp = *mp;
+			*mp = *mstart;
+			*mstart = tmp;
+			if (start == pivot)
+				pivot = p;
+			start += size;
+			mstart++;
+			p += size;
+			mp++;
+		} else if (result == 0) {
+			p += size;
+			mp++;
+		} else {
+ 			end -= size;
+			mend--;
+			qsort_swap(p, end, size);
+			tmp = *mp;
+			*mp = *mend;
+			*mend = tmp;
+			if (end == pivot)
+				pivot = p;
+		}
+	}
+
+	left = (start - base) / size;
+	right = (base + nelem * size - end) / size;
+	if (left > 1)
+		__qsort_with_data(base, left, map, ctx);
+	if (right > 1)
+		__qsort_with_data(end, right, mend, ctx);
+}
+
+uint32_t *
+razor_qsort_with_data(void *base, size_t nelem, size_t size,
+		      razor_compare_with_data_func_t compare, void *data)
+{
+	struct qsort_context ctx;
+	uint32_t *map;
+	int i;
+
+	if (nelem == 0)
+		return NULL;
+
+	ctx.size = size;
+	ctx.compare = compare;
+	ctx.data = data;
+
+	map = malloc(nelem * sizeof (uint32_t));
+	for (i = 0; i < nelem; i++)
+		map[i] = i;
+
+	__qsort_with_data(base, nelem, map, &ctx);
+
+	return map;
 }
