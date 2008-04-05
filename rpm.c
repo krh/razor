@@ -384,7 +384,7 @@ run_script(struct installer *installer,
 			exit(-1);
 		}
 	} else {
-		if (script && write(fd[1], script, strlen(script)) < 0) {
+		if (script && razor_write(fd[1], script, strlen(script)) < 0) {
 			fprintf(stderr, "failed to pipe script, %m\n");
 			return -1;
 		}
