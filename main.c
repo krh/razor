@@ -265,9 +265,8 @@ download_if_missing(CURL *curl, const char *url, const char *file)
 			unlink(file);
 			return -1;
 		}
+		fprintf(stderr, "\n");
 	}
-
-	fprintf(stderr, "\n");
 
 	return 0;
 }
