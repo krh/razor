@@ -11,6 +11,21 @@ Towards replacing rpm + yum (0.1):
 
    - store rpm headers for installed packages.
 
+- rpm seems to consider glibc > 2.6.90 to mean greater than
+  2.6.90-anything.  That is, a comparison that doesn't mention the
+  release field, shouldn't regard the release field of pkgs it
+  compares against.  glibc-common-2.6.90 has
+
+	conflicts: glibc < 2.6.90, glibc > 2.6.90
+
+  since rpm doesn't let you do glibc != 2.6.90, and
+
+	requires: glibc = 2.6.90
+
+  will always pull in glibc.  But even with a != relation, would
+  glibc-2.6.90-16 be equal to 2.6.90?  glibc 2.7.90-8 dropped it in
+  favor of requires = 2.7.90-8 (#225806).
+
 - signed packages
 
 - download (libcurl?)
