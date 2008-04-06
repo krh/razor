@@ -107,55 +107,19 @@ enum razor_transaction_package_state {
 	RAZOR_PACKAGE_UNSATISFIABLE,
 };
 
-struct razor_transaction_package {
-	const char *name, *old_version, *new_version;
-	struct razor_package *old_package, *new_package;
-	enum razor_transaction_package_state state;
-
-	/* dep_package is the name of the package that resulted in
-	 * this entry being created (or NULL if the user requested the
-	 * install/remove), with the other dep_ fields providing
-	 * additional information.
-	 *
-	 * For INSTALL, if dep_type is REQUIRES, then dep_package
-	 * required something that this package provides. If dep_type
-	 * is CONFLICTS, then dep_package is a package that conflicted
-	 * with an older version of this package, forcing an upgrade.
-	 *
-	 * For REMOVE, if dep_type is REQUIRES, then dep_package is a
-	 * package that is being removed. If dep_type is OBSOLETES,
-	 * then dep_package is a package that obsoletes this one.
-	 *
-	 * For OLD_CONFLICT or NEW_CONFLICT, dep_package is an
-	 * existing package that conflicts with this one. The
-	 * conflicting property comes from the already-installed
-	 * package for OLD_CONFLICT, or the to-be-installed package
-	 * for NEW_CONFLICT.
-	 *
-	 * For UNSATISFIABLE, the dep_ fields are as for an INSTALL,
-	 * but the name field will be NULL.
-	 */
-	const char *dep_package;
-	enum razor_property_type dep_type;
-	const char *dep_property;
-	enum razor_version_relation dep_relation;
-	const char *dep_version;
-};
-
-struct razor_transaction {
-	int package_count, errors;
-	struct razor_transaction_package *packages;
-
-	struct razor_set *system, *upstream;
-};
-
 struct razor_transaction *
 razor_transaction_create(struct razor_set *system, struct razor_set *upstream,
 			 int update_count, const char **update_packages,
 			 int remove_count, const char **remove_packages);
-void razor_transaction_describe(struct razor_transaction *trans);
+int razor_transaction_describe(struct razor_transaction *trans);
 struct razor_set *razor_transaction_run(struct razor_transaction *trans);
 void razor_transaction_destroy(struct razor_transaction *trans);
+
+/* Temporary helper for test suite. */
+int razor_transaction_unsatisfied_property(struct razor_transaction *trans,
+					   const char *name,
+					   enum razor_version_relation rel,
+					   const char *version);
 
 /* Importer interface; for building a razor set from external sources,
  * like yum, rpmdb or razor package files. */

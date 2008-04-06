@@ -59,11 +59,11 @@ struct test_context {
 	struct razor_set **importer_set;
 
 	struct razor_transaction *trans;
-	struct razor_transaction_package *unsat;
 
 	char *install_pkgs[3], *remove_pkgs[3];
 	int n_install_pkgs, n_remove_pkgs;
 
+	int unsat;
 	int in_result;
 
 	int debug, errors;
@@ -194,23 +194,18 @@ add_property(struct test_context *ctx, enum razor_property_type type, const char
 }
 
 static void
-check_unsatisfiable_property(struct test_context *ctx, enum razor_property_type type, const char *name, enum razor_version_relation rel, const char *version)
+check_unsatisfiable_property(struct test_context *ctx,
+			     enum razor_property_type type,
+			     const char *name,
+			     enum razor_version_relation rel,
+			     const char *version)
 {
 	if (!version)
 		version = "";
 
-	for (; ctx->unsat < ctx->trans->packages + ctx->trans->package_count; ctx->unsat++) {
-		if (ctx->unsat->state != RAZOR_PACKAGE_UNSATISFIABLE)
-			continue;
-		if (strcmp(name, ctx->unsat->dep_property) != 0 ||
-		    rel != ctx->unsat->dep_relation ||
-		    strcmp(version, ctx->unsat->dep_version) != 0)
-			continue;
-
-		/* OK, found it, so skip over it and continue */
-		ctx->unsat++;
+	if (razor_transaction_unsatisfied_property(ctx->trans,
+						   name, rel, version))
 		return;
-	}
 
 	fprintf(stderr, "  didn't get unsatisfiable '%s %s %s'\n",
 		name, razor_version_relations[rel], version);
@@ -253,22 +248,22 @@ start_transaction(struct test_context *ctx, const char **atts)
 static void
 end_transaction(struct test_context *ctx)
 {
+	int errors;
+
 	ctx->trans = razor_transaction_create(ctx->system_set, ctx->repo_set,
 					      ctx->n_install_pkgs,
 					      (const char **)ctx->install_pkgs,
 					      ctx->n_remove_pkgs,
 					      (const char **)ctx->remove_pkgs);
-	if (ctx->debug) {
-		razor_transaction_describe(ctx->trans);
-		printf("\n");
-	}
+	errors = razor_transaction_describe(ctx->trans);
+	printf("\n");
 
 	while (ctx->n_install_pkgs--)
 		free(ctx->install_pkgs[ctx->n_install_pkgs]);
 	while (ctx->n_remove_pkgs--)
 		free(ctx->remove_pkgs[ctx->n_remove_pkgs]);
 
-	if (!ctx->trans->errors) {
+	if (!errors) {
 		struct razor_set *new;
 		new = razor_transaction_run(ctx->trans);
 		razor_set_destroy(ctx->system_set);
@@ -348,13 +343,13 @@ start_unsatisfiable(struct test_context *ctx, const char **atts)
 		exit(1);
 	}
 
-	ctx->unsat = ctx->trans->packages;
+	ctx->unsat = 1;
 }
 
 static void
 end_unsatisfiable(struct test_context *ctx)
 {
-	ctx->unsat = NULL;
+	ctx->unsat = 0;
 }
 
 static void

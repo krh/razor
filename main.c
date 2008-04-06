@@ -338,14 +338,15 @@ command_update(int argc, const char *argv[])
 {
 	struct razor_set *set, *upstream;
 	struct razor_transaction *trans;
+	int errors;
 
 	set = razor_set_open(repo_filename);
 	upstream = razor_set_open(rawhide_repo_filename);
 	if (set == NULL || upstream == NULL)
 		return 1;
 	trans = razor_transaction_create(set, upstream, argc, argv, 0, NULL);
-	razor_transaction_describe(trans);
-	if (trans->errors)
+	errors = razor_transaction_describe(trans);
+	if (errors)
 		return 1;
 
 	set = razor_transaction_run(trans);
@@ -363,13 +364,14 @@ command_remove(int argc, const char *argv[])
 {
 	struct razor_set *set;
 	struct razor_transaction *trans;
+	int errors;
 
 	set = razor_set_open(repo_filename);
 	if (set == NULL)
 		return 1;
 	trans = razor_transaction_create(set, NULL, 0, NULL, argc, argv);
-	razor_transaction_describe(trans);
-	if (trans->errors)
+	errors = razor_transaction_describe(trans);
+	if (errors)
 		return 1;
 
 	set = razor_transaction_run(trans);
@@ -519,7 +521,7 @@ command_install(int argc, const char *argv[])
 	struct razor_rpm *rpm;
 	const char *filename;
 	char path[PATH_MAX], new_path[PATH_MAX], **packages;
-	int i;
+	int errors, i;
 
 	upstream = create_set_from_rpms(argc, argv);
 	snprintf(path, sizeof path,
@@ -535,8 +537,8 @@ command_install(int argc, const char *argv[])
 					 argc, (const char **)packages,
 					 0, NULL);
 	free(packages);
-	razor_transaction_describe(trans);
-	if (trans->errors)
+	errors = razor_transaction_describe(trans);
+	if (errors)
 		return 1;
 
 	/* FIXME: Use _finish() convention here?  That is, a function
