@@ -25,15 +25,25 @@ command_list(int argc, const char *argv[])
 	struct razor_set *set;
 	struct razor_package_iterator *pi;
 	struct razor_package *package;
-	const char *pattern = argv[0], *name, *version;
+	const char *pattern, *name, *version;
+	int only_names = 0, i = 0;
 
+	if (strcmp(argv[i], "--only-names") == 0) {
+		only_names = 1;
+		i++;
+	}
+
+	pattern = argv[i];
 	set = razor_set_open(repo_filename);
 	pi = razor_package_iterator_create(set);
 	while (razor_package_iterator_next(pi, &package, &name, &version)) {
 		if (pattern && fnmatch(pattern, name, 0) != 0)
 			continue;
 
-		printf("%s-%s\n", name, version);
+		if (only_names)
+			printf("%s\n", name);
+		else
+			printf("%s-%s\n", name, version);
 	}
 	razor_package_iterator_destroy(pi);
 	razor_set_destroy(set);
@@ -227,8 +237,6 @@ show_progress(void *clientp,
 	if (!dlnow < dltotal)
 		fprintf(stderr, "\rdownloading %s, %dkB/%dkB",
 			file, (int) dlnow / 1024, (int) dltotal / 1024);
-	else
-		fprintf(stderr, "\n");
 
 	return 0;
 }
@@ -240,7 +248,6 @@ download_if_missing(CURL *curl, const char *url, const char *file)
 	char error[256];
 	FILE *fp;
 	CURLcode res;
-	char buffer[256];
 
 	curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, error);
 	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0);
@@ -249,9 +256,8 @@ download_if_missing(CURL *curl, const char *url, const char *file)
 
 	if (stat(file, &buf) < 0) {
 		fp = fopen(file, "w");
-		snprintf(buffer, sizeof buffer, "%s/%s", url, file);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
-		curl_easy_setopt(curl, CURLOPT_URL, buffer);
+		curl_easy_setopt(curl, CURLOPT_URL, url);
 		res = curl_easy_perform(curl);
 		fclose(fp);
 		if (res != CURLE_OK) {
@@ -261,11 +267,13 @@ download_if_missing(CURL *curl, const char *url, const char *file)
 		}
 	}
 
+	fprintf(stderr, "\n");
+
 	return 0;
 }
 
 #define REPO_URL "http://download.fedora.redhat.com" \
-	"/pub/fedora/linux/development/i386/os/repodata"
+	"/pub/fedora/linux/development/i386/os"
 
 static int
 command_import_yum(int argc, const char *argv[])
@@ -277,9 +285,13 @@ command_import_yum(int argc, const char *argv[])
 	if (curl == NULL)
 		return 1;
 
-	if (download_if_missing(curl, REPO_URL, "primary.xml.gz") < 0)
+	if (download_if_missing(curl,
+				REPO_URL "/repodata/primary.xml.gz",
+				"primary.xml.gz") < 0)
 		return -1;
-	if (download_if_missing(curl, REPO_URL, "filelists.xml.gz") < 0)
+	if (download_if_missing(curl,
+				REPO_URL "/repodata/filelists.xml.gz",
+				"filelists.xml.gz") < 0)
 		return -1;
 	curl_easy_cleanup(curl);
 
@@ -610,6 +622,40 @@ command_init(int argc, const char *argv[])
 	return 0;
 }
 
+static int
+command_download(int argc, const char *argv[])
+{
+	struct razor_set *set;
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *pattern = argv[0], *name, *version;
+	char url[256], file[256];
+	CURL *curl;
+
+	curl = curl_easy_init();
+	if (curl == NULL)
+		return 1;
+
+	set = razor_set_open(rawhide_repo_filename);
+	pi = razor_package_iterator_create(set);
+	while (razor_package_iterator_next(pi, &package, &name, &version)) {
+		if (pattern && fnmatch(pattern, name, 0) != 0)
+			continue;
+
+		snprintf(url, sizeof url,
+			 REPO_URL "/Packages/%s-%s.i386.rpm", name, version);
+		snprintf(file, sizeof file,
+			 "rpms/%s-%s.i386.rpm", name, version);
+		if (download_if_missing(curl, url, file) < 0)
+			fprintf(stderr, "failed to download %s\n", name);
+	}
+	razor_package_iterator_destroy(pi);
+	razor_set_destroy(set);
+	curl_easy_cleanup(curl);
+
+	return 0;
+}
+
 static struct {
 	const char *name;
 	const char *description;
@@ -633,7 +679,8 @@ static struct {
 	{ "remove", "remove specified packages", command_remove },
 	{ "diff", "show diff between two package sets", command_diff },
 	{ "install", "install rpm", command_install },
-	{ "init", "init razor root", command_init }
+	{ "init", "init razor root", command_init },
+	{ "download", "download packages", command_download }
 };
 
 static int

@@ -1,12 +1,18 @@
 __razor_commands () {
     local IFS=$'\n'
-    COMPREPLY=($(IFS=: compgen -S' ' -W "list-requires:list-provides:list-files:list-file-packages:list-package-files:what-requires:what-provides:import-yum:import-rpmdb:validate:update:diff" -- $1))
+    COMPREPLY=($(IFS=: compgen -S' ' -W "list-requires:list-provides:list-files:list-file-packages:list-package-files:what-requires:what-provides:import-yum:import-rpmdb:validate:update:diff:install:init:download" -- $1))
 }
 
 __razor_packages () {
     local IFS=$'\n'
 
-    COMPREPLY=($(./razor list "$1*" | while read p; do echo "$p "; done))
+    COMPREPLY=($(./razor list --only-names "$1*" | while read p; do echo "$p "; done))
+}
+
+__razor_upstream_packages () {
+    local IFS=$'\n'
+
+    COMPREPLY=($(RAZOR_REPO=rawhide.repo ./razor list --only-names "$1*" | while read p; do echo "$p "; done))
 }
 
 __razor_files() {
@@ -33,6 +39,7 @@ __razor() {
 	    list-files|list-file-packages) __razor_files $cur ;;
 	    what-requires) __razor_requires $cur ;;
 	    what-provides) __razor_provides $cur ;;
+	    download) __razor_upstream_packages $cur ;;
 	esac
     fi
 }
