@@ -51,6 +51,7 @@ struct bitarray {
 };
 
 void bitarray_init(struct bitarray *bitarray, int size, int intial_value);
+void bitarray_release(struct bitarray *bitarray);
 void bitarray_set(struct bitarray *bitarray, int bit, int value);
 int bitarray_get(struct bitarray *bitarray, int bit);
 

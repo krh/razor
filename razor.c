@@ -2946,6 +2946,10 @@ razor_transaction_destroy(struct razor_transaction *trans)
 		     p->state == RAZOR_PACKAGE_REMOVE_NOT_INSTALLED))
 			free((char *)p->name);
 	}
+
+	array_release(&trans->packages);
+	bitarray_release(&trans->syspkgs);
+	bitarray_release(&trans->uppkgs);
 	free(trans);
 
 	/* FIXME: free upstream if it was created as an empty set */

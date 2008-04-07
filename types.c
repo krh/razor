@@ -256,6 +256,12 @@ bitarray_init(struct bitarray *bitarray, int size, int initial_value)
 }
 
 void
+bitarray_release(struct bitarray *bitarray)
+{
+	free(bitarray->bits);
+}
+
+void
 bitarray_set(struct bitarray *bitarray, int bit, int value)
 {
 	if (value)
