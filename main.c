@@ -578,6 +578,8 @@ command_install(int argc, const char *argv[])
 	razor_set_diff(system, next, download_package, curl);	
 	curl_easy_cleanup(curl);
 
+	/* FIXME: We need to figure out the right install order here,
+	 * so the post and pre scripts can run. */
 	razor_set_diff(system, next, install_package, (void *) root);
 
 	razor_set_destroy(next);

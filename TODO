@@ -6,9 +6,6 @@ Towards replacing rpm + yum (0.1):
      want to create dirs), move config files according to file
      flags. (.rpmnew etc)
 
-   - run hooks; probably fork to shell and in the parent just do a
-     write() of the hook section to a pipe to the shell.
-
    - store rpm headers for installed packages.
 
 - rpm seems to consider glibc > 2.6.90 to mean greater than
@@ -27,8 +24,6 @@ Towards replacing rpm + yum (0.1):
   favor of requires = 2.7.90-8 (#225806).
 
 - signed packages
-
-- download (libcurl?)
 
 - figure out how to canonically represent empty string... ~0?
 
