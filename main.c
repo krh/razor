@@ -544,7 +544,6 @@ command_install(int argc, const char *argv[])
 	struct razor_set *system, *upstream, *next;
 	struct razor_transaction *trans;
 	char path[PATH_MAX], new_path[PATH_MAX];
-	CURL *curl;
 	int errors, fd;
 
 	/* Create the new next repo file up front to ensure exclusive
@@ -584,13 +583,7 @@ command_install(int argc, const char *argv[])
 	razor_set_write_to_fd(next, fd);
 	printf("wrote %s\n", new_path);
 
-	curl = curl_easy_init();
-	if (curl == NULL) {
-		unlink(new_path);
-		return 1;
-	}
-	razor_set_diff(system, next, download_package, curl);	
-	curl_easy_cleanup(curl);
+	razor_set_diff(system, next, download_package, NULL);	
 
 	/* FIXME: We need to figure out the right install order here,
 	 * so the post and pre scripts can run. */

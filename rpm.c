@@ -353,7 +353,7 @@ run_script(struct installer *installer,
 	program = razor_rpm_get_indirect(installer->rpm, program_tag, NULL);
 	script = razor_rpm_get_indirect(installer->rpm, script_tag, NULL);
 	if (program == NULL && script == NULL) {
-		return;
+		return 0;
 	} else if (program == NULL) {
 		program = "/bin/sh";
 	}
