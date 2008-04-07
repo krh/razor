@@ -479,14 +479,22 @@ download_package(const char *name,
 		 void *data)
 {
 	char file[PATH_MAX], url[256];
+	const char *v;
 
 	if (old_version)
 		return;
 
+	/* Skip epoch */
+	v = strchr(new_version, ':');
+	if (v != NULL)
+		v = v + 1;
+	else
+		v = new_version;
+
 	snprintf(url, sizeof url,
-		 REPO_URL "/Packages/%s-%s.%s.rpm", name, new_version, arch);
+		 REPO_URL "/Packages/%s-%s.%s.rpm", name, v, arch);
 	snprintf(file, sizeof file,
-		 "rpms/%s-%s.%s.rpm", name, new_version, arch);
+		 "rpms/%s-%s.%s.rpm", name, v, arch);
 	if (download_if_missing(url, file) < 0)
 		fprintf(stderr, "failed to download %s\n", name);
 }
@@ -498,7 +506,7 @@ install_package(const char *name,
 		const char *arch,
 		void *data)
 {
-	const char *root = data;
+	const char *v, *root = data;
 	char file[PATH_MAX];
 	struct razor_rpm *rpm;
 
@@ -507,9 +515,15 @@ install_package(const char *name,
 		return;
 	}
 
-	printf("install %s %s\n", name, new_version);
-	snprintf(file, sizeof file,
-		 "rpms/%s-%s.%s.rpm", name, new_version, arch);
+	/* Skip epoch */
+	v = strchr(new_version, ':');
+	if (v != NULL)
+		v = v + 1;
+	else
+		v = new_version;
+
+	printf("install %s %s\n", name, v);
+	snprintf(file, sizeof file, "rpms/%s-%s.%s.rpm", name, v, arch);
 
  	rpm = razor_rpm_open(file);
 	if (rpm == NULL) {
