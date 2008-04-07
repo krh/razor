@@ -198,13 +198,13 @@ razor_set_destroy(struct razor_set *set)
 }
 
 int
-razor_set_write(struct razor_set *set, const char *filename)
+razor_set_write_to_fd(struct razor_set *set, int fd)
 {
 	char data[4096];
 	struct razor_set_header *header = (struct razor_set_header *) data;
 	struct array *a;
 	uint32_t offset;
-	int i, fd;
+	int i;
 
 	memset(data, 0, sizeof data);
 	header->magic = RAZOR_MAGIC;
@@ -225,10 +225,6 @@ razor_set_write(struct razor_set *set, const char *filename)
 	header->sections[i].offset = 0;
 	header->sections[i].size = 0;
 
-	fd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, 0666);
-	if (fd < 0)
-		return -1;
-
 	razor_write(fd, data, sizeof data);
 	memset(data, 0, sizeof data);
 	for (i = 0; i < ARRAY_SIZE(razor_sections); i++) {
@@ -239,9 +235,25 @@ razor_set_write(struct razor_set *set, const char *filename)
 		razor_write(fd, data, ALIGN(a->size, 4096) - a->size);
 	}
 
-	close(fd);
-
 	return 0;
+}
+
+int
+razor_set_write(struct razor_set *set, const char *filename)
+{
+	int fd, status;
+
+	fd = open(filename, O_CREAT | O_WRONLY | O_TRUNC, 0666);
+	if (fd < 0)
+		return -1;
+
+	status = razor_set_write_to_fd(set, fd);
+	if (status) {
+	    close(fd);
+	    return status;
+	}
+
+	return close(fd);
 }
 
 void

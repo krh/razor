@@ -26,6 +26,7 @@ extern const char * const razor_version_relations[];
 struct razor_set *razor_set_create(void);
 struct razor_set *razor_set_open(const char *filename);
 void razor_set_destroy(struct razor_set *set);
+int razor_set_write_to_fd(struct razor_set *set, int fd);
 int razor_set_write(struct razor_set *set, const char *filename);
 
 struct razor_package *

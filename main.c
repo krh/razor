@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <dirent.h>
 #include <curl/curl.h>
 #include <fnmatch.h>
@@ -530,33 +531,50 @@ command_install(int argc, const char *argv[])
 	struct razor_transaction *trans;
 	char path[PATH_MAX], new_path[PATH_MAX];
 	CURL *curl;
-	int errors;
+	int errors, fd;
+
+	/* Create the new next repo file up front to ensure exclusive
+	 * access. */
+	snprintf(new_path, sizeof new_path,
+		 "%s%s/%s", root, razor_root_path, next_repo_filename);
+	fd = open(new_path, O_CREAT | O_WRONLY | O_TRUNC | O_EXCL, 0666);
+	if (fd < 0) {
+		fprintf(stderr, "failed to get lock file, "
+			"maybe previous operation crashed?\n");
+
+		/* FIXME: Use fcntl advisory locking to figure out
+		 * whether previous operation crashed or is still in
+		 * progress. */
+
+		return -1;
+	}
 
 	upstream = razor_set_open(rawhide_repo_filename);
 	snprintf(path, sizeof path,
 		 "%s%s/%s", root, razor_root_path, system_repo_filename);
 	system = razor_set_open(path);
-	if (system == NULL || upstream == NULL)
+	if (system == NULL || upstream == NULL) {
+		unlink(new_path);
 		return 1;
+	}
 	trans = razor_transaction_create(system, upstream,
 					 argc, argv, 0, NULL);
 	errors = razor_transaction_describe(trans);
-	if (errors)
+	if (errors) {
+		unlink(new_path);
 		return 1;
+	}
 
 	next = razor_transaction_finish(trans);
 
-	/* FIXME: Need razor_set_write_to_fd() so we can open it excl
-	 * up front here or fail if it already exists. */
-	snprintf(new_path, sizeof new_path,
-		 "%s%s/%s", root, razor_root_path, next_repo_filename);
-
-	razor_set_write(next, new_path);
+	razor_set_write_to_fd(next, fd);
 	printf("wrote %s\n", new_path);
 
 	curl = curl_easy_init();
-	if (curl == NULL)
+	if (curl == NULL) {
+		unlink(new_path);
 		return 1;
+	}
 	razor_set_diff(system, next, download_package, curl);	
 	curl_easy_cleanup(curl);
 
