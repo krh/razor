@@ -28,7 +28,7 @@ command_list(int argc, const char *argv[])
 	const char *pattern, *name, *version, *arch;
 	int only_names = 0, i = 0;
 
-	if (strcmp(argv[i], "--only-names") == 0) {
+	if (i < argc && strcmp(argv[i], "--only-names") == 0) {
 		only_names = 1;
 		i++;
 	}
