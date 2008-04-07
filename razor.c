@@ -45,6 +45,7 @@ struct razor_package {
 	uint name  : 24;
 	uint flags : 8;
 	uint32_t version;
+	uint32_t arch;
 	struct list_head properties;
 	struct list_head files;
 };
@@ -268,7 +269,9 @@ razor_build_evr(char *evr_buf, int size, const char *epoch,
 
 void
 razor_importer_begin_package(struct razor_importer *importer,
-			     const char *name, const char *version)
+			     const char *name,
+			     const char *version,
+			     const char *arch)
 {
 	struct razor_package *p;
 
@@ -276,6 +279,7 @@ razor_importer_begin_package(struct razor_importer *importer,
 	p->name = hashtable_tokenize(&importer->table, name);
 	p->flags = 0;
 	p->version = hashtable_tokenize(&importer->table, version);
+	p->arch = hashtable_tokenize(&importer->table, arch);
 
 	importer->package = p;
 	array_init(&importer->properties);
@@ -816,7 +820,9 @@ razor_package_iterator_create_for_property(struct razor_set *set,
 int
 razor_package_iterator_next(struct razor_package_iterator *pi,
 			    struct razor_package **package,
-			    const char **name, const char **version)
+			    const char **name,
+			    const char **version,
+			    const char **arch)
 {
 	char *pool;
 	int valid;
@@ -838,6 +844,7 @@ razor_package_iterator_next(struct razor_package_iterator *pi,
 		*package = p;
 		*name = &pool[p->name];
 		*version = &pool[p->version];
+		*arch = &pool[p->arch];
 	} else {
 		*package = NULL;
 	}
@@ -856,10 +863,10 @@ razor_set_get_package(struct razor_set *set, const char *package)
 {
 	struct razor_package_iterator *pi;
 	struct razor_package *p;
-	const char *name, *version;
+	const char *name, *version, *arch;
 
 	pi = razor_package_iterator_create(set);
-	while (razor_package_iterator_next(pi, &p, &name, &version)) {
+	while (razor_package_iterator_next(pi, &p, &name, &version, &arch)) {
 		if (strcmp(package, name) == 0)
 			break;
 	}
@@ -1234,6 +1241,8 @@ add_package(struct razor_merger *merger,
 	p->flags = flags;
 	p->version = hashtable_tokenize(&merger->table,
 					&pool[package->version]);
+	p->arch = hashtable_tokenize(&merger->table,
+				     &pool[package->arch]);
 
 	p->properties = package->properties;
 	r = list_first(&package->properties, &source->set->property_pool);
@@ -1681,14 +1690,14 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 {
 	struct razor_package_iterator *pi1, *pi2;
 	struct razor_package *p1, *p2;
-	const char *name1, *name2, *version1, *version2;
+	const char *name1, *name2, *version1, *version2, *arch1, *arch2;
 	int res;
 
 	pi1 = razor_package_iterator_create(set);
 	pi2 = razor_package_iterator_create(upstream);
 
-	razor_package_iterator_next(pi1, &p1, &name1, &version1);
-	razor_package_iterator_next(pi2, &p2, &name2, &version2);
+	razor_package_iterator_next(pi1, &p1, &name1, &version1, &arch1);
+	razor_package_iterator_next(pi2, &p2, &name2, &version2, &arch2);
 
 	while (p1 || p2) {
 		if (p1 && p2) {
@@ -1700,16 +1709,16 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 		}
 
 		if (p2 == NULL || res < 0)
-			callback(name1, version1, NULL, data);
+			callback(name1, version1, NULL, arch1, data);
 		else if (p1 == NULL || res > 0)
-			callback(name2, NULL, version2, data);
+			callback(name2, NULL, version2, arch2, data);
 
 		if (p1 != NULL && res <= 0)
 			razor_package_iterator_next(pi1, &p1,
-						    &name1, &version1);
+						    &name1, &version1, &arch1);
 		if (p2 != NULL && res >= 0)
 			razor_package_iterator_next(pi2, &p2,
-						    &name2, &version2);
+						    &name2, &version2, &arch2);
 	}
 
 	razor_package_iterator_destroy(pi1);

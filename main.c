@@ -25,7 +25,7 @@ command_list(int argc, const char *argv[])
 	struct razor_set *set;
 	struct razor_package_iterator *pi;
 	struct razor_package *package;
-	const char *pattern, *name, *version;
+	const char *pattern, *name, *version, *arch;
 	int only_names = 0, i = 0;
 
 	if (strcmp(argv[i], "--only-names") == 0) {
@@ -36,14 +36,15 @@ command_list(int argc, const char *argv[])
 	pattern = argv[i];
 	set = razor_set_open(repo_filename);
 	pi = razor_package_iterator_create(set);
-	while (razor_package_iterator_next(pi, &package, &name, &version)) {
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch)) {
 		if (pattern && fnmatch(pattern, name, 0) != 0)
 			continue;
 
 		if (only_names)
 			printf("%s\n", name);
 		else
-			printf("%s-%s\n", name, version);
+			printf("%s-%s.%s\n", name, version, arch);
 	}
 	razor_package_iterator_destroy(pi);
 	razor_set_destroy(set);
@@ -132,14 +133,15 @@ command_list_file_packages(int argc, const char *argv[])
 	struct razor_set *set;
 	struct razor_package_iterator *pi;
 	struct razor_package *package;
-	const char *name, *version;
+	const char *name, *version, *arch;
 
 	set = razor_set_open(repo_filename);
 	if (set == NULL)
 		return 1;
 
 	pi = razor_package_iterator_create_for_file(set, argv[0]);
-	while (razor_package_iterator_next(pi, &package, &name, &version))
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch))
 		printf("%s-%s\n", name, version);
 	razor_package_iterator_destroy(pi);
 
@@ -168,11 +170,12 @@ list_packages_for_property(struct razor_set *set,
 {
 	struct razor_package_iterator *pi;
 	struct razor_package *package;
-	const char *name, *version;
+	const char *name, *version, *arch;
 
 	pi = razor_package_iterator_create_for_property(set, property);
-	while (razor_package_iterator_next(pi, &package, &name, &version))
-		printf("%s-%s\n", name, version);
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch))
+		printf("%s-%s.%s\n", name, version, arch);
 	razor_package_iterator_destroy(pi);
 }
 
@@ -385,7 +388,8 @@ command_remove(int argc, const char *argv[])
 
 static void
 print_diff(const char *name,
-	   const char *old_version, const char *new_version, void *data)
+	   const char *old_version, const char *new_version, const char *arch,
+	   void *data)
 {
 	if (old_version)
 		printf("removing %s %s\n", name, old_version);
@@ -499,14 +503,15 @@ list_packages(int count, struct razor_set *set)
 {
 	struct razor_package_iterator *pi;
 	struct razor_package *package;
-	const char *name, *version;
+	const char *name, *version, *arch;
 	char **packages;
 	int i;
 
 	packages = malloc(count * sizeof *packages);
 	pi = razor_package_iterator_create(set);
 	i = 0;
-	while (razor_package_iterator_next(pi, &package, &name, &version))
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch))
 		packages[i++] = strdup(name);
 	razor_package_iterator_destroy(pi);
 
@@ -629,7 +634,7 @@ command_download(int argc, const char *argv[])
 	struct razor_set *set;
 	struct razor_package_iterator *pi;
 	struct razor_package *package;
-	const char *pattern = argv[0], *name, *version;
+	const char *pattern = argv[0], *name, *version, *arch;
 	char url[256], file[256];
 	CURL *curl;
 
@@ -639,7 +644,8 @@ command_download(int argc, const char *argv[])
 
 	set = razor_set_open(rawhide_repo_filename);
 	pi = razor_package_iterator_create(set);
-	while (razor_package_iterator_next(pi, &package, &name, &version)) {
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch)) {
 		if (pattern && fnmatch(pattern, name, 0) != 0)
 			continue;
 

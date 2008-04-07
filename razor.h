@@ -43,7 +43,9 @@ razor_package_iterator_create_for_file(struct razor_set *set,
 
 int razor_package_iterator_next(struct razor_package_iterator *pi,
 				struct razor_package **package,
-				const char **name, const char **version);
+				const char **name,
+				const char **version,
+				const char **arch);
 void razor_package_iterator_destroy(struct razor_package_iterator *pi);
 
 struct razor_property_iterator;
@@ -67,6 +69,7 @@ void razor_set_list_unsatisfied(struct razor_set *set);
 typedef void (*razor_package_callback_t)(const char *name,
 					 const char *old_version,
 					 const char *new_version,
+					 const char *arch,
 					 void *data);
 void
 razor_set_diff(struct razor_set *set, struct razor_set *upstream,
@@ -130,7 +133,9 @@ struct razor_rpm;
 struct razor_importer *razor_importer_new(void);
 void razor_importer_destroy(struct razor_importer *importer);
 void razor_importer_begin_package(struct razor_importer *importer,
-				  const char *name, const char *version);
+				  const char *name,
+				  const char *version,
+				  const char *arch);
 void razor_importer_add_property(struct razor_importer *importer,
 				 const char *name,
 				 enum razor_version_relation relation,

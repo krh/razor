@@ -168,13 +168,17 @@ start_package(struct test_context *ctx, const char **atts)
 {
 	const char *name = NULL, *version = NULL, *arch = NULL;
 
-	get_atts(atts, "name", &name, "version", &version, "arch", &arch, NULL);
+	get_atts(atts, "name", &name,
+		 "version", &version,
+		 "arch", &arch,
+		 NULL);
+
 	if (!name) {
 		fprintf(stderr, "  package with no name\n");
 		exit(1);
 	}
 
-	razor_importer_begin_package(ctx->importer, name, version);
+	razor_importer_begin_package(ctx->importer, name, version, arch);
 	razor_importer_add_property(ctx->importer, name,
 				    RAZOR_VERSION_EQUAL, version,
 				    RAZOR_PROPERTY_PROVIDES);
@@ -307,7 +311,9 @@ start_result(struct test_context *ctx, const char **atts)
 
 static void
 diff_callback(const char *name,
-	      const char *old_version, const char *new_version,
+	      const char *old_version,
+	      const char *new_version,
+	      const char *arch,
 	      void *data)
 {
 	struct test_context *ctx = data;

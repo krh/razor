@@ -542,7 +542,7 @@ razor_rpm_close(struct razor_rpm *rpm)
 int
 razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 {
-	const char *name, *version, *release;
+	const char *name, *version, *release, *arch;
 	const uint_32 *epoch;
 	char evr[128], buf[16];
 
@@ -550,6 +550,7 @@ razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 	epoch = razor_rpm_get_indirect(rpm, RPMTAG_EPOCH, NULL);
 	version = razor_rpm_get_indirect(rpm, RPMTAG_VERSION, NULL);
 	release = razor_rpm_get_indirect(rpm, RPMTAG_RELEASE, NULL);
+	arch = razor_rpm_get_indirect(rpm, RPMTAG_ARCH, NULL);
 
 	if (epoch) {
 		snprintf(buf, sizeof buf, "%u", ntohl(*epoch));
@@ -557,7 +558,7 @@ razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 	} else {
 		razor_build_evr(evr, sizeof evr, NULL, version, release);
 	}
-	razor_importer_begin_package(importer, name, evr);
+	razor_importer_begin_package(importer, name, evr, arch);
 
 	import_properties(importer, RAZOR_PROPERTY_REQUIRES, rpm,
 			  RPMTAG_REQUIRENAME,
@@ -621,7 +622,7 @@ razor_set_create_from_rpmdb(void)
 	rpmdbMatchIterator iter;
 	Header h;
 	int_32 type, count, i;
-	union rpm_entry name, epoch, version, release;
+	union rpm_entry name, epoch, version, release, arch;
 	union rpm_entry basenames, dirnames, dirindexes;
 	char filename[PATH_MAX], evr[128], buf[16];
 	rpmdb db;
@@ -641,6 +642,7 @@ razor_set_create_from_rpmdb(void)
 		headerGetEntry(h, RPMTAG_EPOCH, &type, &epoch.p, &count);
 		headerGetEntry(h, RPMTAG_VERSION, &type, &version.p, &count);
 		headerGetEntry(h, RPMTAG_RELEASE, &type, &release.p, &count);
+		headerGetEntry(h, RPMTAG_ARCH, &type, &arch.p, &count);
 
 		if (epoch.flags != NULL) {
 			snprintf(buf, sizeof buf, "%u", *epoch.flags);
@@ -651,7 +653,8 @@ razor_set_create_from_rpmdb(void)
 					NULL, version.string, release.string);
 		}
 
-		razor_importer_begin_package(importer, name.string, evr);
+		razor_importer_begin_package(importer,
+					     name.string, evr, arch.string);
 
 		add_properties(importer, RAZOR_PROPERTY_REQUIRES, h,
 			       RPMTAG_REQUIRENAME,
