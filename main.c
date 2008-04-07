@@ -245,12 +245,17 @@ show_progress(void *clientp,
 }
 
 static int
-download_if_missing(CURL *curl, const char *url, const char *file)
+download_if_missing(const char *url, const char *file)
 {
+	CURL *curl;
 	struct stat buf;
 	char error[256];
 	FILE *fp;
 	CURLcode res;
+
+	curl = curl_easy_init();
+	if (curl == NULL)
+		return 1;
 
 	curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, error);
 	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0);
@@ -271,6 +276,8 @@ download_if_missing(CURL *curl, const char *url, const char *file)
 		fprintf(stderr, "\n");
 	}
 
+	curl_easy_cleanup(curl);
+
 	return 0;
 }
 
@@ -281,21 +288,13 @@ static int
 command_import_yum(int argc, const char *argv[])
 {
 	struct razor_set *set;
-	CURL *curl;
 
-	curl = curl_easy_init();
-	if (curl == NULL)
-		return 1;
-
-	if (download_if_missing(curl,
-				REPO_URL "/repodata/primary.xml.gz",
+	if (download_if_missing(REPO_URL "/repodata/primary.xml.gz",
 				"primary.xml.gz") < 0)
 		return -1;
-	if (download_if_missing(curl,
-				REPO_URL "/repodata/filelists.xml.gz",
+	if (download_if_missing(REPO_URL "/repodata/filelists.xml.gz",
 				"filelists.xml.gz") < 0)
 		return -1;
-	curl_easy_cleanup(curl);
 
 	set = razor_set_create_from_yum();
 	if (set == NULL)
@@ -473,49 +472,57 @@ command_import_rpms(int argc, const char *argv[])
 	return 0;
 }
 
-static struct razor_set *
-create_set_from_rpms(int argc, const char *argv[])
+static void
+download_package(const char *name,
+		 const char *old_version,
+		 const char *new_version,
+		 const char *arch,
+		 void *data)
 {
-	struct razor_importer *importer;
-	struct razor_rpm *rpm;
-	int i;
+	char file[PATH_MAX], url[256];
 
-	importer = razor_importer_new();
-	for (i = 0; i < argc; i++) {
-		rpm = razor_rpm_open(argv[i]);
-		if (rpm == NULL) {
-			fprintf(stderr,
-				"failed to open rpm \"%s\"\n", argv[i]);
-			continue;
-		}
-		if (razor_importer_add_rpm(importer, rpm)) {
-			fprintf(stderr, "couldn't import %s\n", argv[i]);
-			break;
-		}
-		razor_rpm_close(rpm);
-	}
+	if (old_version)
+		return;
 
-	return razor_importer_finish(importer);
+	snprintf(url, sizeof url,
+		 REPO_URL "/Packages/%s-%s.%s.rpm", name, new_version, arch);
+	snprintf(file, sizeof file,
+		 "rpms/%s-%s.%s.rpm", name, new_version, arch);
+	if (download_if_missing(url, file) < 0)
+		fprintf(stderr, "failed to download %s\n", name);
 }
 
-static char **
-list_packages(int count, struct razor_set *set)
+static void
+install_package(const char *name,
+		const char *old_version,
+		const char *new_version,
+		const char *arch,
+		void *data)
 {
-	struct razor_package_iterator *pi;
-	struct razor_package *package;
-	const char *name, *version, *arch;
-	char **packages;
-	int i;
+	const char *root = data;
+	char file[PATH_MAX];
+	struct razor_rpm *rpm;
 
-	packages = malloc(count * sizeof *packages);
-	pi = razor_package_iterator_create(set);
-	i = 0;
-	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch))
-		packages[i++] = strdup(name);
-	razor_package_iterator_destroy(pi);
+	if (old_version) {
+		printf("removing %s %s not handled\n", name, old_version);
+		return;
+	}
 
-	return packages;
+	printf("install %s %s\n", name, new_version);
+	snprintf(file, sizeof file,
+		 "rpms/%s-%s.%s.rpm", name, new_version, arch);
+
+ 	rpm = razor_rpm_open(file);
+	if (rpm == NULL) {
+		fprintf(stderr, "failed to open rpm %s\n", file);
+		return;
+	}
+	if (razor_rpm_install(rpm, root) < 0) {
+		fprintf(stderr,
+			"failed to install rpm %s\n", file);
+		return;
+	}
+	razor_rpm_close(rpm);
 }
 
 static int
@@ -523,25 +530,18 @@ command_install(int argc, const char *argv[])
 {
 	struct razor_set *system, *upstream, *next;
 	struct razor_transaction *trans;
-	struct razor_rpm *rpm;
-	const char *filename;
-	char path[PATH_MAX], new_path[PATH_MAX], **packages;
-	int errors, i;
+	char path[PATH_MAX], new_path[PATH_MAX];
+	CURL *curl;
+	int errors;
 
-	upstream = create_set_from_rpms(argc, argv);
+	upstream = razor_set_open(rawhide_repo_filename);
 	snprintf(path, sizeof path,
 		 "%s%s/%s", root, razor_root_path, system_repo_filename);
 	system = razor_set_open(path);
-	if (system == NULL) {
-		fprintf(stderr, "couldn't open system package database\n");
-		return -1;
-	}
-
-	packages = list_packages(argc, upstream);
+	if (system == NULL || upstream == NULL)
+		return 1;
 	trans = razor_transaction_create(system, upstream,
-					 argc, (const char **)packages,
-					 0, NULL);
-	free(packages);
+					 argc, argv, 0, NULL);
 	errors = razor_transaction_describe(trans);
 	if (errors)
 		return 1;
@@ -558,28 +558,21 @@ command_install(int argc, const char *argv[])
 	 * up front here or fail if it already exists. */
 	snprintf(new_path, sizeof new_path,
 		 "%s%s/%s", root, razor_root_path, next_repo_filename);
-	razor_set_write(next, path);
+
+	razor_set_write(next, new_path);
+	printf("wrote %s\n", new_path);
+
+	curl = curl_easy_init();
+	if (curl == NULL)
+		return 1;
+	razor_set_diff(system, next, download_package, curl);	
+	curl_easy_cleanup(curl);
+
+	razor_set_diff(system, next, install_package, (void *) root);
 
 	razor_set_destroy(next);
 	razor_set_destroy(system);
 	razor_set_destroy(upstream);
-
-	printf("wrote %s\n", new_path);
-
-	for (i = 0; i < argc; i++) {
-		filename = argv[i];
-		rpm = razor_rpm_open(argv[i]);
-		if (rpm == NULL) {
-			fprintf(stderr, "failed to open rpm %s\n", filename);
-			return -1;
-		}
-		if (razor_rpm_install(rpm, root) < 0) {
-			fprintf(stderr,
-				"failed to install rpm %s\n", filename);
-			return -1;
-		}
-		razor_rpm_close(rpm);
-	}	
 
 	/* Make it so. */
 	rename(new_path, path);
@@ -636,11 +629,6 @@ command_download(int argc, const char *argv[])
 	struct razor_package *package;
 	const char *pattern = argv[0], *name, *version, *arch;
 	char url[256], file[256];
-	CURL *curl;
-
-	curl = curl_easy_init();
-	if (curl == NULL)
-		return 1;
 
 	set = razor_set_open(rawhide_repo_filename);
 	pi = razor_package_iterator_create(set);
@@ -653,12 +641,11 @@ command_download(int argc, const char *argv[])
 			 REPO_URL "/Packages/%s-%s.i386.rpm", name, version);
 		snprintf(file, sizeof file,
 			 "rpms/%s-%s.i386.rpm", name, version);
-		if (download_if_missing(curl, url, file) < 0)
+		if (download_if_missing(url, file) < 0)
 			fprintf(stderr, "failed to download %s\n", name);
 	}
 	razor_package_iterator_destroy(pi);
 	razor_set_destroy(set);
-	curl_easy_cleanup(curl);
 
 	return 0;
 }

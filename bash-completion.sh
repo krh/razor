@@ -39,7 +39,7 @@ __razor() {
 	    list-files|list-file-packages) __razor_files $cur ;;
 	    what-requires) __razor_requires $cur ;;
 	    what-provides) __razor_provides $cur ;;
-	    download) __razor_upstream_packages $cur ;;
+	    install|download) __razor_upstream_packages $cur ;;
 	esac
     fi
 }
