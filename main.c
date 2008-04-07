@@ -648,6 +648,7 @@ command_download(int argc, const char *argv[])
 	struct razor_package *package;
 	const char *pattern = argv[0], *name, *version, *arch;
 	char url[256], file[256];
+	int matches = 0;
 
 	set = razor_set_open(rawhide_repo_filename);
 	pi = razor_package_iterator_create(set);
@@ -656,15 +657,24 @@ command_download(int argc, const char *argv[])
 		if (pattern && fnmatch(pattern, name, 0) != 0)
 			continue;
 
+		matches++;
 		snprintf(url, sizeof url,
-			 REPO_URL "/Packages/%s-%s.i386.rpm", name, version);
+			 REPO_URL "/Packages/%s-%s.%s.rpm",
+			 name, version, arch);
 		snprintf(file, sizeof file,
-			 "rpms/%s-%s.i386.rpm", name, version);
+			 "rpms/%s-%s.%s.rpm", name, version, arch);
 		if (download_if_missing(url, file) < 0)
 			fprintf(stderr, "failed to download %s\n", name);
 	}
 	razor_package_iterator_destroy(pi);
 	razor_set_destroy(set);
+
+	if (matches == 0)
+		fprintf(stderr, "no packages matched \"%s\"\n", pattern);
+	else if (matches == 1)
+		fprintf(stderr, "downloaded 1 package\n");
+	else
+		fprintf(stderr, "downloaded %d package\n", matches);
 
 	return 0;
 }
