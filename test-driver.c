@@ -269,8 +269,7 @@ end_transaction(struct test_context *ctx)
 
 	if (!errors) {
 		struct razor_set *new;
-		new = razor_transaction_run(ctx->trans);
-		razor_set_destroy(ctx->system_set);
+		new = razor_transaction_finish(ctx->trans);
 		ctx->system_set = new;
 	}
 }

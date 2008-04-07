@@ -2841,11 +2841,12 @@ razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 }
 
 struct razor_set *
-razor_transaction_run(struct razor_transaction *trans)
+razor_transaction_finish(struct razor_transaction *trans)
 {
 	struct array install_packages, remove_packages;
 	struct razor_merger *merger;
 	struct razor_package *pkg, *i, *iend, *r, *rend, *s, *send;
+	struct razor_set *set;
 	struct source *source1, *source2;
 	char *spool, *ipool, *rpool;
 	uint32_t *map;
@@ -2931,7 +2932,10 @@ razor_transaction_run(struct razor_transaction *trans)
 	array_release(&install_packages);
 	array_release(&remove_packages);
 
-	return razor_merger_finish(merger);
+	set = razor_merger_finish(merger);
+	razor_transaction_destroy(trans);
+
+	return set;
 }
 
 void

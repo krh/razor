@@ -351,8 +351,7 @@ command_update(int argc, const char *argv[])
 	if (errors)
 		return 1;
 
-	set = razor_transaction_run(trans);
-	razor_transaction_destroy(trans);
+	set = razor_transaction_finish(trans);
 	razor_set_write(set, updated_repo_filename);
 	razor_set_destroy(set);
 	razor_set_destroy(upstream);
@@ -376,8 +375,7 @@ command_remove(int argc, const char *argv[])
 	if (errors)
 		return 1;
 
-	set = razor_transaction_run(trans);
-	razor_transaction_destroy(trans);
+	set = razor_transaction_finish(trans);
 	razor_set_write(set, updated_repo_filename);
 	razor_set_destroy(set);
 	printf("wrote system-updated.repo\n");
@@ -546,13 +544,7 @@ command_install(int argc, const char *argv[])
 	if (errors)
 		return 1;
 
-	/* FIXME: Use _finish() convention here?  That is, a function
-	 * that starts the computation and returns the result while
-	 * destroying the transaction.  Nice for transient objects
-	 * such as the merger and the importer.  Should we do that for
-	 * transactions too, that is, razor_transaction_finish()? */
-	next = razor_transaction_run(trans);
-	razor_transaction_destroy(trans);
+	next = razor_transaction_finish(trans);
 
 	/* FIXME: Need razor_set_write_to_fd() so we can open it excl
 	 * up front here or fail if it already exists. */

@@ -115,7 +115,7 @@ razor_transaction_create(struct razor_set *system, struct razor_set *upstream,
 			 int update_count, const char **update_packages,
 			 int remove_count, const char **remove_packages);
 int razor_transaction_describe(struct razor_transaction *trans);
-struct razor_set *razor_transaction_run(struct razor_transaction *trans);
+struct razor_set *razor_transaction_finish(struct razor_transaction *trans);
 void razor_transaction_destroy(struct razor_transaction *trans);
 
 /* Temporary helper for test suite. */
