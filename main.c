@@ -692,7 +692,7 @@ command_download(int argc, const char *argv[])
 	else if (matches == 1)
 		fprintf(stderr, "downloaded 1 package\n");
 	else
-		fprintf(stderr, "downloaded %d package\n", matches);
+		fprintf(stderr, "downloaded %d packages\n", matches);
 
 	return 0;
 }
