@@ -253,6 +253,7 @@ download_if_missing(const char *url, const char *file)
 	char error[256];
 	FILE *fp;
 	CURLcode res;
+	long response;
 
 	curl = curl_easy_init();
 	if (curl == NULL)
@@ -273,6 +274,18 @@ download_if_missing(const char *url, const char *file)
 			fprintf(stderr, "curl error: %s\n", error);
 			unlink(file);
 			return -1;
+		}
+		res = curl_easy_getinfo(curl,
+					CURLINFO_RESPONSE_CODE, &response);
+		if (res != CURLE_OK) {
+			fprintf(stderr, "curl error: %s\n", error);
+                        unlink(file);
+                        return -1;
+		}
+		if (response != 200) {
+			fprintf(stderr, " - failed %ld\n", response);
+                        unlink(file);
+                        return -1;
 		}
 		fprintf(stderr, "\n");
 	}
@@ -480,6 +493,7 @@ download_package(const char *name,
 {
 	char file[PATH_MAX], url[256];
 	const char *v;
+	int *errors = data;
 
 	if (old_version)
 		return;
@@ -496,7 +510,7 @@ download_package(const char *name,
 	snprintf(file, sizeof file,
 		 "rpms/%s-%s.%s.rpm", name, v, arch);
 	if (download_if_missing(url, file) < 0)
-		fprintf(stderr, "failed to download %s\n", name);
+		(*errors)++;
 }
 
 static void
@@ -583,7 +597,12 @@ command_install(int argc, const char *argv[])
 	razor_set_write_to_fd(next, fd);
 	printf("wrote %s\n", new_path);
 
-	razor_set_diff(system, next, download_package, NULL);	
+	razor_set_diff(system, next, download_package, &errors);
+	if (errors > 0) {
+		fprintf(stderr, "failed to download %d packages\n", errors);
+		unlink(new_path);
+                return 1;
+        }
 
 	/* FIXME: We need to figure out the right install order here,
 	 * so the post and pre scripts can run. */
@@ -663,8 +682,7 @@ command_download(int argc, const char *argv[])
 			 name, version, arch);
 		snprintf(file, sizeof file,
 			 "rpms/%s-%s.%s.rpm", name, version, arch);
-		if (download_if_missing(url, file) < 0)
-			fprintf(stderr, "failed to download %s\n", name);
+		download_if_missing(url, file);
 	}
 	razor_package_iterator_destroy(pi);
 	razor_set_destroy(set);
