@@ -495,7 +495,7 @@ razor_rpm_install(struct razor_rpm *rpm, const char *root)
 	mode = razor_rpm_get_indirect(rpm, RPMTAG_FILEMODES, &count);
 	flags = razor_rpm_get_indirect(rpm, RPMTAG_FILEFLAGS, &count);
 
-	for (i = 0; i < count; i++) {
+	for (i = 0; name && i < count; i++) {
 		dir = rpm->dirs[ntohl(*index)];
 
 		/* Skip past the cpio header block unless it's a ghost file,
