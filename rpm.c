@@ -353,9 +353,7 @@ run_script(struct installer *installer,
 	program = razor_rpm_get_indirect(installer->rpm, program_tag, NULL);
 	script = razor_rpm_get_indirect(installer->rpm, script_tag, NULL);
 	if (program == NULL && script == NULL) {
-		printf("no script or program for tags %d and %d\n",
-		       program_tag, script_tag);
-		return -1;
+		return;
 	} else if (program == NULL) {
 		program = "/bin/sh";
 	}
@@ -400,7 +398,8 @@ run_script(struct installer *installer,
 			fprintf(stderr, "wait for child failed, %m");
 			return -1;
 		}
-		printf("script exited with status %d\n", status);
+		if (status)
+			printf("script exited with status %d\n", status);
 	}
 
 	return 0;

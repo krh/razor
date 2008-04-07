@@ -14,7 +14,7 @@ test : test-driver
 	./test-driver test.xml
 
 reset : ./razor
-	rm -rf install
+	sudo rm -rf install
 	./razor init
 
 clean :
