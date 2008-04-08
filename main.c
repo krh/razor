@@ -356,17 +356,71 @@ command_validate(int argc, const char *argv[])
 }
 
 static int
+mark_packages_for_update(struct razor_transaction *trans,
+			 struct razor_set *set, const char *pattern)
+{
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *name, *version, *arch;
+	int matches = 0;
+
+	pi = razor_package_iterator_create(set);
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch)) {
+		if (pattern && fnmatch(pattern, name, 0) == 0) {
+			razor_transaction_install_package(trans, package);
+			matches++;
+		}
+	}
+	razor_package_iterator_destroy(pi);
+
+	return matches;
+}
+
+static int
+mark_packages_for_removal(struct razor_transaction *trans,
+			  struct razor_set *set, const char *pattern)
+{
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *name, *version, *arch;
+	int matches = 0;
+
+	pi = razor_package_iterator_create(set);
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch)) {
+		if (pattern && fnmatch(pattern, name, 0) == 0) {
+			razor_transaction_remove_package(trans, package);
+			matches++;
+		}
+	}
+	razor_package_iterator_destroy(pi);
+
+	return matches;
+}
+
+static int
 command_update(int argc, const char *argv[])
 {
 	struct razor_set *set, *upstream;
 	struct razor_transaction *trans;
-	int errors;
+	int i, errors;
 
 	set = razor_set_open(repo_filename);
 	upstream = razor_set_open(rawhide_repo_filename);
 	if (set == NULL || upstream == NULL)
 		return 1;
-	trans = razor_transaction_create(set, upstream, argc, argv, 0, NULL);
+
+	trans = razor_transaction_create(set, upstream);
+	if (argc == 0)
+		razor_transaction_update_all(trans);
+	for (i = 0; i < argc; i++) {
+		if (mark_packages_for_update(trans, upstream, argv[i]) == 0) {
+			fprintf(stderr, "no match for %s\n", argv[i]);
+			return 1;
+		}
+	}
+		
 	errors = razor_transaction_describe(trans);
 	if (errors)
 		return 1;
@@ -385,12 +439,20 @@ command_remove(int argc, const char *argv[])
 {
 	struct razor_set *set;
 	struct razor_transaction *trans;
-	int errors;
+	int i, errors;
 
 	set = razor_set_open(repo_filename);
 	if (set == NULL)
 		return 1;
-	trans = razor_transaction_create(set, NULL, 0, NULL, argc, argv);
+
+	trans = razor_transaction_create(set, NULL);
+	for (i = 0; i < argc; i++) {
+		if (mark_packages_for_removal(trans, set, argv[i]) == 0) {
+			fprintf(stderr, "no match for %s\n", argv[i]);
+			return 1;
+		}
+	}
+
 	errors = razor_transaction_describe(trans);
 	if (errors)
 		return 1;
@@ -564,7 +626,7 @@ command_install(int argc, const char *argv[])
 	struct razor_set *system, *upstream, *next;
 	struct razor_transaction *trans;
 	char path[PATH_MAX], new_path[PATH_MAX];
-	int errors, fd;
+	int i, errors, fd;
 
 	/* Create the new next repo file up front to ensure exclusive
 	 * access. */
@@ -590,8 +652,15 @@ command_install(int argc, const char *argv[])
 		unlink(new_path);
 		return 1;
 	}
-	trans = razor_transaction_create(system, upstream,
-					 argc, argv, 0, NULL);
+	trans = razor_transaction_create(system, upstream);
+	for (i = 0; i < argc; i++) {
+		if (mark_packages_for_update(trans, upstream, argv[i]) == 0) {
+			fprintf(stderr, "no package matched %s\n", argv[i]);
+			unlink(new_path);
+			return 1;
+		}
+	}
+
 	errors = razor_transaction_describe(trans);
 	if (errors) {
 		unlink(new_path);

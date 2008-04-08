@@ -252,13 +252,21 @@ start_transaction(struct test_context *ctx, const char **atts)
 static void
 end_transaction(struct test_context *ctx)
 {
-	int errors;
+	struct razor_package *pkg;
+	int errors, i;
 
-	ctx->trans = razor_transaction_create(ctx->system_set, ctx->repo_set,
-					      ctx->n_install_pkgs,
-					      (const char **)ctx->install_pkgs,
-					      ctx->n_remove_pkgs,
-					      (const char **)ctx->remove_pkgs);
+	ctx->trans = razor_transaction_create(ctx->system_set, ctx->repo_set);
+	for (i = 0; i < ctx->n_install_pkgs; i++) {
+		pkg = razor_set_get_package(ctx->repo_set,
+					    ctx->install_pkgs[i]);
+		razor_transaction_install_package(ctx->trans, pkg);
+	}		
+	for (i = 0; i < ctx->n_remove_pkgs; i++) {
+		pkg = razor_set_get_package(ctx->repo_set,
+					    ctx->remove_pkgs[i]);
+		razor_transaction_remove_package(ctx->trans, pkg);
+	}		
+
 	errors = razor_transaction_describe(ctx->trans);
 	printf("\n");
 

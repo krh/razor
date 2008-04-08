@@ -1949,39 +1949,6 @@ resolve_new_packages(struct razor_transaction *trans,
 	}
 }
 
-static void
-find_all_packages(struct razor_transaction *trans)
-{
-	struct razor_transaction_package *tp;
-	struct razor_package *sp, *spkgs, *send, *up, *upkgs, *uend;
-	const char *spool, *upool;
-
-	spkgs = trans->system->packages.data;
-	send = trans->system->packages.data + trans->system->packages.size;
-	spool = trans->system->string_pool.data;
-	up = upkgs = trans->upstream->packages.data;
-	uend = trans->upstream->packages.data + trans->upstream->packages.size;
-	upool = trans->upstream->string_pool.data;
-
-	for (sp = spkgs; sp < send; sp++) {
-		while (up < uend && strcmp(&spool[sp->name], &upool[up->name]) > 0)
-			up++;
-		if (strcmp(&spool[sp->name], &upool[up->name]) == 0 &&
-		    versioncmp(&spool[sp->version], &upool[up->version]) < 0) {
-			tp = array_add(&trans->packages, sizeof *tp);
-			memset(tp, 0, sizeof *tp);
-			tp->old_package = sp;
-			tp->new_package = up;
-			tp->name = &upool[up->name];
-			tp->old_version = &spool[sp->version];
-			tp->new_version = &upool[up->version];
-			tp->state = RAZOR_PACKAGE_INSTALL;
-			bitarray_set(&trans->uppkgs, up - upkgs, 1);
-			bitarray_set(&trans->syspkgs, sp - spkgs, 0);
-		}
-	}
-}
-
 static int
 provider_satisfies_requirement(struct razor_property *provider,
 			       const char *provider_strings,
@@ -2601,39 +2568,74 @@ razor_transaction_satisfy(struct razor_transaction *trans)
 	}
 }
 
+void
+razor_transaction_install_package(struct razor_transaction *transaction,
+				  struct razor_package *package)
+{
+	add_transaction_package(transaction, package, NULL,
+				RAZOR_PACKAGE_INSTALL, NULL, NULL);
+}
+
+void
+razor_transaction_remove_package(struct razor_transaction *transaction,
+				 struct razor_package *package)
+{
+	add_transaction_package(transaction, NULL, package,
+				RAZOR_PACKAGE_REMOVE, NULL, NULL);
+}
+
+void
+razor_transaction_update_all(struct razor_transaction *trans)
+{
+	struct razor_package *sp, *spkgs, *send, *up, *upkgs, *uend;
+	const char *spool, *upool;
+
+	spkgs = trans->system->packages.data;
+	send = trans->system->packages.data + trans->system->packages.size;
+	spool = trans->system->string_pool.data;
+	up = upkgs = trans->upstream->packages.data;
+	uend = trans->upstream->packages.data + trans->upstream->packages.size;
+	upool = trans->upstream->string_pool.data;
+
+	for (sp = spkgs; sp < send; sp++) {
+		while (up < uend && strcmp(&spool[sp->name], &upool[up->name]) > 0)
+			up++;
+		if (strcmp(&spool[sp->name], &upool[up->name]) == 0 &&
+		    versioncmp(&spool[sp->version], &upool[up->version]) < 0) {
+			add_transaction_package(trans, up, sp,
+						RAZOR_PACKAGE_INSTALL,
+						NULL, NULL);
+		}
+	}
+}
+
 struct razor_transaction *
-razor_transaction_create(struct razor_set *system, struct razor_set *upstream,
-			 int update_count, const char **update_packages,
-			 int remove_count, const char **remove_packages)
+razor_transaction_create(struct razor_set *system, struct razor_set *upstream)
 {
 	struct razor_transaction *trans;
-	struct razor_transaction_package *tp;
-	int start, end, i;
+	int count;
 
 	trans = zalloc(sizeof *trans);
 
 	trans->system = system;
 	trans->upstream = upstream ? upstream : razor_set_create();
 	array_init(&trans->packages);
-	bitarray_init(&trans->syspkgs, trans->system->packages.size / sizeof (struct razor_package), 1);
-	bitarray_init(&trans->uppkgs, trans->upstream->packages.size / sizeof (struct razor_package), 0);
-	trans->errors = 0;
+	count = trans->system->packages.size / sizeof (struct razor_package);
+	bitarray_init(&trans->syspkgs, count, 1);
+	count = trans->upstream->packages.size / sizeof (struct razor_package);
+	bitarray_init(&trans->uppkgs, count, 0);
 
-	if (update_count > 0 || remove_count > 0) {
-		for (i = 0; i < update_count; i++) {
-			tp = array_add(&trans->packages, sizeof *tp);
-			memset(tp, 0, sizeof *tp);
-			tp->name = update_packages[i];
-			tp->state = RAZOR_PACKAGE_INSTALL;
-		}
-		for (i = 0; i < remove_count; i++) {
-			tp = array_add(&trans->packages, sizeof *tp);
-			memset(tp, 0, sizeof *tp);
-			tp->name = remove_packages[i];
-			tp->state = RAZOR_PACKAGE_REMOVE;
-		}
-	} else
-		find_all_packages(trans);
+	return trans;
+}
+
+static void
+resolve_transaction(struct razor_transaction *trans)
+{
+	int start, end;
+
+	if (trans->package_count > 0)
+		/* Already did this, return. */
+		return;
 
 	start = 0;
 	end = trans->packages.size / sizeof (struct razor_transaction_package);
@@ -2650,8 +2652,6 @@ razor_transaction_create(struct razor_set *system, struct razor_set *upstream,
 	}
 
 	trans->package_count = end;
-
-	return trans;
 }
 
 const char * const razor_version_relations[] = {
@@ -2698,6 +2698,8 @@ razor_transaction_describe(struct razor_transaction *trans)
 {
 	struct razor_transaction_package *p, *pend, *tps;
 	int errors_only = 0;
+
+	resolve_transaction(trans);
 
 	tps = trans->packages.data;
 	pend = trans->packages.data + trans->packages.size;
@@ -2837,6 +2839,8 @@ razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 {
 	struct razor_transaction_package *p, *end;
 
+	resolve_transaction(trans);
+
 	end = trans->packages.data + trans->packages.size;
 	for (p = trans->packages.data; p < end; p++) {
 		if (p->state != RAZOR_PACKAGE_UNSATISFIABLE)
@@ -2864,6 +2868,8 @@ razor_transaction_finish(struct razor_transaction *trans)
 	uint32_t *map;
 	struct razor_transaction_package *p, *end;
 	int cmp;
+
+	resolve_transaction(trans);
 
 	/* FIXME */
 	if (trans->errors)
