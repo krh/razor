@@ -267,6 +267,11 @@ download_if_missing(const char *url, const char *file)
 
 	if (stat(file, &buf) < 0) {
 		fp = fopen(file, "w");
+		if (fp == NULL) {
+			fprintf(stderr,
+				"failed to open %s for writing\n", file);
+			return -1;
+		}
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
 		curl_easy_setopt(curl, CURLOPT_URL, url);
 		res = curl_easy_perform(curl);
