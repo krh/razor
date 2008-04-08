@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <curl/curl.h>
 #include <fnmatch.h>
+#include <errno.h>
 #include "razor.h"
 #include "razor-internal.h"
 
@@ -597,6 +598,11 @@ command_install(int argc, const char *argv[])
 	razor_set_write_to_fd(next, fd);
 	printf("wrote %s\n", new_path);
 
+	if (mkdir("rpms", 0777) && errno != EEXIST) {
+		fprintf(stderr, "failed to create rpms directory.\n");
+		return 1;
+	}
+
 	razor_set_diff(system, next, download_package, &errors);
 	if (errors > 0) {
 		fprintf(stderr, "failed to download %d packages\n", errors);
@@ -668,6 +674,11 @@ command_download(int argc, const char *argv[])
 	const char *pattern = argv[0], *name, *version, *arch;
 	char url[256], file[256];
 	int matches = 0;
+
+	if (mkdir("rpms", 0777) && errno != EEXIST) {
+		fprintf(stderr, "failed to create rpms directory.\n");
+		return 1;
+	}
 
 	set = razor_set_open(rawhide_repo_filename);
 	pi = razor_package_iterator_create(set);
