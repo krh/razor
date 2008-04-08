@@ -2300,6 +2300,8 @@ add_transaction_package(struct razor_transaction *trans,
 				   already->state == RAZOR_PACKAGE_FORCED_UPDATE) {
 				already->new_package = new_package;
 				return;
+			} else if (new_package_set == trans->upstream) {
+				return;
 			}
 
 			/* Oops. We lose */
