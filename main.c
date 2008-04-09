@@ -421,7 +421,7 @@ command_update(int argc, const char *argv[])
 		}
 	}
 		
-	errors = razor_transaction_describe(trans);
+	errors = razor_transaction_resolve(trans);
 	if (errors)
 		return 1;
 
@@ -453,7 +453,7 @@ command_remove(int argc, const char *argv[])
 		}
 	}
 
-	errors = razor_transaction_describe(trans);
+	errors = razor_transaction_resolve(trans);
 	if (errors)
 		return 1;
 
@@ -626,7 +626,12 @@ command_install(int argc, const char *argv[])
 	struct razor_set *system, *upstream, *next;
 	struct razor_transaction *trans;
 	char path[PATH_MAX], new_path[PATH_MAX];
-	int i, errors, fd;
+	int i = 0, errors, fd, dependencies = 1;
+
+	if (i < argc && strcmp(argv[i], "--no-dependencies") == 0) {
+		dependencies = 0;
+		i++;
+	}
 
 	/* Create the new next repo file up front to ensure exclusive
 	 * access. */
@@ -653,7 +658,7 @@ command_install(int argc, const char *argv[])
 		return 1;
 	}
 	trans = razor_transaction_create(system, upstream);
-	for (i = 0; i < argc; i++) {
+	for (; i < argc; i++) {
 		if (mark_packages_for_update(trans, upstream, argv[i]) == 0) {
 			fprintf(stderr, "no package matched %s\n", argv[i]);
 			unlink(new_path);
@@ -661,10 +666,12 @@ command_install(int argc, const char *argv[])
 		}
 	}
 
-	errors = razor_transaction_describe(trans);
-	if (errors) {
-		unlink(new_path);
-		return 1;
+	if (dependencies) {
+		errors = razor_transaction_resolve(trans);
+		if (errors) {
+			unlink(new_path);
+			return 1;
+		}
 	}
 
 	next = razor_transaction_finish(trans);

@@ -2696,7 +2696,7 @@ print_requirement(struct razor_transaction_package *p)
 }
 
 int
-razor_transaction_describe(struct razor_transaction *trans)
+razor_transaction_resolve(struct razor_transaction *trans)
 {
 	struct razor_transaction_package *p, *pend, *tps;
 	int errors_only = 0;
@@ -2841,8 +2841,6 @@ razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 {
 	struct razor_transaction_package *p, *end;
 
-	resolve_transaction(trans);
-
 	end = trans->packages.data + trans->packages.size;
 	for (p = trans->packages.data; p < end; p++) {
 		if (p->state != RAZOR_PACKAGE_UNSATISFIABLE)
@@ -2870,8 +2868,6 @@ razor_transaction_finish(struct razor_transaction *trans)
 	uint32_t *map;
 	struct razor_transaction_package *p, *end;
 	int cmp;
-
-	resolve_transaction(trans);
 
 	/* FIXME */
 	if (trans->errors)

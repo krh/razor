@@ -267,7 +267,7 @@ end_transaction(struct test_context *ctx)
 		razor_transaction_remove_package(ctx->trans, pkg);
 	}		
 
-	errors = razor_transaction_describe(ctx->trans);
+	errors = razor_transaction_resolve(ctx->trans);
 	printf("\n");
 
 	while (ctx->n_install_pkgs--)
