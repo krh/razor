@@ -15,9 +15,9 @@ razor_create_dir(const char *root, const char *path)
 	const char *slash, *next;
 	struct stat buf;
 
-	/* Create all sub-directories in dir and then create name. We
-	 * know root exists and is a dir, root does not end in a '/',
-	 * and path has a leading '/'. */
+	/* Create all sub-directories in dir. We know root exists and
+	 * is a dir, root does not end in a '/', and path has a
+	 * leading '/'. */
 
 	strcpy(buffer, root);
 	p = buffer + strlen(buffer);
@@ -25,7 +25,7 @@ razor_create_dir(const char *root, const char *path)
 	for (slash = path; *slash != '\0'; slash = next) {
 		next = strchr(slash + 1, '/');
 		if (next == NULL)
-			next = slash + strlen(slash);
+			break;
 
 		memcpy(p, slash, next - slash);
 		p += next - slash;

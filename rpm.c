@@ -246,13 +246,13 @@ installer_inflate(struct installer *installer)
 	size_t length;
 	int err;
 
-	if (ALIGN(installer->rest, 4) > sizeof installer->buffer)
+	if (installer->rest > sizeof installer->buffer)
 		length = sizeof installer->buffer;
 	else
 		length = installer->rest;
 
 	installer->stream.next_out = installer->buffer;
-	installer->stream.avail_out = ALIGN(length, 4);
+	installer->stream.avail_out = length;
 	err = inflate(&installer->stream, Z_SYNC_FLUSH);
 	if (err != Z_OK && err != Z_STREAM_END) {
 		fprintf(stderr, "inflate error: %d (%m)\n", err);
@@ -266,8 +266,29 @@ installer_inflate(struct installer *installer)
 }
 
 static int
-create_path(struct installer *installer,
-	    const char *path, const char *name, unsigned int mode)
+installer_align(struct installer *installer, size_t size)
+{
+	unsigned char buffer[4];
+	int err;
+
+	installer->stream.next_out = buffer;
+	installer->stream.avail_out =
+		(size - installer->stream.total_out) & (size - 1);
+
+	if (installer->stream.avail_out == 0)
+		return 0;
+
+	err = inflate(&installer->stream, Z_SYNC_FLUSH);
+	if (err != Z_OK && err != Z_STREAM_END) {
+		fprintf(stderr, "inflate error: %d (%m)\n", err);
+		return -1;
+	}
+
+	return 0;
+}
+
+static int
+create_path(struct installer *installer, const char *path, unsigned int mode)
 {
 	char buffer[PATH_MAX];
 	struct stat buf;
@@ -276,10 +297,7 @@ create_path(struct installer *installer,
 	if (razor_create_dir(installer->root, path) < 0)
 		return -1;
 
-	/* assertion: root doesn't end in a slash, path begins and end
-	 * with a slash, name does not begin with a slash. */
-	snprintf(buffer, sizeof buffer, "%s%s%s",
-		 installer->root, path, name);
+	snprintf(buffer, sizeof buffer, "%s%s", installer->root, path);
 
 	switch (mode >> 12) {
 	case REG:
@@ -461,16 +479,31 @@ installer_finish(struct installer *installer)
 	return 0;
 }
 
+static unsigned long
+fixed_hex_to_ulong(const char *hex, int length)
+{
+	long l;
+	int i;
+
+	for (i = 0, l = 0; i < length; i++) {
+		if (hex[i] < 'a')
+			l = l * 16 + hex[i] - '0';
+		else
+			l = l * 16 + hex[i] - 'a' + 10;
+	}
+
+	return l;
+}
+
 int
 razor_rpm_install(struct razor_rpm *rpm, const char *root)
 {
 	struct installer installer;
-	unsigned int count, i, length;
 	struct cpio_file_header *header;
-	const uint32_t *size, *index, *flags;
-	const unsigned short *mode;
-	const char *name, *dir;
 	struct stat buf;
+	unsigned int mode;
+	char *path;
+	size_t filesize;
 
 	installer.rpm = rpm;
 	installer.root = root;
@@ -488,34 +521,33 @@ razor_rpm_install(struct razor_rpm *rpm, const char *root)
 
 	run_script(&installer, RPMTAG_PREINPROG, RPMTAG_PREIN);
 
-	name = razor_rpm_get_indirect(rpm, RPMTAG_BASENAMES, &count);
-	size = razor_rpm_get_indirect(rpm, RPMTAG_FILESIZES, &count);
-	index = razor_rpm_get_indirect(rpm, RPMTAG_DIRINDEXES, &count);
-	mode = razor_rpm_get_indirect(rpm, RPMTAG_FILEMODES, &count);
-	flags = razor_rpm_get_indirect(rpm, RPMTAG_FILEFLAGS, &count);
+	while (installer.stream.avail_in > 0) {
+		installer.rest = sizeof *header;
+		if (installer_inflate(&installer))
+			return -1;
+		
+		header = (struct cpio_file_header *) installer.buffer;
+		mode = fixed_hex_to_ulong(header->mode, sizeof header->mode);
+		filesize = fixed_hex_to_ulong(header->filesize,
+					      sizeof header->filesize);
 
-	for (i = 0; name && i < count; i++) {
-		dir = rpm->dirs[ntohl(*index)];
+		installer.rest = fixed_hex_to_ulong(header->namesize,
+						    sizeof header->namesize);
 
-		/* Skip past the cpio header block unless it's a ghost file,
-		 * in which case doesn't appear in the cpio archive. */
-		if (!(ntohl(*flags) & RPMFILE_GHOST)) {
-			/* Plus two for the leading '.' and the terminating NUL. */
-			length = sizeof *header + strlen(dir) + strlen(name) + 2;
-			installer.rest = ALIGN(length, 4);
-			if (installer_inflate(&installer))
-				return -1;
-		}
-
-		installer.rest = ntohl(*size);
-		if (create_path(&installer, dir, name, ntohs(*mode)) < 0)
+		if (installer_inflate(&installer) ||
+		    installer_align(&installer, 4))
 			return -1;
 
-		name += strlen(name) + 1;
-		index++;
-		size++;
-		mode++;
-		flags++;
+		path = (char *) installer.buffer;
+		/* This convention is so lame... */
+		if (strcmp(path, "TRAILER!!!") == 0)
+			break;
+
+		installer.rest = filesize;
+		if (create_path(&installer, path + 1, mode) < 0)
+			return -1;
+		if (installer_align(&installer, 4))
+			return -1;
 	}
 
 	if (installer_finish(&installer))

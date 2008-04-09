@@ -728,7 +728,9 @@ command_init(int argc, const char *argv[])
 		return -1;
 	}
 
-	if (razor_create_dir(root, razor_root_path) < 0) {
+	snprintf(path, sizeof path, "%s/%s",
+		 razor_root_path, system_repo_filename);
+	if (razor_create_dir(root, path) < 0) {
 		fprintf(stderr, "could not create %s%s\n",
 			root, razor_root_path);
 		return -1;
