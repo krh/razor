@@ -204,15 +204,17 @@ check_unsatisfiable_property(struct test_context *ctx,
 			     enum razor_version_relation rel,
 			     const char *version)
 {
+	static const char *relation_string[] = { "<", "<=", "=", ">=", ">" };
+
 	if (!version)
 		version = "";
 
 	if (razor_transaction_unsatisfied_property(ctx->trans,
-						   name, rel, version))
+						   name, rel, version, type))
 		return;
 
 	fprintf(stderr, "  didn't get unsatisfiable '%s %s %s'\n",
-		name, razor_version_relations[rel], version);
+		name, relation_string[rel], version);
 	ctx->errors++;
 }
 

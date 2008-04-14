@@ -77,6 +77,7 @@ static int
 list_properties(const char *package_name,
 		enum razor_property_type required_type)
 {
+	static const char *relation_string[] = { "<", "<=", "=", ">=", ">" };
 	struct razor_set *set;
 	struct razor_property *property;
 	struct razor_package *package;
@@ -101,7 +102,7 @@ list_properties(const char *package_name,
 			printf("%s\n", name);
 		else
 			printf("%s %s %s\n", name,
-			       razor_version_relations[relation], version);
+			       relation_string[relation], version);
 	}
 	razor_property_iterator_destroy(pi);
 
@@ -361,20 +362,6 @@ command_import_rpmdb(int argc, const char *argv[])
 }
 
 static int
-command_validate(int argc, const char *argv[])
-{
-	struct razor_set *set;
-
-	set = razor_set_open(repo_filename);
-	if (set == NULL)
-		return 1;
-	razor_set_list_unsatisfied(set);
-	razor_set_destroy(set);
-
-	return 0;
-}
-
-static int
 mark_packages_for_update(struct razor_transaction *trans,
 			 struct razor_set *set, const char *pattern)
 {
@@ -387,7 +374,7 @@ mark_packages_for_update(struct razor_transaction *trans,
 	while (razor_package_iterator_next(pi, &package,
 					   &name, &version, &arch)) {
 		if (pattern && fnmatch(pattern, name, 0) == 0) {
-			razor_transaction_install_package(trans, package);
+			razor_transaction_update_package(trans, package);
 			matches++;
 		}
 	}
@@ -434,7 +421,7 @@ command_update(int argc, const char *argv[])
 	if (argc == 0)
 		razor_transaction_update_all(trans);
 	for (i = 0; i < argc; i++) {
-		if (mark_packages_for_update(trans, upstream, argv[i]) == 0) {
+		if (mark_packages_for_update(trans, set, argv[i]) == 0) {
 			fprintf(stderr, "no match for %s\n", argv[i]);
 			return 1;
 		}
@@ -828,7 +815,6 @@ static struct {
 	{ "import-yum", "import yum metadata files", command_import_yum },
 	{ "import-rpmdb", "import the system rpm database", command_import_rpmdb },
 	{ "import-rpms", "import rpms from the given directory", command_import_rpms },
-	{ "validate", "validate a package set", command_validate },
 	{ "update", "update all or specified packages", command_update },
 	{ "remove", "remove specified packages", command_remove },
 	{ "diff", "show diff between two package sets", command_diff },
