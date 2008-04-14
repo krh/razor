@@ -108,44 +108,13 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 
 /* Package transactions */
 
-enum razor_transaction_package_state {
-	/* Basic states */
-	RAZOR_PACKAGE_INSTALL,
-	RAZOR_PACKAGE_FORCED_UPDATE,
-	RAZOR_PACKAGE_REMOVE,
-	RAZOR_PACKAGE_OBSOLETED,
-
-	/* Error states */
-
-	RAZOR_PACKAGE_FIRST_ERROR_STATE = 0x4,
-	RAZOR_PACKAGE_UNAVAILABLE_FLAG = 0x4,
-
-	/* Package requested for install does not exist */
-	RAZOR_PACKAGE_INSTALL_UNAVAILABLE = RAZOR_PACKAGE_INSTALL | RAZOR_PACKAGE_UNAVAILABLE_FLAG,
-	/* Package requiring update does not have any update */
-	RAZOR_PACKAGE_UPDATE_UNAVAILABLE = RAZOR_PACKAGE_FORCED_UPDATE | RAZOR_PACKAGE_UNAVAILABLE_FLAG,
-	/* Package requested for removal does not exist */
-	RAZOR_PACKAGE_REMOVE_NOT_INSTALLED = RAZOR_PACKAGE_REMOVE | RAZOR_PACKAGE_UNAVAILABLE_FLAG,
-	/* (not used) */
-	RAZOR_PACKAGE_OBSOLETE_UNAVAILABLE = RAZOR_PACKAGE_OBSOLETED | RAZOR_PACKAGE_UNAVAILABLE_FLAG,
-
-	/* No newer version of package is available */
-	RAZOR_PACKAGE_UP_TO_DATE,
-	/* Package marked for both install and remove */
-	RAZOR_PACKAGE_CONTRADICTION,
-	/* Package would add a conflict with an already-installed package */
-	RAZOR_PACKAGE_NEW_CONFLICT,
-	/* Already-installed package has a conflict against this package */
-	RAZOR_PACKAGE_OLD_CONFLICT,
-	/* Requirement of to-be-installed package can't be satisfied */
-	RAZOR_PACKAGE_UNSATISFIABLE,
-};
-
 struct razor_transaction *
 razor_transaction_create(struct razor_set *system, struct razor_set *upstream);
 void razor_transaction_install_package(struct razor_transaction *transaction,
 				       struct razor_package *package);
 void razor_transaction_remove_package(struct razor_transaction *transaction,
+				      struct razor_package *package);
+void razor_transaction_update_package(struct razor_transaction *trans,
 				      struct razor_package *package);
 void razor_transaction_update_all(struct razor_transaction *transaction);
 int razor_transaction_resolve(struct razor_transaction *trans);
@@ -156,7 +125,8 @@ void razor_transaction_destroy(struct razor_transaction *trans);
 int razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 					   const char *name,
 					   enum razor_version_relation rel,
-					   const char *version);
+					   const char *version,
+					   enum razor_property_type type);
 
 /* Importer interface; for building a razor set from external sources,
  * like yum, rpmdb or razor package files. */

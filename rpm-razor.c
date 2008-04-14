@@ -350,6 +350,8 @@ get_query_packages(struct razor_set *set, int argc, const char *argv[])
 	return razor_package_query_finish(query);
 }
 
+static const char *relation_string[] = { "<", "<=", "=", ">=", ">" };
+
 static void
 print_package_properties(struct razor_set *set,
 			 struct razor_package *package,
@@ -371,7 +373,7 @@ print_package_properties(struct razor_set *set,
 			printf("%s\n", name);
 		else
 			printf("%s %s %s\n", name,
-			       razor_version_relations[relation], version);
+			       relation_string[relation], version);
 	}
 	razor_property_iterator_destroy(pi);
 }
@@ -518,7 +520,6 @@ command_erase(int argc, const char *argv[])
 	next = razor_transaction_finish(trans);
 	razor_set_destroy(set);
 
-	razor_set_list_unsatisfied(next);
 	razor_set_destroy(next);
 }
 
@@ -550,8 +551,6 @@ command_install(int argc, const char *argv[])
 	next = razor_transaction_finish(trans);
 	razor_set_destroy(set);
 	razor_set_destroy(upstream);
-
-	razor_set_list_unsatisfied(next);
 
 	razor_set_destroy(next);
 }
