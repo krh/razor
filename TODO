@@ -1,5 +1,12 @@
 Towards replacing rpm + yum (0.1):
 
+- drop the filelists from the main package set file, split out to a
+  secondary file.  for package sets that depend on other package sets,
+  we need to be able to generate properties with owning packages that
+  are in another set.  this way, a package that requires a file, will
+  look up the provides in the set and find the package that owns it
+  and then try mark that for update.
+
 - installer part:
 
    - pre install check; check that dirs can be created (no files where
@@ -7,6 +14,10 @@ Towards replacing rpm + yum (0.1):
      flags. (.rpmnew etc)
 
    - store rpm headers for installed packages.
+
+   - implement rpm uninstall and update.
+
+   - triggers? just say no?
 
 - rpm seems to consider glibc > 2.6.90 to mean greater than
   2.6.90-anything.  That is, a comparison that doesn't mention the
@@ -25,8 +36,6 @@ Towards replacing rpm + yum (0.1):
 
 - signed packages
 
-- figure out how to canonically represent empty string... ~0?
-
 - space calculation before transaction, but ideally, do a number of
   smaller transactions.
 
@@ -44,6 +53,67 @@ Towards replacing rpm + yum (0.1):
   target set (i.e. the current set to be) around as a lock file
   (system.repo.lock or so, see git) so that razor updates are
   prevented if the systems crashes during an update.
+
+- implement depsolving between multiple package sets by creating an
+  iterator that has a sorted list of all installed pkgs from all sets,
+  all installed requires from all sets, all installed provides from
+  all sets etc.  could be a list of tuples (pkgs index, set index).
+  should simplify even the two-set depsolving a bit since we can
+  pretend there's just one set.  this should also be useful for the
+  'overlay set' idea where the system set is actually made up of a
+  number of sets, but typically a read-only set from a read-only fs
+  and a read-write set from a r/w fs.
+
+- locking: we use advisory file locking on the system set
+  (/var/lib/razor/system.repo) to indicate a transaction is in
+  progress.  The locking algorithm is as follows:
+
+    1. obtain advisory lock on system set.  if this is already taken,
+       we know that a process is actively modifying the system set and
+       we have to wait.  there's a fcntl that lets you block for the
+       lock to go away.
+
+    2. if a system-next.repo file already exists an earlier razor
+       process was interrupted or crashed and we may want to clean
+       that up.  the system-next.repo file will record what the
+       previous instance was trying to do and we can just replay that
+       to clean up.
+
+    3. create the new package set whichever way and write it to
+       system-next.repo, then start installing/removing rpms.
+
+    4. When the update is complete, rename system-next.repo to
+       system.repo and remove the advisory lock.
+
+  we should probably introduce a new object that encapsulates this
+  sequence, the filename conventions, rpm cache, e.g. struct
+  razor_image, with operations such as
+
+	#define RAZOR_IMAGE_READ	0x01
+	#define RAZOR_IMAGE_WRITE	0x02
+
+	struct razor_image *
+	razor_image_open(const char *root, unsigned int flags);
+
+	int
+	razor_image_begin_transaction(struct razor_image *image,
+				      struct razor_set *target);
+
+	int
+	razor_image_finish_transaction(struct razor_image *image);
+
+  the transaction pipelineing described above sits on top of this,
+  since each step there needs to complete a full transaction that
+  writes out a new package set.
+
+  for overlay package sets we could do something like
+
+	struct razor_image *
+	razor_image_open_with_base(const char *root, unsigned int flags,
+				   struct razor_image *base);
+
+  where base specifies the r/o package set it's layered on.  this
+  allows for stacking several layers of images.
 
 
 Package set file format items:
