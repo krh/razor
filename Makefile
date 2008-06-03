@@ -1,7 +1,7 @@
 CFLAGS = -Wall -Wstrict-prototypes -Wmissing-prototypes -g
 LDLIBS = -lexpat -lz -g -lrpm -lcurl
 
-all : razor test-driver
+all : razor test-driver rpm-razor
 
 razor : razor.o yum.o main.o rpm.o types.o util.o
 
@@ -9,6 +9,8 @@ razor : razor.o yum.o main.o rpm.o types.o util.o
 razor.o : types.h
 
 test-driver : razor.o types.o util.o test-driver.o
+
+rpm-razor : rpm-razor.o
 
 test : test-driver
 	./test-driver test.xml
