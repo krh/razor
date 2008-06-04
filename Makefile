@@ -10,7 +10,7 @@ razor.o : types.h
 
 test-driver : razor.o types.o util.o test-driver.o
 
-rpm-razor : rpm-razor.o
+rpm-razor : rpm-razor.o razor.o types.o util.o
 
 test : test-driver
 	./test-driver test.xml

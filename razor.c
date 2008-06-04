@@ -810,6 +810,7 @@ struct razor_package_iterator {
 	struct razor_set *set;
 	struct razor_package *package, *end;
 	struct list *index;
+	int free_index;
 };
 
 static struct razor_package_iterator *
@@ -886,6 +887,9 @@ razor_package_iterator_next(struct razor_package_iterator *pi,
 void
 razor_package_iterator_destroy(struct razor_package_iterator *pi)
 {
+	if (pi->free_index)
+		free(pi->index);
+
 	free(pi);
 }
 
@@ -2992,4 +2996,79 @@ razor_transaction_destroy(struct razor_transaction *trans)
 	free(trans);
 
 	/* FIXME: free upstream if it was created as an empty set */
+}
+
+struct razor_package_query {
+	struct razor_set *set;
+	char *vector;
+	int count;
+};
+
+struct razor_package_query *
+razor_package_query_create(struct razor_set *set)
+{
+	struct razor_package_query *pq;
+	int count;
+
+	pq = zalloc(sizeof *pq);
+	pq->set = set;
+	count = set->packages.size / sizeof(struct razor_package);
+	pq->vector = zalloc(count * sizeof(char));
+
+	return pq;
+}
+
+void
+razor_package_query_add_package(struct razor_package_query *pq,
+				struct razor_package *p)
+{
+	struct razor_package *packages;
+
+	packages = pq->set->packages.data;
+	pq->count += pq->vector[p - packages] ^ 1;
+	pq->vector[p - packages] = 1;
+}
+
+void
+razor_package_query_add_iterator(struct razor_package_query *pq,
+				 struct razor_package_iterator *pi)
+{
+	struct razor_package *packages, *p;
+	const char *name, *version, *arch;
+
+	packages = pq->set->packages.data;
+	while (razor_package_iterator_next(pi, &p, &name, &version, &arch)) {
+		pq->count += pq->vector[p - packages] ^ 1;
+		pq->vector[p - packages] = 1;
+	}
+}
+
+struct razor_package_iterator *
+razor_package_query_finish(struct razor_package_query *pq)
+{
+	struct razor_package_iterator *pi;
+	struct razor_set *set;
+	struct list *index;
+	int i, j, count;
+
+	set = pq->set;
+	count = set->packages.size / sizeof(struct razor_package);
+	index = zalloc(pq->count * sizeof *index);
+
+	for (i = 0, j = 0; i < count; i++) {
+		if (!pq->vector[i])
+			continue;
+
+		index[j].data = i;
+		if (j == pq->count - 1)
+			index[j].flags = 0x80;
+		j++;
+	}
+
+	free(pq);
+
+	pi = razor_package_iterator_create_with_index(set, index);
+	pi->free_index = 1;
+
+	return pi;
 }

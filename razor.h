@@ -68,6 +68,17 @@ int razor_package_iterator_next(struct razor_package_iterator *pi,
 				const char **arch);
 void razor_package_iterator_destroy(struct razor_package_iterator *pi);
 
+struct razor_package_query *
+razor_package_query_create(struct razor_set *set);
+void
+razor_package_query_add_package(struct razor_package_query *pq,
+				struct razor_package *p);
+void
+razor_package_query_add_iterator(struct razor_package_query *pq,
+				 struct razor_package_iterator *pi);
+struct razor_package_iterator *
+razor_package_query_finish(struct razor_package_query *pq);
+
 struct razor_property_iterator;
 struct razor_property_iterator *
 razor_property_iterator_create(struct razor_set *set,

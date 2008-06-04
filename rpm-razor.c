@@ -38,7 +38,8 @@ struct option {
 	void *data;
 };
 
-static int option_all;
+static int option_all, option_whatrequires, option_whatprovides;
+
 
 static const struct option query_options[] = {
 	{ OPTION_BOOL, "configfiles", 'c', NULL, "list all configuration files", NULL },
@@ -57,8 +58,8 @@ static const struct option query_options[] = {
 	{ OPTION_BOOL, "fileid", 0, NULL, "query/verify package(s) with file identifier", NULL },
 	{ OPTION_BOOL, "specfile", 0, NULL, "query a spec file", NULL, },
 	{ OPTION_BOOL, "triggeredby", 0, NULL, "query the package(s) triggered by the package", NULL },
-	{ OPTION_BOOL, "whatrequires", 0, NULL, "query/verify the package(s) which require a dependency", NULL },
-	{ OPTION_BOOL, "whatprovides", 0, NULL, "query/verify the package(s) which provide a dependency", NULL },
+	{ OPTION_BOOL, "whatrequires", 0, NULL, "query/verify the package(s) which require a dependency", &option_whatrequires },
+	{ OPTION_BOOL, "whatprovides", 0, NULL, "query/verify the package(s) which provide a dependency", &option_whatprovides },
 	{ OPTION_BOOL, "nomanifest", 0, NULL, "do not process non-package files as manifests", NULL },
 	{ }
 };
@@ -78,8 +79,8 @@ static const struct option verify_options[] = {
 	{ OPTION_BOOL, "fileid", 0, NULL, "query/verify package(s) with file identifier", NULL },
 	{ OPTION_BOOL, "specfile", 0, NULL, "query a spec file", NULL },
 	{ OPTION_BOOL, "triggeredby", 0, NULL, "query the package(s) triggered by the package", NULL },
-	{ OPTION_BOOL, "whatrequires", 0, NULL, "query/verify the package(s) which require a dependency", NULL },
-	{ OPTION_BOOL, "whatprovides", 0, NULL, "query/verify the package(s) which provide a dependency", NULL },
+	{ OPTION_BOOL, "whatrequires", 0, NULL, "query/verify the package(s) which require a dependency", &option_whatrequires },
+	{ OPTION_BOOL, "whatprovides", 0, NULL, "query/verify the package(s) which provide a dependency", &option_whatprovides },
 	{ OPTION_BOOL, "nomanifest", 0, NULL, "do not process non-package files as manifests", NULL },
 	{ }
 };
@@ -169,14 +170,16 @@ static const struct option common_options[] = {
 	{ }
 };
 
+static int option_conflicts, option_obsoletes, option_requires, option_provides;
+
 static const struct option alias_options[] = {
 	{ OPTION_BOOL, "scripts", 0, NULL, "list install/erase scriptlets from package(s)", NULL, },
 	{ OPTION_BOOL, "setperms", 0, NULL, "set permissions of files in a package", NULL, },
 	{ OPTION_BOOL, "setugids", 0, NULL, "set user/group ownership of files in a package", NULL, },
-	{ OPTION_BOOL, "conflicts", 0, NULL, "list capabilities this package conflicts with", NULL, },
-	{ OPTION_BOOL, "obsoletes", 0, NULL, "list other packages removed by installing this package", NULL, },
-	{ OPTION_BOOL, "provides", 0, NULL, "list capabilities that this package provides", NULL, },
-	{ OPTION_BOOL, "requires", 0, NULL, "list capabilities required by package(s)", NULL, },
+	{ OPTION_BOOL, "conflicts", 0, NULL, "list capabilities this package conflicts with", &option_conflicts, },
+	{ OPTION_BOOL, "obsoletes", 0, NULL, "list other packages removed by installing this package", &option_obsoletes, },
+	{ OPTION_BOOL, "provides", 0, NULL, "list capabilities that this package provides", &option_provides, },
+	{ OPTION_BOOL, "requires", 0, NULL, "list capabilities required by package(s)", &option_requires, },
 	{ OPTION_BOOL, "info", 0, NULL, "list descriptive information from package(s)", NULL, },
 	{ OPTION_BOOL, "changelog", 0, NULL, "list change logs for this package", NULL, },
 	{ OPTION_BOOL, "xml", 0, NULL, "list metadata in xml", NULL, },
@@ -224,15 +227,168 @@ static const struct option rpm_options[] = {
 	{ }
 };
 
+static const char system_repo_filename[] = "system.repo";
+static const char *repo_filename = system_repo_filename;
+
+static struct razor_property *
+add_property_packages(struct razor_set *set, 
+		      struct razor_package_query *query,
+		      const char *ref_name,
+		      const char *ref_version,
+		      enum razor_property_type ref_type)
+{
+	struct razor_property *property;
+	struct razor_property_iterator *pi;
+	struct razor_package_iterator *pkgi;
+	const char *name, *version;
+	enum razor_property_type type;
+	enum razor_version_relation relation;
+
+	pi = razor_property_iterator_create(set, NULL);
+	while (razor_property_iterator_next(pi, &property, &name,
+					    &relation, &version, &type)) {
+		if (strcmp(ref_name, name) != 0)
+			continue;
+		if (ref_version && relation == RAZOR_VERSION_EQUAL &&
+		    strcmp(ref_version, version) != 0)
+			continue;
+		if (ref_type != type)
+			continue;
+
+		pkgi = razor_package_iterator_create_for_property(set,
+								  property);
+		razor_package_query_add_iterator(query, pkgi);
+		razor_package_iterator_destroy(pkgi);
+	}
+	razor_property_iterator_destroy(pi);
+
+	return property;
+}
+
+static int
+strcmpp(const void *p1, const void *p2)
+{
+	return strcmp(*(char * const *) p1, *(char * const *) p2);
+}
+
+static void
+add_command_line_packages(struct razor_set *set,
+			  struct razor_package_query *query,
+			  int argc, const char **argv)
+{
+	struct razor_package *package;
+	struct razor_package_iterator *pi;
+	const char *name, *version, *arch;
+	int i, cmp;
+
+	qsort(argv, argc, sizeof(*argv), strcmpp);
+	i = 0;
+
+	pi = razor_package_iterator_create(set);
+
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch)) {
+		while (cmp = strcmp(argv[i], name), cmp < 0 && i < argc) {
+			printf("package %s is not installed\n", argv[i]);
+			i++;
+		}
+
+		if (cmp == 0) {
+			razor_package_query_add_package(query, package);
+			i++;
+		}
+	}
+
+	razor_package_iterator_destroy(pi);
+}
+
+static void
+print_package_properties(struct razor_set *set,
+			 struct razor_package *package,
+			 enum razor_property_type ref_type)
+{
+	struct razor_property *property;
+	struct razor_property_iterator *pi;
+	const char *name, *version;
+	enum razor_property_type type;
+	enum razor_version_relation relation;
+
+	pi = razor_property_iterator_create(set, package);
+	while (razor_property_iterator_next(pi, &property,
+					    &name, &relation, &version,
+					    &type)) {
+		if (type != ref_type)
+			continue;
+		if (version[0] == '\0')
+			printf("%s\n", name);
+		else
+			printf("%s %s %s\n", name,
+			       razor_version_relations[relation], version);
+	}
+	razor_property_iterator_destroy(pi);
+}
+
 static void
 command_query(int argc, const char *argv[])
 {
-	if (argc == 0 && !option_all) {
+	struct razor_set *set;
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	struct razor_package_query *query;
+	const char *name, *version, *arch;
+
+	set = razor_set_open(repo_filename);
+
+	if (option_all + option_whatprovides + option_whatrequires > 1) {
+		printf("only one type of query/verify "
+		       "may be performed at a time\n");
+		exit(1);
+	}
+
+	query = razor_package_query_create(set);
+	if (option_all) {
+		pi = razor_package_iterator_create(set);
+		razor_package_query_add_iterator(query, pi);
+		razor_package_iterator_destroy(pi);
+	} else if (option_whatrequires) {
+		add_property_packages(set, query,
+				      argv[0], NULL, RAZOR_PROPERTY_REQUIRES);
+	} else if (option_whatprovides) {
+		add_property_packages(set, query,
+				      argv[0], NULL, RAZOR_PROPERTY_PROVIDES);
+	} else if (argc > 0) {
+		add_command_line_packages(set, query, argc, argv);
+	} else {
 		printf("no arguments given for query\n");
 		exit(1);
 	}
 
-	printf("command query - not implemented\n");
+	pi = razor_package_query_finish(query);
+
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch)) {
+		if (option_conflicts)
+			print_package_properties(set, package,
+						 RAZOR_PROPERTY_CONFLICTS);
+		if (option_obsoletes)
+			print_package_properties(set, package,
+						 RAZOR_PROPERTY_OBSOLETES);
+		if (option_requires)
+			print_package_properties(set, package,
+						 RAZOR_PROPERTY_REQUIRES);
+		if (option_provides)
+			print_package_properties(set, package,
+						 RAZOR_PROPERTY_PROVIDES);
+		if (!option_conflicts && !option_obsoletes &&
+		    !option_requires && !option_provides)
+			printf("%s-%s.%s\n", name, version, arch);
+	}
+
+	razor_package_iterator_destroy(pi);
+
+	razor_set_destroy(set);
+
+	return;
 }
 
 static void
