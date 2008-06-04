@@ -39,7 +39,7 @@ struct option {
 };
 
 static int option_all, option_whatrequires, option_whatprovides;
-
+static int option_package;
 
 static const struct option query_options[] = {
 	{ OPTION_BOOL, "configfiles", 'c', NULL, "list all configuration files", NULL },
@@ -51,7 +51,7 @@ static const struct option query_options[] = {
 	{ OPTION_BOOL, "all", 'a', NULL, "query/verify all packages", &option_all },
 	{ OPTION_BOOL, "file", 'f', NULL, "query/verify package(s) owning file", NULL },
 	{ OPTION_BOOL, "group", 'g', NULL, "query/verify package(s) in group", NULL },
-	{ OPTION_BOOL, "package", 'p', NULL, "query/verify a package file", NULL },
+	{ OPTION_BOOL, "package", 'p', NULL, "query/verify a package file", &option_package },
 	{ OPTION_BOOL, "ftswalk", 'W', NULL, "query/verify package(s) from TOP file tree walk", NULL },
 	{ OPTION_BOOL, "pkgid", 0, NULL, "query/verify package(s) with package identifier", NULL },
 	{ OPTION_BOOL, "hdrid", 0, NULL, "query/verify package(s) with header identifier", NULL },
@@ -328,6 +328,28 @@ print_package_properties(struct razor_set *set,
 	razor_property_iterator_destroy(pi);
 }
 
+static struct razor_set *
+create_set_from_command_line(int argc, const char *argv[])
+{
+	struct razor_importer *importer;
+	struct razor_rpm *rpm;
+	int i;
+
+	importer = razor_importer_new();
+
+	for (i = 0; i < argc; i++) {
+		rpm = razor_rpm_open(argv[i]);
+		if (rpm == NULL)
+			continue;
+		if (razor_importer_add_rpm(importer, rpm))
+			printf("couldn't import %s\n", argv[i]);
+
+		razor_rpm_close(rpm);
+	}
+
+	return razor_importer_finish(importer);
+}
+
 static void
 command_query(int argc, const char *argv[])
 {
@@ -337,7 +359,13 @@ command_query(int argc, const char *argv[])
 	struct razor_package_query *query;
 	const char *name, *version, *arch;
 
-	set = razor_set_open(repo_filename);
+	if (option_package) {
+		set = create_set_from_command_line(argc, argv);
+		argc = 0;
+		option_all = 1;
+	} else {
+		set = razor_set_open(repo_filename);
+	}
 
 	if (option_all + option_whatprovides + option_whatrequires > 1) {
 		printf("only one type of query/verify "
