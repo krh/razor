@@ -77,7 +77,7 @@ static const struct option verify_options[] = {
 	{ OPTION_BOOL, "nofiles", 0, NULL, "don't verify files in package", NULL },
 	{ OPTION_BOOL, "nodeps", 0, NULL, "don't verify package dependencies", NULL },
 	{ OPTION_BOOL, "noscript", 0, NULL, "don't execute verify script(s)", NULL, },
-	{ OPTION_BOOL, "all", 'a', NULL, "query/verify all packages", NULL },
+	{ OPTION_BOOL, "all", 'a', NULL, "query/verify all packages", &option_al },
 	{ OPTION_BOOL, "file", 'f', NULL, "query/verify package(s) owning file", NULL },
 	{ OPTION_BOOL, "group", 'g', NULL, "query/verify package(s) in group", NULL },
 	{ OPTION_BOOL, "package", 'p', NULL, "query/verify a package file", NULL },
@@ -460,7 +460,7 @@ command_verify(int argc, const char *argv[])
 static void
 command_erase(int argc, const char *argv[])
 {
-	struct razor_set *set;
+	struct razor_set *set, *next;
 	struct razor_transaction *trans;
 	struct razor_package_query *query;
 	struct razor_package_iterator *pi;
@@ -478,30 +478,52 @@ command_erase(int argc, const char *argv[])
 
 	query = razor_package_query_create(set);
 	add_command_line_packages(set, query, argc, argv);
-	pi = razor_package_query_finish(query);
 
+	pi = razor_package_query_finish(query);
 	while (razor_package_iterator_next(pi, &package,
 					   &name, &version, &arch))
 		razor_transaction_remove_package(trans, package);
-
 	razor_package_iterator_destroy(pi);
 
-	set = razor_transaction_finish(trans);
-	
-	razor_set_list_unsatisfied(set);
-
+	next = razor_transaction_finish(trans);
 	razor_set_destroy(set);
+
+	razor_set_list_unsatisfied(next);
+	razor_set_destroy(next);
 }
 
 static void
 command_install(int argc, const char *argv[])
 {
+	struct razor_set *set, *upstream, *next;
+	struct razor_transaction *trans;
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *name, *version, *arch;
+
 	if (argc == 0) {
 		printf("no packages given for install\n");
 		exit(1);
 	}
 
-	printf("command install - not implemented\n");
+	set = razor_set_open(repo_filename);
+	upstream = create_set_from_command_line(argc, argv);
+
+	trans = razor_transaction_create(set, upstream);
+
+	pi = razor_package_iterator_create(upstream);
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch))
+		razor_transaction_install_package(trans, package);
+	razor_package_iterator_destroy(pi);
+
+	next = razor_transaction_finish(trans);
+	razor_set_destroy(set);
+	razor_set_destroy(upstream);
+
+	razor_set_list_unsatisfied(next);
+
+	razor_set_destroy(next);
 }
 
 static void
