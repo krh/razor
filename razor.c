@@ -1205,7 +1205,7 @@ razor_set_list_unsatisfied(struct razor_set *set)
 	for (u = unsatisfied.data; u < end; u++) {
 		r = properties + *u;
 		if (pool[r->version] == '\0')
-			printf("%ss not satisfied\n",
+			printf("%s not satisfied\n",
 			       &pool[r->name]);
 		else
 			printf("%s-%s not satisfied\n",

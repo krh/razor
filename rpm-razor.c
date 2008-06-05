@@ -460,12 +460,37 @@ command_verify(int argc, const char *argv[])
 static void
 command_erase(int argc, const char *argv[])
 {
+	struct razor_set *set;
+	struct razor_transaction *trans;
+	struct razor_package_query *query;
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *name, *version, *arch;
+
 	if (argc == 0) {
 		printf("no packages given for erase\n");
 		exit(1);
 	}
 
-	printf("command erase - not implemented\n");
+	set = razor_set_open(repo_filename);
+
+	trans = razor_transaction_create(set, NULL);
+
+	query = razor_package_query_create(set);
+	add_command_line_packages(set, query, argc, argv);
+	pi = razor_package_query_finish(query);
+
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch))
+		razor_transaction_remove_package(trans, package);
+
+	razor_package_iterator_destroy(pi);
+
+	set = razor_transaction_finish(trans);
+	
+	razor_set_list_unsatisfied(set);
+
+	razor_set_destroy(set);
 }
 
 static void
