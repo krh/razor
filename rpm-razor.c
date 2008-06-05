@@ -491,29 +491,34 @@ command_update(int argc, const char *argv[])
 }
 
 static int
-for_each_option(const struct option *options, const char *s,
+for_each_option(const struct option *options,
+		const char *name, char short_name,
 		void (*fn)(const struct option *o,
-			   const char *arg, void *data), void *data)
+			   const char *name, char short_name,
+			   void *data), void *data)
 {
 	int i, count = 0;
 
 	for (i = 0; options[i].type != OPTION_LAST; i++) {
 		switch (options[i].type) {
 		case OPTION_GROUP:
-			count += for_each_option(options[i].data, s, fn, data);
+			count += for_each_option(options[i].data,
+						 name, short_name, fn, data);
 			break;
 
 		case OPTION_BOOL:
 		case OPTION_STRING:
-			if (s[0] == '-' &&
-			    s[1] == options[i].short_name && s[2] == '\0') {
-				fn(&options[i], s, data);
+			if (name && strcmp(options[i].name, name) == 0) {
+				fn(&options[i], name, 0, data);
 				count++;
+				break;
 			}
-			if (s[0] == '-' && s[1] == '-' &&
-			    strcmp(options[i].name, s + 2) == 0) {
-				fn(&options[i], s, data);
+
+			if (short_name &&
+			    short_name == options[i].short_name) {
+				fn(&options[i], NULL, short_name, data);
 				count++;
+				break;
 			}
 			break;
 
@@ -526,10 +531,14 @@ for_each_option(const struct option *options, const char *s,
 }
 
 static void
-handle_option(const struct option *o, const char *arg, void *data)
+handle_option(const struct option *o,
+	      const char *name, char short_name, void *data)
 {
 	if (o->data == NULL) {
-		printf("option \"%s\" not supported\n", arg);
+		if (name)
+			printf("option --%s not supported\n", name);
+		else
+			printf("option -%c not supported\n", short_name);
 		return;
 	}
 
@@ -539,7 +548,7 @@ handle_option(const struct option *o, const char *arg, void *data)
 		break;
 
 	case OPTION_STRING:
-		*(const char **) o->data = arg + strlen(o->name) + 3;
+		*(const char **) o->data = name + strlen(o->name) + 1;
 		break;
 
 	case OPTION_LAST:
@@ -552,9 +561,7 @@ handle_option(const struct option *o, const char *arg, void *data)
 static int
 parse_options(const struct option *options, int argc, const char **argv)
 {
-	int i, j;
-
-	/* FIXME: Bundling... rpm -Uvh must work :) */
+	int i, j, k;
 
 	for (i = 1, j = 0; i < argc; i++) {
 		if (argv[i][0] != '-') {
@@ -562,10 +569,21 @@ parse_options(const struct option *options, int argc, const char **argv)
 			continue;
 		}
 
-		if (for_each_option(options, argv[i],
-				    handle_option, NULL) == 0) {
-			printf("unknown option: \"%s\"\n", argv[i]);
-			exit(1);
+		if (argv[i][1] == '-') {
+			if (for_each_option(options, &argv[i][2], 0,
+					    handle_option, NULL) == 0) {
+				printf("unknown option: %s\n", argv[i]);
+				exit(1);
+			}
+			continue;
+		}
+
+		for (k = 1; argv[i][k]; k++) {
+			if (for_each_option(options, NULL, argv[i][k],
+					    handle_option, NULL) == 0) {
+				printf("unknown option: -%c\n", argv[i][k]);
+				exit(1);
+			}
 		}
 	}
 
