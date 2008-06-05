@@ -38,6 +38,14 @@ struct option {
 	void *data;
 };
 
+/* A note about all these options: rpm allows options to mean
+ * different things depending on what other options are present on the
+ * command line.  For example, if -q or --query is present, -i no
+ * longer means install, but info.  The way we handle this is by
+ * setting all the options that may match (ie if -i is given we set
+ * install and info), and then look at the relevent one depending on
+ * what else in on the command line. */
+
 static int option_all, option_whatrequires, option_whatprovides;
 static int option_package;
 
@@ -170,7 +178,8 @@ static const struct option common_options[] = {
 	{ }
 };
 
-static int option_conflicts, option_obsoletes, option_requires, option_provides;
+static int option_conflicts, option_obsoletes, option_requires;
+static int option_provides, option_info, option_changelog;
 
 static const struct option alias_options[] = {
 	{ OPTION_BOOL, "scripts", 0, NULL, "list install/erase scriptlets from package(s)", NULL, },
@@ -180,8 +189,8 @@ static const struct option alias_options[] = {
 	{ OPTION_BOOL, "obsoletes", 0, NULL, "list other packages removed by installing this package", &option_obsoletes, },
 	{ OPTION_BOOL, "provides", 0, NULL, "list capabilities that this package provides", &option_provides, },
 	{ OPTION_BOOL, "requires", 0, NULL, "list capabilities required by package(s)", &option_requires, },
-	{ OPTION_BOOL, "info", 0, NULL, "list descriptive information from package(s)", NULL, },
-	{ OPTION_BOOL, "changelog", 0, NULL, "list change logs for this package", NULL, },
+	{ OPTION_BOOL, "info", 'i', NULL, "list descriptive information from package(s)", &option_info, },
+	{ OPTION_BOOL, "changelog", 0, NULL, "list change logs for this package", &option_changelog, },
 	{ OPTION_BOOL, "xml", 0, NULL, "list metadata in xml", NULL, },
 	{ OPTION_BOOL, "triggers", 0, NULL, "list trigger scriptlets from package(s)", NULL, },
 	{ OPTION_BOOL, "last", 0, NULL, "list package(s) by install time, most recent first", NULL, },
@@ -328,6 +337,18 @@ print_package_properties(struct razor_set *set,
 	razor_property_iterator_destroy(pi);
 }
 
+static void
+print_package_info(struct razor_set *set, struct razor_package *package)
+{
+	printf("FIXME: Package info not tracked.\n");
+}
+
+static void
+print_package_changelog(struct razor_set *set, struct razor_package *package)
+{
+	printf("FIXME: Package changelog not tracked.\n");
+}
+
 static struct razor_set *
 create_set_from_command_line(int argc, const char *argv[])
 {
@@ -407,8 +428,14 @@ command_query(int argc, const char *argv[])
 		if (option_provides)
 			print_package_properties(set, package,
 						 RAZOR_PROPERTY_PROVIDES);
-		if (!option_conflicts && !option_obsoletes &&
-		    !option_requires && !option_provides)
+		if (option_info)
+			print_package_info(set, package);
+		if (option_changelog)
+			print_package_changelog(set, package);
+
+		if (option_conflicts + option_obsoletes +
+		    option_requires + option_provides +
+		    option_info + option_changelog == 0)
 			printf("%s-%s.%s\n", name, version, arch);
 	}
 
@@ -463,28 +490,31 @@ command_update(int argc, const char *argv[])
 	printf("command update - not implemented\n");
 }
 
-static const struct option *
-find_option(const struct option *options, const char *s)
+static int
+for_each_option(const struct option *options, const char *s,
+		void (*fn)(const struct option *o,
+			   const char *arg, void *data), void *data)
 {
-	const struct option *o;
-	int i;
+	int i, count = 0;
 
 	for (i = 0; options[i].type != OPTION_LAST; i++) {
 		switch (options[i].type) {
 		case OPTION_GROUP:
-			o = find_option(options[i].data, s);
-			if (o != NULL)
-				return o;
+			count += for_each_option(options[i].data, s, fn, data);
 			break;
 
 		case OPTION_BOOL:
 		case OPTION_STRING:
 			if (s[0] == '-' &&
-			    s[1] == options[i].short_name && s[2] == '\0')
-				return &options[i];
+			    s[1] == options[i].short_name && s[2] == '\0') {
+				fn(&options[i], s, data);
+				count++;
+			}
 			if (s[0] == '-' && s[1] == '-' &&
-			    strcmp(options[i].name, s + 2) == 0)
-				return &options[i];
+			    strcmp(options[i].name, s + 2) == 0) {
+				fn(&options[i], s, data);
+				count++;
+			}
 			break;
 
 		case OPTION_LAST:
@@ -492,13 +522,36 @@ find_option(const struct option *options, const char *s)
 		}
 	}
 
-	return NULL;
+	return count;
+}
+
+static void
+handle_option(const struct option *o, const char *arg, void *data)
+{
+	if (o->data == NULL) {
+		printf("option \"%s\" not supported\n", arg);
+		return;
+	}
+
+	switch (o->type) {
+	case OPTION_BOOL:
+		*(int *) o->data = 1;
+		break;
+
+	case OPTION_STRING:
+		*(const char **) o->data = arg + strlen(o->name) + 3;
+		break;
+
+	case OPTION_LAST:
+	case OPTION_GROUP:
+		/* Shouldn't happen. */
+		break;
+	}
 }
 
 static int
 parse_options(const struct option *options, int argc, const char **argv)
 {
-	const struct option *o;
 	int i, j;
 
 	/* FIXME: Bundling... rpm -Uvh must work :) */
@@ -508,29 +561,11 @@ parse_options(const struct option *options, int argc, const char **argv)
 			argv[j++] = argv[i];
 			continue;
 		}
-		o = find_option(options, argv[i]);
-		if (o == NULL) {
+
+		if (for_each_option(options, argv[i],
+				    handle_option, NULL) == 0) {
 			printf("unknown option: \"%s\"\n", argv[i]);
-			continue;
-		}
-		if (o->data == NULL) {
-			printf("option \"%s\" not supported\n", argv[i]);
-			continue;
-		}
-		switch (o->type) {
-		case OPTION_BOOL:
-			*(int *) o->data = 1;
-			break;
-
-		case OPTION_STRING:
-			*(const char **) o->data =
-				argv[i] + strlen(o->name) + 3;
-			break;
-
-		case OPTION_LAST:
-		case OPTION_GROUP:
-			/* Shouldn't happen. */
-			break;
+			exit(1);
 		}
 	}
 
@@ -639,23 +674,16 @@ main(int argc, const char *argv[])
 		exit(0);
 	}
 
-	if (option_query + option_verify +
-	    option_erase + option_install + option_upgrade > 1) {
-		printf("specify only one of query, verify, erase, install "
-		       "or upgrade\n");
-		exit(1);
-	}
-	    
-	if (option_query) {
-		command_query(argc, argv);
-	} else if (option_verify) {
+	if (option_verify) {
 		command_verify(argc, argv);
-	} else if (option_erase) {
-		command_erase(argc, argv);
+	} else if (option_query) {
+		command_query(argc, argv);
 	} else if (option_install) {
 		command_install(argc, argv);
 	} else if (option_upgrade) {
 		command_update(argc, argv);
+	} else if (option_erase) {
+		command_erase(argc, argv);
 	} else {
 		print_options_usage(rpm_options);
 		printf("\n");
