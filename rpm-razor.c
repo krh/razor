@@ -77,10 +77,10 @@ static const struct option verify_options[] = {
 	{ OPTION_BOOL, "nofiles", 0, NULL, "don't verify files in package", NULL },
 	{ OPTION_BOOL, "nodeps", 0, NULL, "don't verify package dependencies", NULL },
 	{ OPTION_BOOL, "noscript", 0, NULL, "don't execute verify script(s)", NULL, },
-	{ OPTION_BOOL, "all", 'a', NULL, "query/verify all packages", &option_al },
+	{ OPTION_BOOL, "all", 'a', NULL, "query/verify all packages", &option_all },
 	{ OPTION_BOOL, "file", 'f', NULL, "query/verify package(s) owning file", NULL },
 	{ OPTION_BOOL, "group", 'g', NULL, "query/verify package(s) in group", NULL },
-	{ OPTION_BOOL, "package", 'p', NULL, "query/verify a package file", NULL },
+	{ OPTION_BOOL, "package", 'p', NULL, "query/verify a package file", &option_package },
 	{ OPTION_BOOL, "ftswalk", 'W', NULL, "query/verify package(s) from TOP file tree walk", NULL },
 	{ OPTION_BOOL, "pkgid", 0, NULL, "query/verify package(s) with package identifier", NULL },
 	{ OPTION_BOOL, "hdrid", 0, NULL, "query/verify package(s) with header identifier", NULL },
@@ -311,6 +311,45 @@ add_command_line_packages(struct razor_set *set,
 	razor_package_iterator_destroy(pi);
 }
 
+static struct razor_package_iterator *
+get_query_packages(struct razor_set *set, int argc, const char *argv[])
+{
+	struct razor_package_query *query;
+	struct razor_package_iterator *pi;
+	int i;
+
+	if (option_all + option_whatprovides + option_whatrequires > 1) {
+		printf("only one type of query/verify "
+		       "may be performed at a time\n");
+		exit(1);
+	}
+
+	query = razor_package_query_create(set);
+
+	if (option_all) {
+		pi = razor_package_iterator_create(set);
+		razor_package_query_add_iterator(query, pi);
+		razor_package_iterator_destroy(pi);
+	} else if (option_whatrequires) {
+		for (i = 0; i < argc; i++)
+			add_property_packages(set, query,
+					      argv[i], NULL,
+					      RAZOR_PROPERTY_REQUIRES);
+	} else if (option_whatprovides) {
+		for (i = 0; i < argc; i++)
+			add_property_packages(set, query,
+					      argv[i], NULL,
+					      RAZOR_PROPERTY_PROVIDES);
+	} else if (argc > 0) {
+		add_command_line_packages(set, query, argc, argv);
+	} else {
+		printf("no arguments given for query/verify\n");
+		exit(1);
+	}
+
+	return razor_package_query_finish(query);
+}
+
 static void
 print_package_properties(struct razor_set *set,
 			 struct razor_package *package,
@@ -377,7 +416,6 @@ command_query(int argc, const char *argv[])
 	struct razor_set *set;
 	struct razor_package_iterator *pi;
 	struct razor_package *package;
-	struct razor_package_query *query;
 	const char *name, *version, *arch;
 
 	if (option_package) {
@@ -388,31 +426,7 @@ command_query(int argc, const char *argv[])
 		set = razor_set_open(repo_filename);
 	}
 
-	if (option_all + option_whatprovides + option_whatrequires > 1) {
-		printf("only one type of query/verify "
-		       "may be performed at a time\n");
-		exit(1);
-	}
-
-	query = razor_package_query_create(set);
-	if (option_all) {
-		pi = razor_package_iterator_create(set);
-		razor_package_query_add_iterator(query, pi);
-		razor_package_iterator_destroy(pi);
-	} else if (option_whatrequires) {
-		add_property_packages(set, query,
-				      argv[0], NULL, RAZOR_PROPERTY_REQUIRES);
-	} else if (option_whatprovides) {
-		add_property_packages(set, query,
-				      argv[0], NULL, RAZOR_PROPERTY_PROVIDES);
-	} else if (argc > 0) {
-		add_command_line_packages(set, query, argc, argv);
-	} else {
-		printf("no arguments given for query\n");
-		exit(1);
-	}
-
-	pi = razor_package_query_finish(query);
+	pi = get_query_packages(set, argc, argv);
 
 	while (razor_package_iterator_next(pi, &package,
 					   &name, &version, &arch)) {
@@ -449,12 +463,28 @@ command_query(int argc, const char *argv[])
 static void
 command_verify(int argc, const char *argv[])
 {
-	if (argc == 0) {
-		printf("no arguments given for verify\n");
-		exit(1);
+	struct razor_set *set;
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *name, *version, *arch;
+
+	if (option_package) {
+		set = create_set_from_command_line(argc, argv);
+		argc = 0;
+		option_all = 1;
+	} else {
+		set = razor_set_open(repo_filename);
 	}
 
-	printf("command verify - not implemented\n");
+	pi = get_query_packages(set, argc, argv);
+
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch)) {
+		printf("verify %s-%s.%s - not implemented\n",
+		       name, version, arch);
+	}
+
+	razor_package_iterator_destroy(pi);
 }
 
 static void
