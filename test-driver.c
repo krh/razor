@@ -262,8 +262,12 @@ end_transaction(struct test_context *ctx)
 		razor_transaction_install_package(ctx->trans, pkg);
 	}		
 	for (i = 0; i < ctx->n_remove_pkgs; i++) {
-		pkg = razor_set_get_package(ctx->repo_set,
+		pkg = razor_set_get_package(ctx->system_set,
 					    ctx->remove_pkgs[i]);
+		if (!pkg)
+			pkg = razor_set_get_package(ctx->repo_set,
+						    ctx->remove_pkgs[i]);
+
 		razor_transaction_remove_package(ctx->trans, pkg);
 	}		
 
@@ -278,6 +282,7 @@ end_transaction(struct test_context *ctx)
 	if (!errors) {
 		struct razor_set *new;
 		new = razor_transaction_finish(ctx->trans);
+		ctx->trans = NULL;
 		ctx->system_set = new;
 	}
 }
