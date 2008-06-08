@@ -63,6 +63,8 @@ struct razor_set_header {
 struct razor_package {
 	uint name  : 24;
 	uint flags : 8;
+	uint32_t summary;
+	uint32_t description;
 	uint32_t version;
 	uint32_t arch;
 	struct list_head properties;
@@ -325,6 +327,15 @@ razor_importer_finish_package(struct razor_importer *importer)
 		       1);
 
 	array_release(&importer->properties);
+}
+
+void
+razor_importer_add_details(struct razor_importer *importer,
+			   const char *summary,
+			   const char *description)
+{
+	importer->package->summary = hashtable_tokenize(&importer->table, summary);
+	importer->package->description = hashtable_tokenize(&importer->table, description);
 }
 
 void
@@ -908,6 +919,20 @@ razor_set_get_package(struct razor_set *set, const char *package)
 	razor_package_iterator_destroy(pi);
 
 	return p;
+}
+
+const char *
+razor_package_get_summary(struct razor_set *set, struct razor_package *package)
+{
+	const char *pool = set->string_pool.data;
+	return &pool[package->summary];
+}
+
+const char *
+razor_package_get_description(struct razor_set *set, struct razor_package *package)
+{
+	const char *pool = set->string_pool.data;
+	return &pool[package->description];
 }
 
 struct razor_property_iterator {

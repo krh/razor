@@ -810,6 +810,35 @@ command_download(int argc, const char *argv[])
 	return 0;
 }
 
+static int
+command_info(int argc, const char *argv[])
+{
+	struct razor_set *set;
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *pattern = argv[0], *name, *version, *arch;
+
+	set = razor_set_open(repo_filename);
+	pi = razor_package_iterator_create(set);
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch)) {
+		if (pattern && fnmatch(pattern, name, 0) != 0)
+			continue;
+
+		printf ("Name:        %s\n", name);
+		printf ("Arch:        %s\n", arch);
+		printf ("Version:     %s\n", version);
+		printf ("Summary:     %s\n", razor_package_get_summary (set, package));
+		printf ("Description:\n");
+		printf ("%s\n", razor_package_get_description (set, package));
+		printf ("\n");
+	}
+	razor_package_iterator_destroy(pi);
+	razor_set_destroy(set);
+
+	return 0;
+}
+
 static struct {
 	const char *name;
 	const char *description;
@@ -834,7 +863,8 @@ static struct {
 	{ "diff", "show diff between two package sets", command_diff },
 	{ "install", "install rpm", command_install },
 	{ "init", "init razor root", command_init },
-	{ "download", "download packages", command_download }
+	{ "download", "download packages", command_download },
+	{ "info", "display package details", command_info }
 };
 
 static int

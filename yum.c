@@ -37,6 +37,8 @@ enum {
 	YUM_STATE_BEGIN,
 	YUM_STATE_PACKAGE_NAME,
 	YUM_STATE_PACKAGE_ARCH,
+	YUM_STATE_SUMMARY,
+	YUM_STATE_DESCRIPTION,
 	YUM_STATE_CHECKSUM,
 	YUM_STATE_REQUIRES,
 	YUM_STATE_PROVIDES,
@@ -52,7 +54,7 @@ struct yum_context {
 
 	struct razor_importer *importer;
 	struct import_property_context *current_property_context;
-	char name[256], arch[64], buffer[512], *p;
+	char name[256], arch[64], summary[512], description[4096], buffer[512], *p;
 	char pkgid[128];
 	int state;
 };
@@ -113,6 +115,12 @@ yum_primary_start_element(void *data, const char *name, const char **atts)
 		razor_build_evr(buffer, sizeof buffer, epoch, version, release);
 		razor_importer_begin_package(ctx->importer,
 					     ctx->name, buffer, ctx->arch);
+	} else if (strcmp(name, "summary") == 0) {
+		ctx->p = ctx->summary;
+		ctx->state = YUM_STATE_SUMMARY;
+	} else if (strcmp(name, "description") == 0) {
+		ctx->p = ctx->description;
+		ctx->state = YUM_STATE_DESCRIPTION;
 	} else if (strcmp(name, "checksum") == 0) {
 		ctx->p = ctx->pkgid;
 		ctx->state = YUM_STATE_CHECKSUM;
@@ -188,6 +196,8 @@ yum_primary_end_element (void *data, const char *name)
 	switch (ctx->state) {
 	case YUM_STATE_PACKAGE_NAME:
 	case YUM_STATE_PACKAGE_ARCH:
+	case YUM_STATE_SUMMARY:
+	case YUM_STATE_DESCRIPTION:
 	case YUM_STATE_CHECKSUM:
 	case YUM_STATE_FILE:
 		ctx->state = YUM_STATE_BEGIN;
@@ -195,6 +205,8 @@ yum_primary_end_element (void *data, const char *name)
 	}
 
 	if (strcmp(name, "package") == 0) {
+		razor_importer_add_details(ctx->importer, ctx->summary, ctx->description);
+
 		XML_StopParser(ctx->current_parser, XML_TRUE);
 		ctx->current_parser = ctx->filelists_parser;
 	}
@@ -208,6 +220,8 @@ yum_character_data (void *data, const XML_Char *s, int len)
 	switch (ctx->state) {
 	case YUM_STATE_PACKAGE_NAME:
 	case YUM_STATE_PACKAGE_ARCH:
+	case YUM_STATE_SUMMARY:
+	case YUM_STATE_DESCRIPTION:
 	case YUM_STATE_CHECKSUM:
 	case YUM_STATE_FILE:
 		memcpy(ctx->p, s, len);
