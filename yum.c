@@ -39,6 +39,8 @@ enum {
 	YUM_STATE_PACKAGE_ARCH,
 	YUM_STATE_SUMMARY,
 	YUM_STATE_DESCRIPTION,
+	YUM_STATE_URL,
+	YUM_STATE_LICENSE,
 	YUM_STATE_CHECKSUM,
 	YUM_STATE_REQUIRES,
 	YUM_STATE_PROVIDES,
@@ -54,7 +56,8 @@ struct yum_context {
 
 	struct razor_importer *importer;
 	struct import_property_context *current_property_context;
-	char name[256], arch[64], summary[512], description[4096], buffer[512], *p;
+	char name[256], arch[64], summary[512], description[4096];
+	char url[256], license[64], buffer[512], *p;
 	char pkgid[128];
 	int state;
 };
@@ -121,9 +124,15 @@ yum_primary_start_element(void *data, const char *name, const char **atts)
 	} else if (strcmp(name, "description") == 0) {
 		ctx->p = ctx->description;
 		ctx->state = YUM_STATE_DESCRIPTION;
+	} else if (strcmp(name, "url") == 0) {
+		ctx->p = ctx->url;
+		ctx->state = YUM_STATE_URL;
 	} else if (strcmp(name, "checksum") == 0) {
 		ctx->p = ctx->pkgid;
 		ctx->state = YUM_STATE_CHECKSUM;
+	} else if (strcmp(name, "rpm:license") == 0) {
+		ctx->p = ctx->license;
+		ctx->state = YUM_STATE_LICENSE;
 	} else if (strcmp(name, "rpm:requires") == 0) {
 		ctx->state = YUM_STATE_REQUIRES;
 	} else if (strcmp(name, "rpm:provides") == 0) {
@@ -198,6 +207,8 @@ yum_primary_end_element (void *data, const char *name)
 	case YUM_STATE_PACKAGE_ARCH:
 	case YUM_STATE_SUMMARY:
 	case YUM_STATE_DESCRIPTION:
+	case YUM_STATE_URL:
+	case YUM_STATE_LICENSE:
 	case YUM_STATE_CHECKSUM:
 	case YUM_STATE_FILE:
 		ctx->state = YUM_STATE_BEGIN;
@@ -205,7 +216,9 @@ yum_primary_end_element (void *data, const char *name)
 	}
 
 	if (strcmp(name, "package") == 0) {
-		razor_importer_add_details(ctx->importer, ctx->summary, ctx->description);
+		razor_importer_add_details(ctx->importer, ctx->summary,
+					   ctx->description, ctx->url,
+					   ctx->license);
 
 		XML_StopParser(ctx->current_parser, XML_TRUE);
 		ctx->current_parser = ctx->filelists_parser;
@@ -222,6 +235,8 @@ yum_character_data (void *data, const XML_Char *s, int len)
 	case YUM_STATE_PACKAGE_ARCH:
 	case YUM_STATE_SUMMARY:
 	case YUM_STATE_DESCRIPTION:
+	case YUM_STATE_URL:
+	case YUM_STATE_LICENSE:
 	case YUM_STATE_CHECKSUM:
 	case YUM_STATE_FILE:
 		memcpy(ctx->p, s, len);

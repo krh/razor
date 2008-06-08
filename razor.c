@@ -63,10 +63,12 @@ struct razor_set_header {
 struct razor_package {
 	uint name  : 24;
 	uint flags : 8;
-	uint32_t summary;
-	uint32_t description;
 	uint32_t version;
 	uint32_t arch;
+	uint32_t summary;
+	uint32_t description;
+	uint32_t url;
+	uint32_t license;
 	struct list_head properties;
 	struct list_head files;
 };
@@ -332,10 +334,15 @@ razor_importer_finish_package(struct razor_importer *importer)
 void
 razor_importer_add_details(struct razor_importer *importer,
 			   const char *summary,
-			   const char *description)
+			   const char *description,
+			   const char *url,
+			   const char *license)
 {
 	importer->package->summary = hashtable_tokenize(&importer->table, summary);
 	importer->package->description = hashtable_tokenize(&importer->table, description);
+	importer->package->url = hashtable_tokenize(&importer->table, url);
+	importer->package->license = hashtable_tokenize(&importer->table, license);
+
 }
 
 void
@@ -921,18 +928,17 @@ razor_set_get_package(struct razor_set *set, const char *package)
 	return p;
 }
 
-const char *
-razor_package_get_summary(struct razor_set *set, struct razor_package *package)
+void
+razor_package_get_details(struct razor_set *set, struct razor_package *package,
+			  const char **summary, const char **description,
+			  const char **url, const char **license)
 {
 	const char *pool = set->string_pool.data;
-	return &pool[package->summary];
-}
 
-const char *
-razor_package_get_description(struct razor_set *set, struct razor_package *package)
-{
-	const char *pool = set->string_pool.data;
-	return &pool[package->description];
+	*summary = &pool[package->summary];
+	*description = &pool[package->description];
+	*url = &pool[package->url];
+	*license = &pool[package->license];
 }
 
 struct razor_property_iterator {

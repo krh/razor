@@ -51,10 +51,10 @@ int razor_set_write(struct razor_set *set, const char *filename);
 struct razor_package *
 razor_set_get_package(struct razor_set *set, const char *package);
 
-const char *
-razor_package_get_summary(struct razor_set *set, struct razor_package *package);
-const char *
-razor_package_get_description(struct razor_set *set, struct razor_package *package);
+void
+razor_package_get_details(struct razor_set *set, struct razor_package *package,
+			  const char **summary, const char **description,
+			  const char **url, const char **license);
 
 struct razor_package_iterator;
 struct razor_package_iterator *
@@ -177,7 +177,9 @@ void razor_importer_begin_package(struct razor_importer *importer,
 				  const char *arch);
 void razor_importer_add_details(struct razor_importer *importer,
 				const char *summary,
-				const char *description);
+				const char *description,
+				const char *url,
+				const char *license);
 void razor_importer_add_property(struct razor_importer *importer,
 				 const char *name,
 				 enum razor_version_relation relation,

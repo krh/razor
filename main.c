@@ -817,6 +817,7 @@ command_info(int argc, const char *argv[])
 	struct razor_package_iterator *pi;
 	struct razor_package *package;
 	const char *pattern = argv[0], *name, *version, *arch;
+	const char *summary, *description, *url, *license;
 
 	set = razor_set_open(repo_filename);
 	pi = razor_package_iterator_create(set);
@@ -825,12 +826,17 @@ command_info(int argc, const char *argv[])
 		if (pattern && fnmatch(pattern, name, 0) != 0)
 			continue;
 
+		razor_package_get_details (set, package, &summary, &description,
+					   &url, &license);
+
 		printf ("Name:        %s\n", name);
 		printf ("Arch:        %s\n", arch);
 		printf ("Version:     %s\n", version);
-		printf ("Summary:     %s\n", razor_package_get_summary (set, package));
+		printf ("URL:         %s\n", url);
+		printf ("License:     %s\n", license);
+		printf ("Summary:     %s\n", summary);
 		printf ("Description:\n");
-		printf ("%s\n", razor_package_get_description (set, package));
+		printf ("%s\n", description);
 		printf ("\n");
 	}
 	razor_package_iterator_destroy(pi);
