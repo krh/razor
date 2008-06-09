@@ -166,4 +166,22 @@ struct razor_rpm *razor_rpm_open(const char *filename);
 int razor_rpm_install(struct razor_rpm *rpm, const char *root);
 int razor_rpm_close(struct razor_rpm *rpm);
 
+
+/* Razor root functions. The root data struct encapsulates filesystem
+ * conventions and the locking protocol. */
+
+struct razor_root;
+#define RAZOR_ROOT_OPEN_WRITE 0x01
+
+int razor_root_create(const char *root);
+struct razor_root *razor_root_open(const char *root, int flags);
+struct razor_transaction *
+razor_root_create_transaction(struct razor_root *image,
+			      struct razor_set *upstream);
+int razor_root_close(struct razor_root *image);
+void razor_root_update(struct razor_root *image, struct razor_set *next);
+int razor_root_commit(struct razor_root *image);
+void razor_root_diff(struct razor_root *root,
+		     razor_package_callback_t callback, void *data);
+
 #endif /* _RAZOR_H_ */

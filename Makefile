@@ -3,7 +3,7 @@ LDLIBS = librazor.a -lexpat -lz -g -lrpm -lcurl
 
 all : razor test-driver rpm-razor
 
-librazor_objs = razor.o yum.o rpm.o types.o util.o
+librazor_objs = razor.o yum.o rpm.o types.o util.o razor-root.o
 librazor.a : $(librazor_objs)
 	ar cr $@ $(librazor_objs)
 
