@@ -53,7 +53,7 @@ razor_root_create(const char *root)
 	set = razor_set_create();
 	snprintf(path, sizeof path, "%s%s/%s",
 		 root, razor_root_path, system_repo_filename);
-	if (stat(root, &buf) == 0) {
+	if (stat(path, &buf) == 0) {
 		fprintf(stderr,
 			"a razor install root is already initialized\n");
 		return -1;

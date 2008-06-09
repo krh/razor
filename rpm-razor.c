@@ -116,8 +116,10 @@ static const struct option signature_options[] = {
 	{ }
 };
 
+static int option_initdb;
+
 static const struct option database_options[] = {
-	{ OPTION_BOOL, "initdb", 0, NULL, "initialize database", NULL },
+	{ OPTION_BOOL, "initdb", 0, NULL, "initialize database", &option_initdb },
 	{ OPTION_BOOL, "rebuilddb", 0, NULL, "rebuild database inverted lists from installed package headers", NULL },
 	{ }
 };
@@ -238,6 +240,13 @@ static const struct option rpm_options[] = {
 
 static const char system_repo_filename[] = "system.repo";
 static const char *repo_filename = system_repo_filename;
+static const char install_root[] = "install";
+
+static void
+command_initdb(int argc, const char *argv[])
+{
+	razor_root_create(install_root);
+}
 
 static struct razor_property *
 add_property_packages(struct razor_set *set, 
@@ -768,7 +777,9 @@ main(int argc, const char *argv[])
 		exit(0);
 	}
 
-	if (option_verify) {
+	if (option_initdb) {
+		command_initdb(argc, argv);
+	} else if (option_verify) {
 		command_verify(argc, argv);
 	} else if (option_query) {
 		command_query(argc, argv);
