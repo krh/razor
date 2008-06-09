@@ -563,6 +563,159 @@ command_import_rpms(int argc, const char *argv[])
 	return 0;
 }
 
+/* The image data struct encapsulates filesystem conventions and the
+ * locking protocol.  FIXME: Should this be razor_root?*/
+struct razor_root {
+	struct razor_set *system;
+	int fd;
+	char path[PATH_MAX];
+	char new_path[PATH_MAX];
+};
+
+#define RAZOR_ROOT_OPEN_WRITE 0x01
+
+int
+razor_root_create(const char *root);
+struct razor_root *
+razor_root_open(const char *root, int flags);
+struct razor_transaction *
+razor_root_create_transaction(struct razor_root *image,
+			      struct razor_set *upstream);
+int
+razor_root_close(struct razor_root *image);
+void
+razor_root_update(struct razor_root *image, struct razor_set *next);
+int
+razor_root_commit(struct razor_root *image);
+
+int
+razor_root_create(const char *root)
+{	
+	struct stat buf;
+	struct razor_set *set;
+	char path[PATH_MAX];
+
+	if (stat(root, &buf) < 0) {
+		if (mkdir(root, 0777) < 0) {
+			fprintf(stderr,
+				"could not create install root \"%s\"\n",
+				root);
+			return -1;
+		}
+		fprintf(stderr, "created install root \"%s\"\n", root);
+	} else if (!S_ISDIR(buf.st_mode)) {
+		fprintf(stderr,
+			"install root \"%s\" exists, but is not a directory\n",
+			root);
+		return -1;
+	}
+
+	snprintf(path, sizeof path, "%s/%s",
+		 razor_root_path, system_repo_filename);
+	if (razor_create_dir(root, path) < 0) {
+		fprintf(stderr, "could not create %s%s\n",
+			root, razor_root_path);
+		return -1;
+	}
+
+	set = razor_set_create();
+	snprintf(path, sizeof path, "%s%s/%s",
+		 root, razor_root_path, system_repo_filename);
+	if (stat(root, &buf) == 0) {
+		fprintf(stderr,
+			"a razor install root is already initialized\n");
+		return -1;
+	}
+	if (razor_set_write(set, path) < 0) {
+		fprintf(stderr, "could not write initial package set\n");
+		return -1;
+	}
+	razor_set_destroy(set);
+
+	return 0;
+}
+
+struct razor_root *
+razor_root_open(const char *root, int flags)
+{
+	struct razor_root *image;
+
+	image = malloc(sizeof *image);
+	if (image == NULL)
+		return NULL;
+
+	/* Create the new next repo file up front to ensure exclusive
+	 * access. */
+	snprintf(image->new_path, sizeof image->new_path,
+		 "%s%s/%s", root, root, next_repo_filename);
+	image->fd = open(image->new_path,
+			 O_CREAT | O_WRONLY | O_TRUNC | O_EXCL, 0666);
+	if (image->fd < 0) {
+		fprintf(stderr, "failed to get lock file, "
+			"maybe previous operation crashed?\n");
+
+		/* FIXME: Use fcntl advisory locking on the system
+		 * package set file to figure out whether previous
+		 * operation crashed or is still in progress. */
+
+		free(image);
+		return NULL;
+	}
+
+	snprintf(image->path, sizeof image->path,
+		 "%s%s/%s", root, razor_root_path, system_repo_filename);
+	image->system = razor_set_open(image->path);
+	if (image->system == NULL) {
+		unlink(image->new_path);
+		close(image->fd);
+		free(image);
+		return NULL;
+	}
+
+	return image;
+}
+
+struct razor_transaction *
+razor_root_create_transaction(struct razor_root *image,
+			      struct razor_set *upstream)
+{
+	/* FIXME: This should take a number of upstream repos. */
+	return razor_transaction_create(image->system, upstream);
+}
+
+int
+razor_root_close(struct razor_root *image)
+{
+	unlink(image->new_path);
+	close(image->fd);
+	free(image);
+
+	return 0;
+}
+
+void
+razor_root_update(struct razor_root *image, struct razor_set *next)
+{
+	razor_set_write_to_fd(next, image->fd);
+
+	/* Sync the new repo file so the new package set is on disk
+	 * before we start upgrading. */
+	fsync(image->fd);
+	printf("wrote %s\n", image->new_path);
+}
+
+int
+razor_root_commit(struct razor_root *image)
+{
+	/* Make it so. */
+	rename(image->new_path, image->path);
+	printf("renamed %s to %s\n", image->new_path, image->path);
+	close(image->fd);
+	free(image);
+
+	return 0;
+}
+
 static void
 download_package(const char *name,
 		 const char *old_version,
@@ -634,45 +787,24 @@ install_package(const char *name,
 static int
 command_install(int argc, const char *argv[])
 {
-	struct razor_set *system, *upstream, *next;
+	struct razor_root *root;
+	struct razor_set *upstream, *next;
 	struct razor_transaction *trans;
-	char path[PATH_MAX], new_path[PATH_MAX];
-	int i = 0, errors, fd, dependencies = 1;
+	int i = 0, errors, dependencies = 1;
 
 	if (i < argc && strcmp(argv[i], "--no-dependencies") == 0) {
 		dependencies = 0;
 		i++;
 	}
 
-	/* Create the new next repo file up front to ensure exclusive
-	 * access. */
-	snprintf(new_path, sizeof new_path,
-		 "%s%s/%s", root, razor_root_path, next_repo_filename);
-	fd = open(new_path, O_CREAT | O_WRONLY | O_TRUNC | O_EXCL, 0666);
-	if (fd < 0) {
-		fprintf(stderr, "failed to get lock file, "
-			"maybe previous operation crashed?\n");
-
-		/* FIXME: Use fcntl advisory locking to figure out
-		 * whether previous operation crashed or is still in
-		 * progress. */
-
-		return -1;
-	}
-
+	root = razor_root_open(razor_root_path, RAZOR_ROOT_OPEN_WRITE);
 	upstream = razor_set_open(rawhide_repo_filename);
-	snprintf(path, sizeof path,
-		 "%s%s/%s", root, razor_root_path, system_repo_filename);
-	system = razor_set_open(path);
-	if (system == NULL || upstream == NULL) {
-		unlink(new_path);
-		return 1;
-	}
-	trans = razor_transaction_create(system, upstream);
+	trans = razor_root_create_transaction(root, upstream);
+
 	for (; i < argc; i++) {
 		if (mark_packages_for_update(trans, upstream, argv[i]) == 0) {
 			fprintf(stderr, "no package matched %s\n", argv[i]);
-			unlink(new_path);
+			razor_root_close(root);
 			return 1;
 		}
 	}
@@ -680,83 +812,42 @@ command_install(int argc, const char *argv[])
 	if (dependencies) {
 		errors = razor_transaction_resolve(trans);
 		if (errors) {
-			unlink(new_path);
+			razor_root_close(root);
 			return 1;
 		}
 	}
 
 	next = razor_transaction_finish(trans);
 
-	razor_set_write_to_fd(next, fd);
-	printf("wrote %s\n", new_path);
+	razor_root_update(root, next);
 
 	if (mkdir("rpms", 0777) && errno != EEXIST) {
 		fprintf(stderr, "failed to create rpms directory.\n");
+		razor_root_close(root);
 		return 1;
 	}
 
-	razor_set_diff(system, next, download_package, &errors);
+	razor_set_diff(root->system, next, download_package, &errors);
 	if (errors > 0) {
 		fprintf(stderr, "failed to download %d packages\n", errors);
-		unlink(new_path);
+		razor_root_close(root);
                 return 1;
         }
 
 	/* FIXME: We need to figure out the right install order here,
 	 * so the post and pre scripts can run. */
-	razor_set_diff(system, next, install_package, (void *) root);
+	razor_set_diff(root->system, next, install_package, (void *) root);
 
 	razor_set_destroy(next);
-	razor_set_destroy(system);
 	razor_set_destroy(upstream);
 
-	/* Make it so. */
-	rename(new_path, path);
-	printf("renamed %s to %s\n", new_path, path);
-
-	return 0;
+	return razor_root_commit(root);
 }
 
 static int
 command_init(int argc, const char *argv[])
 {
-	struct stat buf;
-	struct razor_set *set;
-	char path[PATH_MAX];
-
-	if (stat(root, &buf) < 0) {
-		if (mkdir(root, 0777) < 0) {
-			fprintf(stderr,
-				"could not create install root \"%s\"\n",
-				root);
-			return -1;
-		}
-		fprintf(stderr, "created install root \"%s\"\n", root);
-	} else if (!S_ISDIR(buf.st_mode)) {
-		fprintf(stderr,
-			"install root \"%s\" exists, but is not a directory\n",
-			root);
-		return -1;
-	}
-
-	snprintf(path, sizeof path, "%s/%s",
-		 razor_root_path, system_repo_filename);
-	if (razor_create_dir(root, path) < 0) {
-		fprintf(stderr, "could not create %s%s\n",
-			root, razor_root_path);
-		return -1;
-	}
-
-	set = razor_set_create();
-	snprintf(path, sizeof path, "%s%s/%s",
-		 root, razor_root_path, system_repo_filename);
-	if (razor_set_write(set, path) < 0) {
-		fprintf(stderr, "could not write initial package set\n");
-		return -1;
-	}
-	razor_set_destroy(set);
-
-	return 0;
+	return razor_root_create(root);
 }
 
 static int
