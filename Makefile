@@ -1,16 +1,20 @@
 CFLAGS = -Wall -Wstrict-prototypes -Wmissing-prototypes -g
-LDLIBS = -lexpat -lz -g -lrpm -lcurl
+LDLIBS = librazor.a -lexpat -lz -g -lrpm -lcurl
 
 all : razor test-driver rpm-razor
 
-razor : razor.o yum.o main.o rpm.o types.o util.o
+librazor_objs = razor.o yum.o rpm.o types.o util.o
+librazor.a : $(librazor_objs)
+	ar cr $@ $(librazor_objs)
+
+razor : main.o librazor.a
 
 *.o : razor.h razor-internal.h
 razor.o : types.h
 
-test-driver : razor.o types.o util.o test-driver.o
+test-driver : librazor.a test-driver.o
 
-rpm-razor : rpm-razor.o razor.o types.o util.o rpm.o
+rpm-razor : librazor.a rpm-razor.o
 
 test : test-driver
 	./test-driver test.xml
@@ -20,4 +24,4 @@ reset : ./razor
 	./razor init
 
 clean :
-	rm -f *.o razor
+	rm -f *.o razor librazor.a
