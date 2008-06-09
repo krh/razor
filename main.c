@@ -39,6 +39,7 @@ static const char updated_repo_filename[] = "system-updated.repo";
 static const char razor_root_path[] = "/var/lib/razor";
 static const char root[] = "install";
 static const char *repo_filename = system_repo_filename;
+static const char *yum_url;
 
 static int
 command_list(int argc, const char *argv[])
@@ -321,19 +322,23 @@ download_if_missing(const char *url, const char *file)
 	return 0;
 }
 
-#define REPO_URL "http://download.fedora.redhat.com" \
+#define YUM_URL "http://download.fedora.redhat.com" \
 	"/pub/fedora/linux/development/i386/os"
 
 static int
 command_import_yum(int argc, const char *argv[])
 {
 	struct razor_set *set;
+	char buffer[512];
 
-	if (download_if_missing(REPO_URL "/repodata/primary.xml.gz",
-				"primary.xml.gz") < 0)
+	printf("downloading from %s.\n", yum_url);
+	snprintf(buffer, sizeof buffer,
+		 "%s/repodata/primary.xml.gz", yum_url);
+	if (download_if_missing(buffer, "primary.xml.gz") < 0)
 		return -1;
-	if (download_if_missing(REPO_URL "/repodata/filelists.xml.gz",
-				"filelists.xml.gz") < 0)
+	snprintf(buffer, sizeof buffer,
+		 "%s/repodata/filelists.xml.gz", yum_url);
+	if (download_if_missing(buffer, "filelists.xml.gz") < 0)
 		return -1;
 
 	set = razor_set_create_from_yum();
@@ -580,7 +585,7 @@ download_package(const char *name,
 		v = new_version;
 
 	snprintf(url, sizeof url,
-		 REPO_URL "/Packages/%s-%s.%s.rpm", name, v, arch);
+		 "%s/Packages/%s-%s.%s.rpm", yum_url, name, v, arch);
 	snprintf(file, sizeof file,
 		 "rpms/%s-%s.%s.rpm", name, v, arch);
 	if (download_if_missing(url, file) < 0)
@@ -778,8 +783,8 @@ command_download(int argc, const char *argv[])
 
 		matches++;
 		snprintf(url, sizeof url,
-			 REPO_URL "/Packages/%s-%s.%s.rpm",
-			 name, version, arch);
+			 "%s/Packages/%s-%s.%s.rpm",
+			 yum_url, name, version, arch);
 		snprintf(file, sizeof file,
 			 "rpms/%s-%s.%s.rpm", name, version, arch);
 		download_if_missing(url, file);
@@ -845,6 +850,10 @@ main(int argc, const char *argv[])
 	repo = getenv("RAZOR_REPO");
 	if (repo != NULL)
 		repo_filename = repo;
+
+	yum_url = getenv("YUM_URL");
+	if (yum_url == NULL)
+		yum_url = YUM_URL;
 
 	if (argc < 2)
 		return usage();
