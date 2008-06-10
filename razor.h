@@ -118,6 +118,7 @@ void razor_transaction_update_package(struct razor_transaction *trans,
 				      struct razor_package *package);
 void razor_transaction_update_all(struct razor_transaction *transaction);
 int razor_transaction_resolve(struct razor_transaction *trans);
+void razor_transaction_describe(struct razor_transaction *trans);
 struct razor_set *razor_transaction_finish(struct razor_transaction *trans);
 void razor_transaction_destroy(struct razor_transaction *trans);
 
@@ -175,6 +176,7 @@ struct razor_root;
 
 int razor_root_create(const char *root);
 struct razor_root *razor_root_open(const char *root, int flags);
+struct razor_set *razor_root_open_read_only(const char *root);
 struct razor_transaction *
 razor_root_create_transaction(struct razor_root *image,
 			      struct razor_set *upstream);

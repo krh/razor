@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <dirent.h>
 #include "razor.h"
 
 enum option_type {
@@ -163,6 +164,7 @@ static const struct option install_options[] = {
 };
 
 static int option_version;
+static const char *option_root = "install";
 
 static const struct option common_options[] = {
 	{ OPTION_STRING, "define", 'D', "MACRO EXPR", "define MACRO with value EXPR", NULL, },
@@ -171,7 +173,7 @@ static const struct option common_options[] = {
 	{ OPTION_BOOL, "nodigest", 0, NULL, "don't verify package digest(s)", NULL, },
 	{ OPTION_BOOL, "nosignature", 0, NULL, "don't verify package signature(s)", NULL, },
 	{ OPTION_STRING, "rcfile", 0, "<FILE:...>", "read <FILE:...> instead of default file(s)", NULL },
-	{ OPTION_STRING, "root", 'r', "ROOT", "use ROOT as top level directory (default: \"/\")", NULL },
+	{ OPTION_STRING, "root", 'r', "ROOT", "use ROOT as top level directory (default: \"/\")", &option_root },
 	{ OPTION_BOOL, "querytags", 0, NULL, "display known query tags", NULL, },
 	{ OPTION_BOOL, "showrc", 0, NULL, "display final rpmrc and macro configuration", NULL, },
 	{ OPTION_BOOL, "quiet", 0, NULL, "provide less detailed output", NULL },
@@ -240,12 +242,11 @@ static const struct option rpm_options[] = {
 
 static const char system_repo_filename[] = "system.repo";
 static const char *repo_filename = system_repo_filename;
-static const char install_root[] = "install";
 
 static void
 command_initdb(int argc, const char *argv[])
 {
-	razor_root_create(install_root);
+	razor_root_create(option_root);
 }
 
 static struct razor_property *
@@ -434,7 +435,7 @@ command_query(int argc, const char *argv[])
 		argc = 0;
 		option_all = 1;
 	} else {
-		set = razor_set_open(repo_filename);
+		set = razor_root_open_read_only(option_root);
 	}
 
 	pi = get_query_packages(set, argc, argv);
@@ -484,7 +485,7 @@ command_verify(int argc, const char *argv[])
 		argc = 0;
 		option_all = 1;
 	} else {
-		set = razor_set_open(repo_filename);
+		set = razor_root_open_read_only(option_root);
 	}
 
 	pi = get_query_packages(set, argc, argv);

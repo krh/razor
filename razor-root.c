@@ -107,6 +107,17 @@ razor_root_open(const char *root, int flags)
 	return image;
 }
 
+struct razor_set *
+razor_root_open_read_only(const char *root)
+{
+	char path[PATH_MAX];
+
+	snprintf(path, sizeof path, "%s%s/%s",
+		 root, razor_root_path, system_repo_filename);
+
+	return razor_set_open(path);
+}
+
 struct razor_transaction *
 razor_root_create_transaction(struct razor_root *image,
 			      struct razor_set *upstream)
