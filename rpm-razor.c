@@ -558,6 +558,7 @@ command_install(int argc, const char *argv[])
 		razor_transaction_install_package(trans, package);
 	razor_package_iterator_destroy(pi);
 
+	razor_transaction_describe(trans);
 	next = razor_transaction_finish(trans);
 	razor_set_destroy(set);
 	razor_set_destroy(upstream);
@@ -568,12 +569,34 @@ command_install(int argc, const char *argv[])
 static void
 command_update(int argc, const char *argv[])
 {
+	struct razor_set *set, *upstream, *next;
+	struct razor_transaction *trans;
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *name, *version, *arch;
+
 	if (argc == 0) {
 		printf("no packages given for update\n");
 		exit(1);
 	}
 
-	printf("command update - not implemented\n");
+	set = razor_set_open(repo_filename);
+	upstream = create_set_from_command_line(argc, argv);
+
+	trans = razor_transaction_create(set, upstream);
+
+	pi = razor_package_iterator_create(upstream);
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch))
+		razor_transaction_update_package(trans, package);
+	razor_package_iterator_destroy(pi);
+
+	razor_transaction_describe(trans);
+	next = razor_transaction_finish(trans);
+	razor_set_destroy(set);
+	razor_set_destroy(upstream);
+
+	razor_set_destroy(next);
 }
 
 static int

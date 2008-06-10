@@ -1874,10 +1874,16 @@ void
 razor_transaction_update_package(struct razor_transaction *trans,
 				  struct razor_package *package)
 {
-	struct razor_package *spkgs;
+	struct razor_package *spkgs, *upkgs, *end;
 
 	spkgs = trans->system.set->packages.data;
-	trans->system.packages[package - spkgs] |= TRANS_PACKAGE_UPDATE;
+	upkgs = trans->upstream.set->packages.data;
+	end = trans->system.set->packages.data +
+		trans->system.set->packages.size;
+	if (spkgs <= package && package < end)
+		trans->system.packages[package - spkgs] |= TRANS_PACKAGE_UPDATE;
+	else
+		trans->upstream.packages[package - upkgs] |= TRANS_PACKAGE_UPDATE;
 }
 
 struct prop_iter {
@@ -2119,6 +2125,8 @@ clear_requires_flags(struct transaction_set *ts)
 	}
 }
 
+static const char *relation_string[] = { "<", "<=", "=", ">=", ">" };
+
 static void
 mark_satisfied_requires(struct razor_transaction *trans,
 			struct transaction_set *rts,
@@ -2140,8 +2148,6 @@ mark_satisfied_requires(struct razor_transaction *trans,
 			rpi.present[rp - rpi.start] |= TRANS_PROPERTY_SATISFIED;
 	}
 }
-
-static const char *relation_string[] = { "<", "<=", "=", ">=", ">" };
 
 static void
 mark_all_satisfied_requires(struct razor_transaction *trans)
@@ -2377,28 +2383,46 @@ razor_transaction_resolve(struct razor_transaction *trans)
 	return trans->changes;
 }
 
+static void
+describe_unsatisfied(struct razor_set *set, struct razor_property *rp)
+{
+	struct razor_package_iterator pi;
+	struct razor_package *pkg;
+	const char *name, *version, *arch, *pool;
+
+	pool = set->string_pool.data;
+	fprintf(stderr, "could not satisfy %s %s %s, required by",
+		&pool[rp->name],
+		relation_string[rp->relation],
+		&pool[rp->version]);
+
+	razor_package_iterator_init_for_property(&pi, set, rp);
+	while (razor_package_iterator_next(&pi, &pkg, &name, &version, &arch))
+		fprintf(stderr, " %s-%s", name, version);
+
+	fprintf(stderr, "\n");
+}
+
 void
 razor_transaction_describe(struct razor_transaction *trans)
 {
 	struct prop_iter rpi;
 	struct razor_property *rp;
 
+	flush_scheduled_system_updates(trans);
+	flush_scheduled_upstream_updates(trans);
+	mark_all_satisfied_requires(trans);
+
 	prop_iter_init(&rpi, &trans->system);
 	while (prop_iter_next(&rpi, RAZOR_PROPERTY_REQUIRES, &rp)) {
 		if (!(rpi.present[rp - rpi.start] & TRANS_PROPERTY_SATISFIED))
-			fprintf(stderr, "could not satisfy req %s %s %s\n",
-				&rpi.pool[rp->name],
-				relation_string[rp->relation],
-				&rpi.pool[rp->version]);
+			describe_unsatisfied(trans->system.set, rp);
 	}
 
 	prop_iter_init(&rpi, &trans->upstream);
 	while (prop_iter_next(&rpi, RAZOR_PROPERTY_REQUIRES, &rp)) {
 		if (!(rpi.present[rp - rpi.start] & TRANS_PROPERTY_SATISFIED))
-			fprintf(stderr, "could not satisfy req %s %s %s\n",
-				&rpi.pool[rp->name],
-				relation_string[rp->relation],
-				&rpi.pool[rp->version]);
+			describe_unsatisfied(trans->upstream.set, rp);
 	}
 }
 
