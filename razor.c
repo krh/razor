@@ -2146,35 +2146,12 @@ static const char *relation_string[] = { "<", "<=", "=", ">=", ">" };
 static void
 mark_all_satisfied_requires(struct razor_transaction *trans)
 {
-	struct razor_property *sp;
-	struct prop_iter spi;
-
 	clear_requires_flags(&trans->system);
 	clear_requires_flags(&trans->upstream);
 	mark_satisfied_requires(trans, &trans->system, &trans->system);
 	mark_satisfied_requires(trans, &trans->system, &trans->upstream);
 	mark_satisfied_requires(trans, &trans->upstream, &trans->system);
 	mark_satisfied_requires(trans, &trans->upstream, &trans->upstream);
-
-	prop_iter_init(&spi, &trans->system);
-	while (prop_iter_next(&spi, RAZOR_PROPERTY_REQUIRES, &sp)) {
-		if (spi.present[sp - spi.start] & TRANS_PROPERTY_SATISFIED)
-			continue;
-		fprintf(stderr, "unsatisfied system requires: %s %s %s\n",
-			spi.pool + sp->name,
-			relation_string[sp->relation],
-			spi.pool + sp->version);
-	}
-
-	prop_iter_init(&spi, &trans->upstream);
-	while (prop_iter_next(&spi, RAZOR_PROPERTY_REQUIRES, &sp)) {
-		if (spi.present[sp - spi.start] & TRANS_PROPERTY_SATISFIED)
-			continue;
-		fprintf(stderr, "unsatisfied upstream requires: %s %s %s\n",
-			spi.pool + sp->name,
-			relation_string[sp->relation],
-			spi.pool + sp->version);
-	}
 }
 
 static void
@@ -2309,7 +2286,6 @@ static void
 pull_in_all_requirements(struct razor_transaction *trans)
 {
 	struct prop_iter rpi, ppi;
-	struct razor_property *rp;
 
 	prop_iter_init(&rpi, &trans->system);
 	prop_iter_init(&ppi, &trans->upstream);
@@ -2318,24 +2294,6 @@ pull_in_all_requirements(struct razor_transaction *trans)
 	prop_iter_init(&rpi, &trans->upstream);
 	prop_iter_init(&ppi, &trans->upstream);
 	pull_in_requirements(trans, &rpi, &ppi);
-
-	prop_iter_init(&rpi, &trans->system);
-	while (prop_iter_next(&rpi, RAZOR_PROPERTY_REQUIRES, &rp)) {
-		if (!(rpi.present[rp - rpi.start] & TRANS_PROPERTY_SATISFIED))
-			fprintf(stderr, "could not satisfy req %s %s %s\n",
-				&rpi.pool[rp->name],
-				relation_string[rp->relation],
-				&rpi.pool[rp->version]);
-	}
-
-	prop_iter_init(&rpi, &trans->upstream);
-	while (prop_iter_next(&rpi, RAZOR_PROPERTY_REQUIRES, &rp)) {
-		if (!(rpi.present[rp - rpi.start] & TRANS_PROPERTY_SATISFIED))
-			fprintf(stderr, "could not satisfy req %s %s %s\n",
-				&rpi.pool[rp->name],
-				relation_string[rp->relation],
-				&rpi.pool[rp->version]);
-	}
 }
 
 static void
@@ -2354,21 +2312,17 @@ flush_scheduled_system_updates(struct razor_transaction *trans)
 		if (!(trans->system.packages[p - spkgs] & TRANS_PACKAGE_UPDATE))
 			continue;
 
-		if (!prop_iter_seek_to(&ppi, RAZOR_PROPERTY_PROVIDES, name)) {
-			fprintf(stderr, "nothing provides %s\n", name);
+		if (!prop_iter_seek_to(&ppi, RAZOR_PROPERTY_PROVIDES, name))
 			continue;
-		}
 
 		pkg = pick_matching_provider(trans->upstream.set, &ppi,
 					     RAZOR_VERSION_GREATER, version);
-		if (pkg == NULL) {
-			fprintf(stderr,
-				"no newer version of %s available\n", name);
+		if (pkg == NULL)
 			continue;
-		}
 		
-		fprintf(stderr, "updating %s from %s to %s\n",
-			name, version, &ppi.pool[pkg->version]);
+		fprintf(stderr, "updating %s-%s to %s-%s\n",
+			name, version,
+			&ppi.pool[pkg->name], &ppi.pool[pkg->version]);
 
 		razor_transaction_remove_package(trans, p);
 		razor_transaction_install_package(trans, pkg);
@@ -2421,6 +2375,31 @@ razor_transaction_resolve(struct razor_transaction *trans)
 	}
 
 	return trans->changes;
+}
+
+void
+razor_transaction_describe(struct razor_transaction *trans)
+{
+	struct prop_iter rpi;
+	struct razor_property *rp;
+
+	prop_iter_init(&rpi, &trans->system);
+	while (prop_iter_next(&rpi, RAZOR_PROPERTY_REQUIRES, &rp)) {
+		if (!(rpi.present[rp - rpi.start] & TRANS_PROPERTY_SATISFIED))
+			fprintf(stderr, "could not satisfy req %s %s %s\n",
+				&rpi.pool[rp->name],
+				relation_string[rp->relation],
+				&rpi.pool[rp->version]);
+	}
+
+	prop_iter_init(&rpi, &trans->upstream);
+	while (prop_iter_next(&rpi, RAZOR_PROPERTY_REQUIRES, &rp)) {
+		if (!(rpi.present[rp - rpi.start] & TRANS_PROPERTY_SATISFIED))
+			fprintf(stderr, "could not satisfy req %s %s %s\n",
+				&rpi.pool[rp->name],
+				relation_string[rp->relation],
+				&rpi.pool[rp->version]);
+	}
 }
 
 int
