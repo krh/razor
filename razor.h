@@ -26,6 +26,12 @@ struct razor_set;
 struct razor_package;
 struct razor_property;
 
+enum razor_repo_file_type {
+	RAZOR_REPO_FILE_MAIN,
+	RAZOR_REPO_FILE_DETAILS,
+	RAZOR_REPO_FILE_FILES
+};
+
 enum razor_property_type {
 	RAZOR_PROPERTY_REQUIRES,
 	RAZOR_PROPERTY_PROVIDES,
@@ -45,8 +51,13 @@ extern const char * const razor_version_relations[];
 struct razor_set *razor_set_create(void);
 struct razor_set *razor_set_open(const char *filename);
 void razor_set_destroy(struct razor_set *set);
-int razor_set_write_to_fd(struct razor_set *set, int fd);
-int razor_set_write(struct razor_set *set, const char *filename);
+int razor_set_write_to_fd(struct razor_set *set, int fd,
+			  enum razor_repo_file_type type);
+int razor_set_write(struct razor_set *set, const char *filename,
+		    enum razor_repo_file_type type);
+
+void razor_set_open_details(struct razor_set *set, const char *filename);
+void razor_set_open_files(struct razor_set *set, const char *filename);
 
 struct razor_package *
 razor_set_get_package(struct razor_set *set, const char *package);
