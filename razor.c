@@ -59,6 +59,7 @@ struct razor_set_header {
 #define RAZOR_PACKAGE_POOL	4
 #define RAZOR_PROPERTY_POOL	5
 #define RAZOR_FILE_POOL		6
+#define RAZOR_FILE_STRING_POOL	7
 
 struct razor_package {
 	uint name  : 24;
@@ -99,6 +100,7 @@ struct razor_set {
 	struct array package_pool;
  	struct array property_pool;
  	struct array file_pool;
+	struct array file_string_pool;
 	struct razor_set_header *header;
 };
 
@@ -117,6 +119,7 @@ struct import_directory {
 struct razor_importer {
 	struct razor_set *set;
 	struct hashtable table;
+	struct hashtable file_table;
 	struct razor_package *package;
 	struct array properties;
 	struct array files;
@@ -135,13 +138,14 @@ zalloc(size_t size)
 }
 
 struct razor_set_section razor_sections[] = {
-	{ RAZOR_STRING_POOL,	offsetof(struct razor_set, string_pool) },
-	{ RAZOR_PACKAGES,	offsetof(struct razor_set, packages) },
-	{ RAZOR_PROPERTIES,	offsetof(struct razor_set, properties) },
-	{ RAZOR_FILES,		offsetof(struct razor_set, files) },
-	{ RAZOR_PACKAGE_POOL,	offsetof(struct razor_set, package_pool) },
-	{ RAZOR_PROPERTY_POOL,	offsetof(struct razor_set, property_pool) },
-	{ RAZOR_FILE_POOL,	offsetof(struct razor_set, file_pool) },
+	{ RAZOR_STRING_POOL,		offsetof(struct razor_set, string_pool) },
+	{ RAZOR_PACKAGES,		offsetof(struct razor_set, packages) },
+	{ RAZOR_PROPERTIES,		offsetof(struct razor_set, properties) },
+	{ RAZOR_FILES,			offsetof(struct razor_set, files) },
+	{ RAZOR_PACKAGE_POOL,		offsetof(struct razor_set, package_pool) },
+	{ RAZOR_PROPERTY_POOL,		offsetof(struct razor_set, property_pool) },
+	{ RAZOR_FILE_POOL,		offsetof(struct razor_set, file_pool) },
+	{ RAZOR_FILE_STRING_POOL,	offsetof(struct razor_set, file_string_pool) },
 };
 
 struct razor_set *
@@ -155,6 +159,8 @@ razor_set_create(void)
 
 	e = array_add(&set->files, sizeof *e);
 	empty = array_add(&set->string_pool, 1);
+	*empty = '\0';
+	empty = array_add(&set->file_string_pool, 1);
 	*empty = '\0';
 	e->name = 0;
 	e->flags = RAZOR_ENTRY_LAST;
@@ -393,6 +399,7 @@ razor_importer_new(void)
 	importer = zalloc(sizeof *importer);
 	importer->set = razor_set_create();
 	hashtable_init(&importer->table, &importer->set->string_pool);
+	hashtable_init(&importer->file_table, &importer->set->file_string_pool);
 
 	return importer;
 }
@@ -629,7 +636,7 @@ build_file_tree(struct razor_importer *importer)
 			      compare_filenames,
 			      NULL);
 
-	root.name = hashtable_tokenize(&importer->table, "");
+	root.name = hashtable_tokenize(&importer->file_table, "");
 	array_init(&root.files);
 	array_init(&root.packages);
 	root.last = NULL;
@@ -649,7 +656,7 @@ build_file_tree(struct razor_importer *importer)
 			length = end - f;
 			memcpy(dirname, f, length);
 			dirname[length] ='\0';
-			name = hashtable_tokenize(&importer->table, dirname);
+			name = hashtable_tokenize(&importer->file_table, dirname);
 			if (d->last == NULL || d->last->name != name) {
 				d->last = array_add(&d->files, sizeof *d);
 				d->last->name = name;
@@ -819,6 +826,7 @@ razor_importer_finish(struct razor_importer *importer)
 
 	set = importer->set;
 	hashtable_release(&importer->table);
+	hashtable_release(&importer->file_table);
 	free(importer);
 
 	return set;
@@ -1014,7 +1022,7 @@ static struct razor_entry *
 find_entry(struct razor_set *set, struct razor_entry *dir, const char *pattern)
 {
 	struct razor_entry *e;
-	const char *n, *pool = set->string_pool.data;
+	const char *n, *pool = set->file_string_pool.data;
 	int len;
 
 	e = (struct razor_entry *) set->files.data + dir->start;
@@ -1037,7 +1045,7 @@ list_dir(struct razor_set *set, struct razor_entry *dir,
 	 char *prefix, const char *pattern)
 {
 	struct razor_entry *e;
-	const char *n, *pool = set->string_pool.data;
+	const char *n, *pool = set->file_string_pool.data;
 
 	e = (struct razor_entry *) set->files.data + dir->start;
 	do {
@@ -1111,7 +1119,7 @@ list_package_files(struct razor_set *set, struct list *r,
 	int len;
 	
 	entries = (struct razor_entry *) set->files.data;
-	pool = set->string_pool.data;
+	pool = set->file_string_pool.data;
 
 	e = entries + dir->start;
 	do {
@@ -1258,6 +1266,7 @@ struct source {
 struct razor_merger {
 	struct razor_set *set;
 	struct hashtable table;
+	struct hashtable file_table;
 	struct source source1;
 	struct source source2;
 };
@@ -1272,6 +1281,7 @@ razor_merger_create(struct razor_set *set1, struct razor_set *set2)
 	merger = zalloc(sizeof *merger);
 	merger->set = razor_set_create();
 	hashtable_init(&merger->table, &merger->set->string_pool);
+	hashtable_init(&merger->file_table, &merger->set->file_string_pool);
 
 	merger->source1.set = set1;
 	count = set1->properties.size / sizeof (struct razor_property);
@@ -1434,7 +1444,7 @@ add_file(struct razor_merger *merger, const char *name)
 	struct razor_entry *e;
 
 	e = array_add(&merger->set->files, sizeof *e);
-	e->name = hashtable_tokenize(&merger->table, name);
+	e->name = hashtable_tokenize(&merger->file_table, name);
 	e->flags = 0;
 	e->start = 0;
 
@@ -1740,6 +1750,7 @@ razor_merger_finish(struct razor_merger *merger)
 
 	result = merger->set;
 	hashtable_release(&merger->table);
+	hashtable_release(&merger->file_table);
 	free(merger);
 
 	return result;
