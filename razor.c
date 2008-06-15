@@ -52,14 +52,15 @@ struct razor_set_header {
 #define RAZOR_MAGIC 0x7a7a7a7a
 #define RAZOR_VERSION 1
 
-#define RAZOR_STRING_POOL	0
-#define RAZOR_PACKAGES		1
-#define RAZOR_PROPERTIES	2
-#define RAZOR_FILES		3
-#define RAZOR_PACKAGE_POOL	4
-#define RAZOR_PROPERTY_POOL	5
-#define RAZOR_FILE_POOL		6
-#define RAZOR_FILE_STRING_POOL	7
+#define RAZOR_STRING_POOL		0
+#define RAZOR_PACKAGES			1
+#define RAZOR_PROPERTIES		2
+#define RAZOR_FILES			3
+#define RAZOR_PACKAGE_POOL		4
+#define RAZOR_PROPERTY_POOL		5
+#define RAZOR_FILE_POOL			6
+#define RAZOR_FILE_STRING_POOL		7
+#define RAZOR_DETAILS_STRING_POOL	8
 
 struct razor_package {
 	uint name  : 24;
@@ -101,6 +102,7 @@ struct razor_set {
  	struct array property_pool;
  	struct array file_pool;
 	struct array file_string_pool;
+	struct array details_string_pool;
 	struct razor_set_header *header;
 };
 
@@ -120,6 +122,7 @@ struct razor_importer {
 	struct razor_set *set;
 	struct hashtable table;
 	struct hashtable file_table;
+	struct hashtable details_table;
 	struct razor_package *package;
 	struct array properties;
 	struct array files;
@@ -146,6 +149,7 @@ struct razor_set_section razor_sections[] = {
 	{ RAZOR_PROPERTY_POOL,		offsetof(struct razor_set, property_pool) },
 	{ RAZOR_FILE_POOL,		offsetof(struct razor_set, file_pool) },
 	{ RAZOR_FILE_STRING_POOL,	offsetof(struct razor_set, file_string_pool) },
+	{ RAZOR_DETAILS_STRING_POOL,	offsetof(struct razor_set, details_string_pool) },
 };
 
 struct razor_set *
@@ -161,6 +165,8 @@ razor_set_create(void)
 	empty = array_add(&set->string_pool, 1);
 	*empty = '\0';
 	empty = array_add(&set->file_string_pool, 1);
+	*empty = '\0';
+	empty = array_add(&set->details_string_pool, 1);
 	*empty = '\0';
 	e->name = 0;
 	e->flags = RAZOR_ENTRY_LAST;
@@ -344,11 +350,10 @@ razor_importer_add_details(struct razor_importer *importer,
 			   const char *url,
 			   const char *license)
 {
-	importer->package->summary = hashtable_tokenize(&importer->table, summary);
-	importer->package->description = hashtable_tokenize(&importer->table, description);
-	importer->package->url = hashtable_tokenize(&importer->table, url);
-	importer->package->license = hashtable_tokenize(&importer->table, license);
-
+	importer->package->summary = hashtable_tokenize(&importer->details_table, summary);
+	importer->package->description = hashtable_tokenize(&importer->details_table, description);
+	importer->package->url = hashtable_tokenize(&importer->details_table, url);
+	importer->package->license = hashtable_tokenize(&importer->details_table, license);
 }
 
 void
@@ -400,6 +405,7 @@ razor_importer_new(void)
 	importer->set = razor_set_create();
 	hashtable_init(&importer->table, &importer->set->string_pool);
 	hashtable_init(&importer->file_table, &importer->set->file_string_pool);
+	hashtable_init(&importer->details_table, &importer->set->details_string_pool);
 
 	return importer;
 }
@@ -827,6 +833,7 @@ razor_importer_finish(struct razor_importer *importer)
 	set = importer->set;
 	hashtable_release(&importer->table);
 	hashtable_release(&importer->file_table);
+	hashtable_release(&importer->details_table);
 	free(importer);
 
 	return set;
@@ -941,7 +948,7 @@ razor_package_get_details(struct razor_set *set, struct razor_package *package,
 			  const char **summary, const char **description,
 			  const char **url, const char **license)
 {
-	const char *pool = set->string_pool.data;
+	const char *pool = set->details_string_pool.data;
 
 	*summary = &pool[package->summary];
 	*description = &pool[package->description];
@@ -1267,6 +1274,7 @@ struct razor_merger {
 	struct razor_set *set;
 	struct hashtable table;
 	struct hashtable file_table;
+	struct hashtable details_table;
 	struct source source1;
 	struct source source2;
 };
@@ -1282,6 +1290,7 @@ razor_merger_create(struct razor_set *set1, struct razor_set *set2)
 	merger->set = razor_set_create();
 	hashtable_init(&merger->table, &merger->set->string_pool);
 	hashtable_init(&merger->file_table, &merger->set->file_string_pool);
+	hashtable_init(&merger->details_table, &merger->set->details_string_pool);
 
 	merger->source1.set = set1;
 	count = set1->properties.size / sizeof (struct razor_property);
@@ -1751,6 +1760,7 @@ razor_merger_finish(struct razor_merger *merger)
 	result = merger->set;
 	hashtable_release(&merger->table);
 	hashtable_release(&merger->file_table);
+	hashtable_release(&merger->details_table);
 	free(merger);
 
 	return result;
