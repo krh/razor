@@ -2391,39 +2391,54 @@ describe_unsatisfied(struct razor_set *set, struct razor_property *rp)
 	const char *name, *version, *arch, *pool;
 
 	pool = set->string_pool.data;
-	fprintf(stderr, "could not satisfy %s %s %s, required by",
-		&pool[rp->name],
-		relation_string[rp->relation],
-		&pool[rp->version]);
-
-	razor_package_iterator_init_for_property(&pi, set, rp);
-	while (razor_package_iterator_next(&pi, &pkg, &name, &version, &arch))
-		fprintf(stderr, " %s-%s", name, version);
-
-	fprintf(stderr, "\n");
+	if (pool[rp->version] == '\0') {
+		razor_package_iterator_init_for_property(&pi, set, rp);
+		while (razor_package_iterator_next(&pi, &pkg,
+						   &name, &version, &arch))
+			fprintf(stderr, "%s is needed by %s-%s.%s\n",
+				&pool[rp->name],
+				name, version, arch);
+	} else {
+		razor_package_iterator_init_for_property(&pi, set, rp);
+		while (razor_package_iterator_next(&pi, &pkg,
+						   &name, &version, &arch))
+			fprintf(stderr, "%s %s %s is needed by %s-%s.%s\n",
+				&pool[rp->name],
+				relation_string[rp->relation],
+				&pool[rp->version],
+				name, version, arch);
+	}
 }
 
-void
+int
 razor_transaction_describe(struct razor_transaction *trans)
 {
 	struct prop_iter rpi;
 	struct razor_property *rp;
+	int unsatisfied;
 
 	flush_scheduled_system_updates(trans);
 	flush_scheduled_upstream_updates(trans);
 	mark_all_satisfied_requires(trans);
 
+	unsatisfied = 0;
 	prop_iter_init(&rpi, &trans->system);
 	while (prop_iter_next(&rpi, RAZOR_PROPERTY_REQUIRES, &rp)) {
-		if (!(rpi.present[rp - rpi.start] & TRANS_PROPERTY_SATISFIED))
+		if (!(rpi.present[rp - rpi.start] & TRANS_PROPERTY_SATISFIED)) {
 			describe_unsatisfied(trans->system.set, rp);
+		        unsatisfied++;
+		}
 	}
 
 	prop_iter_init(&rpi, &trans->upstream);
 	while (prop_iter_next(&rpi, RAZOR_PROPERTY_REQUIRES, &rp)) {
-		if (!(rpi.present[rp - rpi.start] & TRANS_PROPERTY_SATISFIED))
+		if (!(rpi.present[rp - rpi.start] & TRANS_PROPERTY_SATISFIED)) {
 			describe_unsatisfied(trans->upstream.set, rp);
+			unsatisfied++;
+		}
 	}
+
+	return unsatisfied;
 }
 
 int
@@ -2518,8 +2533,6 @@ razor_transaction_destroy(struct razor_transaction *trans)
 	transaction_set_release(&trans->system);
 	transaction_set_release(&trans->upstream);
 	free(trans);
-
-	/* FIXME: free upstream if it was created as an empty set */
 }
 
 struct razor_package_query {

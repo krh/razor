@@ -446,7 +446,7 @@ command_update(int argc, const char *argv[])
 static int
 command_remove(int argc, const char *argv[])
 {
-	struct razor_set *set;
+	struct razor_set *set, *upstream;
 	struct razor_transaction *trans;
 	int i, errors;
 
@@ -454,7 +454,8 @@ command_remove(int argc, const char *argv[])
 	if (set == NULL)
 		return 1;
 
-	trans = razor_transaction_create(set, NULL);
+	upstream = razor_set_create();
+	trans = razor_transaction_create(set, upstream);
 	for (i = 0; i < argc; i++) {
 		if (mark_packages_for_removal(trans, set, argv[i]) == 0) {
 			fprintf(stderr, "no match for %s\n", argv[i]);
@@ -469,6 +470,7 @@ command_remove(int argc, const char *argv[])
 	set = razor_transaction_finish(trans);
 	razor_set_write(set, updated_repo_filename);
 	razor_set_destroy(set);
+	razor_set_destroy(upstream);
 	printf("wrote system-updated.repo\n");
 
 	return 0;
