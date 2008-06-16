@@ -1,0 +1,12 @@
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+includedir=@includedir@
+
+Name: razor
+Description: library for depsolving, installing and removing packages
+Version: @VERSION@
+Requires: expat curl
+Libs: -L${libdir} -lexpat -lz -lcurl
+Cflags: -I${includedir}/razor
+

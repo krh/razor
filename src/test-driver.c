@@ -237,7 +237,7 @@ start_property(struct test_context *ctx, enum razor_property_type type, const ch
 		}
 	} else
 		rel = RAZOR_VERSION_EQUAL;
-	
+
 	if (ctx->unsat)
 		check_unsatisfiable_property(ctx, type, name, rel, version);
 	else
@@ -262,12 +262,12 @@ end_transaction(struct test_context *ctx)
 		pkg = razor_set_get_package(ctx->repo_set,
 					    ctx->install_pkgs[i]);
 		razor_transaction_install_package(ctx->trans, pkg);
-	}		
+	}
 	for (i = 0; i < ctx->n_remove_pkgs; i++) {
 		pkg = razor_set_get_package(ctx->repo_set,
 					    ctx->remove_pkgs[i]);
 		razor_transaction_remove_package(ctx->trans, pkg);
-	}		
+	}
 
 	errors = razor_transaction_resolve(ctx->trans);
 	printf("\n");
@@ -435,7 +435,7 @@ int main(int argc, char *argv[])
 
 	if (argc > 3) {
 		fprintf(stderr, "usage: %s [-d] [TESTS-FILE]\n", argv[0]);
-		exit(-1);			
+		exit(-1);
 	}
 
 	if (argc >= 2 && !strcmp (argv[1], "-d")) {

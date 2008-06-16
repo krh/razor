@@ -253,7 +253,7 @@ command_initdb(int argc, const char *argv[])
 }
 
 static struct razor_property *
-add_property_packages(struct razor_set *set, 
+add_property_packages(struct razor_set *set,
 		      struct razor_package_query *query,
 		      const char *ref_name,
 		      const char *ref_version,

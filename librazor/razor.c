@@ -444,7 +444,7 @@ compare_properties(const void *p1, const void *p2, void *data)
 	struct razor_set *set = data;
 	char *pool = set->string_pool.data;
 
-	if (prop1->name != prop2->name) 
+	if (prop1->name != prop2->name)
 		return strcmp(&pool[prop1->name], &pool[prop2->name]);
 	else if (prop1->type != prop2->type)
 		return prop1->type - prop2->type;
@@ -547,7 +547,7 @@ count_entries(struct import_directory *d)
 		count_entries(p);
 		d->count += p->count + 1;
 		p++;
-	}		
+	}
 }
 
 static void
@@ -571,7 +571,7 @@ serialize_files(struct razor_set *set,
 		list_set_array(&e->packages, &set->package_pool, &p->packages, 0);
 		array_release(&p->packages);
 		p++;
-	}		
+	}
 	if (e != NULL)
 		e->flags |= RAZOR_ENTRY_LAST;
 
@@ -639,7 +639,7 @@ build_file_tree(struct razor_importer *importer)
 				array_init(&d->last->files);
 				array_init(&d->last->packages);
 			}
-			d = d->last;				
+			d = d->last;
 			f = end + 1;
 			if (*end == '\0')
 				break;
@@ -1074,7 +1074,7 @@ razor_package_iterator_create_for_file(struct razor_set *set,
 	entry = find_entry(set, set->files.data, filename);
 	if (entry == NULL)
 		return NULL;
-	
+
 	index = list_first(&entry->packages, &set->package_pool);
 	return razor_package_iterator_create_with_index(set, index);
 }
@@ -1088,7 +1088,7 @@ list_package_files(struct razor_set *set, struct list *r,
 	uint32_t next, file;
 	char *pool;
 	int len;
-	
+
 	entries = (struct razor_entry *) set->files.data;
 	pool = set->string_pool.data;
 
@@ -1112,7 +1112,7 @@ list_package_files(struct razor_set *set, struct list *r,
 		if (e->flags & RAZOR_ENTRY_LAST)
 			next = end;
 		else {
-			f = e + 1; 
+			f = e + 1;
 			while (f->start == 0 && !(f->flags & RAZOR_ENTRY_LAST))
 				f++;
 			if (f->start == 0)
@@ -1961,10 +1961,10 @@ remove_matching_providers(struct razor_transaction *trans,
 		set = trans->system.set;
 	else
 		set = trans->upstream.set;
-   
+
 	pkgs = (struct razor_package *) set->packages.data;
-	for (p = ppi->p; 
-	     p < ppi->end && 
+	for (p = ppi->p;
+	     p < ppi->end &&
 	     p->name == ppi->p->name &&
 	     p->type == ppi->p->type;
 	     p++) {
@@ -1973,7 +1973,7 @@ remove_matching_providers(struct razor_transaction *trans,
 		if (!provider_satisfies_requirement(p, ppi->pool,
 						    relation, version))
 			continue;
-		    
+
 		razor_package_iterator_init_for_property(&pkg_iter, set, p);
 		while (razor_package_iterator_next(&pkg_iter,
 						   &pkg, &n, &v, &a)) {
@@ -2004,10 +2004,10 @@ flag_matching_providers(struct razor_transaction *trans,
 		set = trans->upstream.set;
 		flags = trans->upstream.packages;
 	}
-   
+
 	pkgs = (struct razor_package *) set->packages.data;
-	for (p = ppi->p; 
-	     p < ppi->end && 
+	for (p = ppi->p;
+	     p < ppi->end &&
 		     p->name == ppi->p->name &&
 		     p->type == ppi->p->type;
 	     p++) {
@@ -2017,7 +2017,7 @@ flag_matching_providers(struct razor_transaction *trans,
 						    r->relation,
 						    &rpi->pool[r->version]))
 			continue;
-		    
+
 		razor_package_iterator_init_for_property(&pkg_iter, set, p);
 		while (razor_package_iterator_next(&pkg_iter, &pkg,
 						   &name, &version, &arch)) {
@@ -2077,7 +2077,7 @@ remove_obsoleted_packages(struct razor_transaction *trans)
 	spkgs = trans->system.set->packages.data;
 	prop_iter_init(&spi, &trans->system);
 	prop_iter_init(&upi, &trans->upstream);
-	
+
 	while (prop_iter_next(&upi, RAZOR_PROPERTY_OBSOLETES, &up)) {
 		if (!prop_iter_seek_to(&spi, RAZOR_PROPERTY_PROVIDES,
 				       &upi.pool[up->name]))
@@ -2171,11 +2171,11 @@ update_unsatisfied_packages(struct razor_transaction *trans)
 
 	spkgs = trans->system.set->packages.data;
 	prop_iter_init(&spi, &trans->system);
-	
+
 	while (prop_iter_next(&spi, RAZOR_PROPERTY_REQUIRES, &sp)) {
 		if (spi.present[sp - spi.start] & TRANS_PROPERTY_SATISFIED)
 			continue;
-		
+
 		razor_package_iterator_init_for_property(&pkg_iter,
 							 trans->system.set,
 							 sp);
@@ -2277,9 +2277,9 @@ pull_in_requirements(struct razor_transaction *trans,
 		fprintf(stderr, "pulling in %s which provides %s %s %s "
 			"to satisfy %s %s %s\n",
 			ppi->pool + pkg->name,
-			ppi->pool + pp->name, 
+			ppi->pool + pp->name,
 			relation_string[pp->relation],
-			ppi->pool + pp->version, 
+			ppi->pool + pp->version,
 			&rpi->pool[rp->name],
 			relation_string[rp->relation],
 			&rpi->pool[rp->version]);
@@ -2296,7 +2296,7 @@ pull_in_all_requirements(struct razor_transaction *trans)
 	prop_iter_init(&rpi, &trans->system);
 	prop_iter_init(&ppi, &trans->upstream);
 	pull_in_requirements(trans, &rpi, &ppi);
-	
+
 	prop_iter_init(&rpi, &trans->upstream);
 	prop_iter_init(&ppi, &trans->upstream);
 	pull_in_requirements(trans, &rpi, &ppi);
@@ -2325,7 +2325,7 @@ flush_scheduled_system_updates(struct razor_transaction *trans)
 					     RAZOR_VERSION_GREATER, version);
 		if (pkg == NULL)
 			continue;
-		
+
 		fprintf(stderr, "updating %s-%s to %s-%s\n",
 			name, version,
 			&ppi.pool[pkg->name], &ppi.pool[pkg->version]);
@@ -2457,7 +2457,7 @@ razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 		    p->relation == rel &&
 		    strcmp(&pi.pool[p->name], name) == 0 &&
 		    strcmp(&pi.pool[p->version], version) == 0)
-		    
+
 			return 1;
 	}
 
@@ -2467,7 +2467,7 @@ razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 		    p->relation == rel &&
 		    strcmp(&pi.pool[p->name], name) == 0 &&
 		    strcmp(&pi.pool[p->version], version) == 0)
-		    
+
 			return 1;
 	}
 

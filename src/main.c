@@ -429,7 +429,7 @@ command_update(int argc, const char *argv[])
 			return 1;
 		}
 	}
-		
+
 	errors = razor_transaction_resolve(trans);
 	if (errors)
 		return 1;
@@ -497,7 +497,7 @@ command_diff(int argc, const char *argv[])
 	if (set == NULL || updated == NULL)
 		return 1;
 
-	razor_set_diff(set, updated, print_diff, NULL);	
+	razor_set_diff(set, updated, print_diff, NULL);
 
 	razor_set_destroy(set);
 	razor_set_destroy(updated);

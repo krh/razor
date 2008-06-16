@@ -22,7 +22,7 @@ struct razor_root {
 
 int
 razor_root_create(const char *root)
-{	
+{
 	struct stat buf;
 	struct razor_set *set;
 	char path[PATH_MAX];
