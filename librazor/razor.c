@@ -2353,10 +2353,9 @@ flush_scheduled_upstream_updates(struct razor_transaction *trans)
 		if (!(trans->upstream.packages[p - upkgs] & TRANS_PACKAGE_UPDATE))
 			continue;
 
-		if (!prop_iter_seek_to(&spi, RAZOR_PROPERTY_PROVIDES, name))
-			continue;
-		remove_matching_providers(trans, &spi,
-					  RAZOR_VERSION_LESS, version);
+		if (prop_iter_seek_to(&spi, RAZOR_PROPERTY_PROVIDES, name))
+			remove_matching_providers(trans, &spi,
+						  RAZOR_VERSION_LESS, version);
 		razor_transaction_install_package(trans, p);
 		fprintf(stderr, "installing %s-%s\n", name, version);
 	}
@@ -2368,6 +2367,7 @@ razor_transaction_resolve(struct razor_transaction *trans)
 	int last = 0;
 
 	flush_scheduled_system_updates(trans);
+	flush_scheduled_upstream_updates(trans);
 
 	while (last < trans->changes) {
 		last = trans->changes;
