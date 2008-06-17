@@ -79,7 +79,7 @@ razor_root_open(const char *root, int flags)
 	/* Create the new next repo file up front to ensure exclusive
 	 * access. */
 	snprintf(image->new_path, sizeof image->new_path,
-		 "%s%s/%s", root, root, next_repo_filename);
+		 "%s%s/%s", root, razor_root_path, next_repo_filename);
 	image->fd = open(image->new_path,
 			 O_CREAT | O_WRONLY | O_TRUNC | O_EXCL, 0666);
 	if (image->fd < 0) {
