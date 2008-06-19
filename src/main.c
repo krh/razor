@@ -657,8 +657,8 @@ command_install(int argc, const char *argv[])
 	}
 
 	if (dependencies) {
-		errors = razor_transaction_resolve(trans);
-		if (errors) {
+		razor_transaction_resolve(trans);
+		if (razor_transaction_describe(trans) > 0) {
 			razor_root_close(root);
 			return 1;
 		}
@@ -674,6 +674,7 @@ command_install(int argc, const char *argv[])
 		return 1;
 	}
 
+	errors = 0;
 	razor_root_diff(root, download_package, &errors);
 	if (errors > 0) {
 		fprintf(stderr, "failed to download %d packages\n", errors);
@@ -683,7 +684,7 @@ command_install(int argc, const char *argv[])
 
 	/* FIXME: We need to figure out the right install order here,
 	 * so the post and pre scripts can run. */
-	razor_root_diff(root, install_package, (void *) root);
+	razor_root_diff(root, install_package, (void *) install_root);
 
 	razor_set_destroy(next);
 	razor_set_destroy(upstream);
