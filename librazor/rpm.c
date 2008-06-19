@@ -322,8 +322,10 @@ import_files(struct razor_importer *importer, struct razor_rpm *rpm)
 	unsigned int i, count;
 	char buffer[256];
 
-	/* assert: count is the same for all arrays */
+	if (rpm->dirs == NULL)
+		return;
 
+	/* assert: count is the same for all arrays */
 	index = razor_rpm_get_indirect(rpm, RPMTAG_DIRINDEXES, &count);
 	name = razor_rpm_get_indirect(rpm, RPMTAG_BASENAMES, &count);
 	for (i = 0; i < count; i++) {
@@ -346,6 +348,8 @@ razor_rpm_open(const char *filename)
 	int fd;
 
 	rpm = malloc(sizeof *rpm);
+	if (rpm == NULL)
+		return NULL;
 	memset(rpm, 0, sizeof *rpm);
 
 	fd = open(filename, O_RDONLY);
