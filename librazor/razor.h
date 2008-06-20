@@ -143,7 +143,7 @@ int razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 struct razor_importer;
 struct razor_rpm;
 
-struct razor_importer *razor_importer_new(void);
+struct razor_importer *razor_importer_create(void);
 void razor_importer_destroy(struct razor_importer *importer);
 void razor_importer_begin_package(struct razor_importer *importer,
 				  const char *name,

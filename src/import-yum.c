@@ -256,7 +256,7 @@ razor_set_create_from_yum(void)
 	gzFile primary, filelists;
 	XML_ParsingStatus status;
 
-	ctx.importer = razor_importer_new();
+	ctx.importer = razor_importer_create();
 	ctx.state = YUM_STATE_BEGIN;
 
 	ctx.primary_parser = XML_ParserCreate(NULL);

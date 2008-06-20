@@ -97,7 +97,7 @@ razor_set_create_from_rpmdb(void)
 		exit(1);
 	}
 
-	importer = razor_importer_new();
+	importer = razor_importer_create();
 
 	iter = rpmdbInitIterator(db, 0, NULL, 0);
 	while (h = rpmdbNextIterator(iter), h != NULL) {

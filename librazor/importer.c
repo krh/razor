@@ -92,7 +92,7 @@ razor_importer_add_file(struct razor_importer *importer, const char *name)
 }
 
 struct razor_importer *
-razor_importer_new(void)
+razor_importer_create(void)
 {
 	struct razor_importer *importer;
 

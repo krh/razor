@@ -537,7 +537,7 @@ command_import_rpms(int argc, const char *argv[])
 		return -1;
 	}
 
-	importer = razor_importer_new();
+	importer = razor_importer_create();
 
 	while (de = readdir(dir), de != NULL) {
 		len = strlen(de->d_name);

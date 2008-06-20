@@ -414,7 +414,7 @@ create_set_from_command_line(int argc, const char *argv[])
 	struct razor_rpm *rpm;
 	int i;
 
-	importer = razor_importer_new();
+	importer = razor_importer_create();
 
 	for (i = 0; i < argc; i++) {
 		rpm = razor_rpm_open(argv[i]);
