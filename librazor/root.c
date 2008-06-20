@@ -68,7 +68,7 @@ razor_root_create(const char *root)
 }
 
 struct razor_root *
-razor_root_open(const char *root, int flags)
+razor_root_open(const char *root)
 {
 	struct razor_root *image;
 
@@ -118,20 +118,19 @@ razor_root_open_read_only(const char *root)
 	return razor_set_open(path);
 }
 
-struct razor_transaction *
-razor_root_create_transaction(struct razor_root *image,
-			      struct razor_set *upstream)
+struct razor_set *
+razor_root_get_system_set(struct razor_root *root)
 {
-	/* FIXME: This should take a number of upstream repos. */
-	return razor_transaction_create(image->system, upstream);
+	return root->system;
 }
 
 int
-razor_root_close(struct razor_root *image)
+razor_root_close(struct razor_root *root)
 {
-	unlink(image->new_path);
-	close(image->fd);
-	free(image);
+	razor_set_destroy(root->system);
+	unlink(root->new_path);
+	close(root->fd);
+	free(root);
 
 	return 0;
 }
@@ -149,20 +148,14 @@ razor_root_update(struct razor_root *root, struct razor_set *next)
 }
 
 int
-razor_root_commit(struct razor_root *image)
+razor_root_commit(struct razor_root *root)
 {
 	/* Make it so. */
-	rename(image->new_path, image->path);
-	printf("renamed %s to %s\n", image->new_path, image->path);
-	close(image->fd);
-	free(image);
+	rename(root->new_path, root->path);
+	printf("renamed %s to %s\n", root->new_path, root->path);
+	razor_set_destroy(root->system);
+	close(root->fd);
+	free(root);
 
 	return 0;
-}
-
-void
-razor_root_diff(struct razor_root *root,
-		razor_package_callback_t callback, void *data)
-{
-	return razor_set_diff(root->system, root->next, callback, data);
 }

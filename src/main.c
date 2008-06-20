@@ -644,7 +644,7 @@ static int
 command_install(int argc, const char *argv[])
 {
 	struct razor_root *root;
-	struct razor_set *upstream, *next;
+	struct razor_set *system, *upstream, *next;
 	struct razor_transaction *trans;
 	int i = 0, errors, dependencies = 1;
 
@@ -653,9 +653,10 @@ command_install(int argc, const char *argv[])
 		i++;
 	}
 
-	root = razor_root_open(install_root, RAZOR_ROOT_OPEN_WRITE);
+	root = razor_root_open(install_root);
+	system = razor_root_get_system_set(root);
 	upstream = razor_set_open(rawhide_repo_filename);
-	trans = razor_root_create_transaction(root, upstream);
+	trans = razor_transaction_create(system, upstream);
 
 	for (; i < argc; i++) {
 		if (mark_packages_for_update(trans, upstream, argv[i]) == 0) {
@@ -684,7 +685,7 @@ command_install(int argc, const char *argv[])
 	}
 
 	errors = 0;
-	razor_root_diff(root, download_package, &errors);
+	razor_set_diff(system, next, download_package, &errors);
 	if (errors > 0) {
 		fprintf(stderr, "failed to download %d packages\n", errors);
 		razor_root_close(root);
@@ -693,7 +694,7 @@ command_install(int argc, const char *argv[])
 
 	/* FIXME: We need to figure out the right install order here,
 	 * so the post and pre scripts can run. */
-	razor_root_diff(root, install_package, (void *) install_root);
+	razor_set_diff(system, next, install_package, (void *) install_root);
 
 	razor_set_destroy(next);
 	razor_set_destroy(upstream);
