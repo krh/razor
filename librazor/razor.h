@@ -32,21 +32,31 @@ enum razor_repo_file_type {
 	RAZOR_REPO_FILE_FILES
 };
 
-enum razor_property_type {
-	RAZOR_PROPERTY_REQUIRES,
-	RAZOR_PROPERTY_PROVIDES,
-	RAZOR_PROPERTY_CONFLICTS,
-	RAZOR_PROPERTY_OBSOLETES
+enum razor_property_flags {
+	RAZOR_PROPERTY_LESS		= 1 << 0,
+	RAZOR_PROPERTY_GREATER		= 1 << 1,
+	RAZOR_PROPERTY_EQUAL		= 1 << 2,
+	RAZOR_PROPERTY_RELATION_MASK	=
+		RAZOR_PROPERTY_LESS |
+		RAZOR_PROPERTY_GREATER |
+		RAZOR_PROPERTY_EQUAL,
+
+	RAZOR_PROPERTY_REQUIRES		= 0 << 3,
+	RAZOR_PROPERTY_PROVIDES		= 1 << 3,
+	RAZOR_PROPERTY_CONFLICTS	= 2 << 3,
+	RAZOR_PROPERTY_OBSOLETES	= 3 << 3,
+	RAZOR_PROPERTY_TYPE_MASK	= 3 << 3,
+		
+	RAZOR_PROPERTY_PRE		= 1 << 5,
+	RAZOR_PROPERTY_POST		= 1 << 6,
+	RAZOR_PROPERTY_PREUN		= 1 << 7,
+	RAZOR_PROPERTY_POSTUN		= 1 << 8
 };
 
-enum razor_version_relation {
-	RAZOR_VERSION_LESS,
-	RAZOR_VERSION_LESS_OR_EQUAL,
-	RAZOR_VERSION_EQUAL,
-	RAZOR_VERSION_GREATER_OR_EQUAL,
-	RAZOR_VERSION_GREATER
-};
-extern const char * const razor_version_relations[];
+const char *
+razor_property_relation_to_string(struct razor_property *p);
+const char *
+razor_property_type_to_string(struct razor_property *p);
 
 struct razor_set *razor_set_create(void);
 struct razor_set *razor_set_open(const char *filename);
@@ -102,9 +112,8 @@ razor_property_iterator_create(struct razor_set *set,
 int razor_property_iterator_next(struct razor_property_iterator *pi,
 				 struct razor_property **property,
 				 const char **name,
-				 enum razor_version_relation *relation,
-				 const char **version,
-				 enum razor_property_type *type);
+				 uint32_t *flags,
+				 const char **version);
 void
 razor_property_iterator_destroy(struct razor_property_iterator *pi);
 
@@ -124,54 +133,24 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 
 /* Package transactions */
 
-enum razor_transaction_package_state {
-	/* Basic states */
-	RAZOR_PACKAGE_INSTALL,
-	RAZOR_PACKAGE_FORCED_UPDATE,
-	RAZOR_PACKAGE_REMOVE,
-	RAZOR_PACKAGE_OBSOLETED,
-
-	/* Error states */
-
-	RAZOR_PACKAGE_FIRST_ERROR_STATE = 0x4,
-	RAZOR_PACKAGE_UNAVAILABLE_FLAG = 0x4,
-
-	/* Package requested for install does not exist */
-	RAZOR_PACKAGE_INSTALL_UNAVAILABLE = RAZOR_PACKAGE_INSTALL | RAZOR_PACKAGE_UNAVAILABLE_FLAG,
-	/* Package requiring update does not have any update */
-	RAZOR_PACKAGE_UPDATE_UNAVAILABLE = RAZOR_PACKAGE_FORCED_UPDATE | RAZOR_PACKAGE_UNAVAILABLE_FLAG,
-	/* Package requested for removal does not exist */
-	RAZOR_PACKAGE_REMOVE_NOT_INSTALLED = RAZOR_PACKAGE_REMOVE | RAZOR_PACKAGE_UNAVAILABLE_FLAG,
-	/* (not used) */
-	RAZOR_PACKAGE_OBSOLETE_UNAVAILABLE = RAZOR_PACKAGE_OBSOLETED | RAZOR_PACKAGE_UNAVAILABLE_FLAG,
-
-	/* No newer version of package is available */
-	RAZOR_PACKAGE_UP_TO_DATE,
-	/* Package marked for both install and remove */
-	RAZOR_PACKAGE_CONTRADICTION,
-	/* Package would add a conflict with an already-installed package */
-	RAZOR_PACKAGE_NEW_CONFLICT,
-	/* Already-installed package has a conflict against this package */
-	RAZOR_PACKAGE_OLD_CONFLICT,
-	/* Requirement of to-be-installed package can't be satisfied */
-	RAZOR_PACKAGE_UNSATISFIABLE,
-};
-
 struct razor_transaction *
 razor_transaction_create(struct razor_set *system, struct razor_set *upstream);
 void razor_transaction_install_package(struct razor_transaction *transaction,
 				       struct razor_package *package);
 void razor_transaction_remove_package(struct razor_transaction *transaction,
 				      struct razor_package *package);
+void razor_transaction_update_package(struct razor_transaction *trans,
+				      struct razor_package *package);
 void razor_transaction_update_all(struct razor_transaction *transaction);
 int razor_transaction_resolve(struct razor_transaction *trans);
+int razor_transaction_describe(struct razor_transaction *trans);
 struct razor_set *razor_transaction_finish(struct razor_transaction *trans);
 void razor_transaction_destroy(struct razor_transaction *trans);
 
 /* Temporary helper for test suite. */
 int razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 					   const char *name,
-					   enum razor_version_relation rel,
+					   uint32_t flags,
 					   const char *version);
 
 /* Importer interface; for building a razor set from external sources,
@@ -193,9 +172,8 @@ void razor_importer_add_details(struct razor_importer *importer,
 				const char *license);
 void razor_importer_add_property(struct razor_importer *importer,
 				 const char *name,
-				 enum razor_version_relation relation,
-				 const char *version,
-				 enum razor_property_type type);
+				 uint32_t flags,
+				 const char *version);
 void razor_importer_add_file(struct razor_importer *importer,
 			     const char *name);
 void razor_importer_finish_package(struct razor_importer *importer);
@@ -207,6 +185,7 @@ struct razor_set *razor_importer_finish(struct razor_importer *importer);
 
 void razor_build_evr(char *evr_buf, int size, const char *epoch,
 		     const char *version, const char *release);
+int razor_versioncmp(const char *s1, const char *s2);
 
 struct razor_set *razor_set_create_from_yum(void);
 struct razor_set *razor_set_create_from_rpmdb(void);
@@ -216,5 +195,24 @@ struct razor_set *razor_set_create_from_rpmdb(void);
 struct razor_rpm *razor_rpm_open(const char *filename);
 int razor_rpm_install(struct razor_rpm *rpm, const char *root);
 int razor_rpm_close(struct razor_rpm *rpm);
+
+
+/* Razor root functions. The root data struct encapsulates filesystem
+ * conventions and the locking protocol. */
+
+struct razor_root;
+#define RAZOR_ROOT_OPEN_WRITE 0x01
+
+int razor_root_create(const char *root);
+struct razor_root *razor_root_open(const char *root, int flags);
+struct razor_set *razor_root_open_read_only(const char *root);
+struct razor_transaction *
+razor_root_create_transaction(struct razor_root *image,
+			      struct razor_set *upstream);
+int razor_root_close(struct razor_root *image);
+void razor_root_update(struct razor_root *image, struct razor_set *next);
+int razor_root_commit(struct razor_root *image);
+void razor_root_diff(struct razor_root *root,
+		     razor_package_callback_t callback, void *data);
 
 #endif /* _RAZOR_H_ */

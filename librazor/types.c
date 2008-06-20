@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "types.h"
+#include "razor-internal.h"
 
 void
 array_init(struct array *array)
@@ -243,35 +243,4 @@ hashtable_tokenize(struct hashtable *table, const char *string)
 		return token;
 
 	return hashtable_insert(table, string);
-}
-
-
-void
-bitarray_init(struct bitarray *bitarray, int size, int initial_value)
-{
-	int bytes = ((size + 31) / 32) * 4;
-
-	bitarray->bits = malloc(bytes);
-	memset(bitarray->bits, initial_value ? 0xff : 0x00, bytes);
-}
-
-void
-bitarray_release(struct bitarray *bitarray)
-{
-	free(bitarray->bits);
-}
-
-void
-bitarray_set(struct bitarray *bitarray, int bit, int value)
-{
-	if (value)
-		bitarray->bits[bit >> 5] |= 1 << (bit & 31);
-	else
-		bitarray->bits[bit >> 5] &= ~(1 << (bit & 31));
-}
-
-int
-bitarray_get(struct bitarray *bitarray, int bit)
-{
-	return (bitarray->bits[bit >> 5] & (1 << (bit & 31))) != 0;
 }

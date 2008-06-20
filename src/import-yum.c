@@ -21,6 +21,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -59,36 +60,34 @@ struct yum_context {
 	char name[256], arch[64], summary[512], description[4096];
 	char url[256], license[64], buffer[512], *p;
 	char pkgid[128];
+	uint32_t property_type;
 	int state;
 };
 
-static enum razor_version_relation
-yum_to_razor_flags (const char *flags)
+static uint32_t
+yum_to_razor_relation (const char *flags)
 {
-	/* FIXME? */
-	if (!flags)
-		return RAZOR_VERSION_EQUAL;
-
 	if (flags[0] == 'L') {
 		if (flags[1] == 'T')
-			return RAZOR_VERSION_LESS;
+			return RAZOR_PROPERTY_LESS;
 		else
-			return RAZOR_VERSION_LESS_OR_EQUAL;
+			return RAZOR_PROPERTY_LESS | RAZOR_PROPERTY_EQUAL;
 	} else if (flags[0] == 'G') {
 		if (flags[1] == 'T')
-			return RAZOR_VERSION_GREATER;
+			return RAZOR_PROPERTY_GREATER;
 		else
-			return RAZOR_VERSION_GREATER_OR_EQUAL;
+			return RAZOR_PROPERTY_GREATER | RAZOR_PROPERTY_EQUAL;
 	} else
-		return RAZOR_VERSION_EQUAL;
+		return RAZOR_PROPERTY_EQUAL;
 }
 
 static void
 yum_primary_start_element(void *data, const char *name, const char **atts)
 {
 	struct yum_context *ctx = data;
-	const char *n, *epoch, *version, *release, *flags;
+	const char *n, *epoch, *version, *release;
 	char buffer[128];
+	uint32_t pre, relation, flags;
 	int i;
 
 	if (strcmp(name, "name") == 0) {
@@ -135,19 +134,24 @@ yum_primary_start_element(void *data, const char *name, const char **atts)
 		ctx->state = YUM_STATE_LICENSE;
 	} else if (strcmp(name, "rpm:requires") == 0) {
 		ctx->state = YUM_STATE_REQUIRES;
+		ctx->property_type = RAZOR_PROPERTY_REQUIRES;
 	} else if (strcmp(name, "rpm:provides") == 0) {
 		ctx->state = YUM_STATE_PROVIDES;
+		ctx->property_type = RAZOR_PROPERTY_PROVIDES;
 	} else if (strcmp(name, "rpm:obsoletes") == 0) {
 		ctx->state = YUM_STATE_OBSOLETES;
+		ctx->property_type = RAZOR_PROPERTY_OBSOLETES;
 	} else if (strcmp(name, "rpm:conflicts") == 0) {
 		ctx->state = YUM_STATE_CONFLICTS;
+		ctx->property_type = RAZOR_PROPERTY_CONFLICTS;
 	} else if (strcmp(name, "rpm:entry") == 0 &&
 		   ctx->state != YUM_STATE_BEGIN) {
 		n = NULL;
 		epoch = NULL;
 		version = NULL;
 		release = NULL;
-		flags = NULL;
+		relation = RAZOR_PROPERTY_EQUAL;
+		pre = 0;
 		for (i = 0; atts[i]; i += 2) {
 			if (strcmp(atts[i], "name") == 0)
 				n = atts[i + 1];
@@ -158,7 +162,13 @@ yum_primary_start_element(void *data, const char *name, const char **atts)
 			else if (strcmp(atts[i], "rel") == 0)
 				release = atts[i + 1];
 			else if (strcmp(atts[i], "flags") == 0)
-				flags = atts[i + 1];
+				relation = yum_to_razor_relation(atts[i + 1]);
+			else if (strcmp(atts[i], "pre") == 0)
+				pre = 
+					RAZOR_PROPERTY_PRE |
+					RAZOR_PROPERTY_POST |
+					RAZOR_PROPERTY_PREUN |
+					RAZOR_PROPERTY_POSTUN;
 		}
 
 		if (n == NULL) {
@@ -168,32 +178,8 @@ yum_primary_start_element(void *data, const char *name, const char **atts)
 		}
 
 		razor_build_evr(buffer, sizeof buffer, epoch, version, release);
-		switch (ctx->state) {
-		case YUM_STATE_REQUIRES:
-			razor_importer_add_property(ctx->importer, n,
-						    yum_to_razor_flags (flags),
-						    buffer,
-						    RAZOR_PROPERTY_REQUIRES);
-			break;
-		case YUM_STATE_PROVIDES:
-			razor_importer_add_property(ctx->importer, n,
-						    yum_to_razor_flags (flags),
-						    buffer,
-						    RAZOR_PROPERTY_PROVIDES);
-			break;
-		case YUM_STATE_OBSOLETES:
-			razor_importer_add_property(ctx->importer, n,
-						    yum_to_razor_flags (flags),
-						    buffer,
-						    RAZOR_PROPERTY_OBSOLETES);
-			break;
-		case YUM_STATE_CONFLICTS:
-			razor_importer_add_property(ctx->importer, n,
-						    yum_to_razor_flags (flags),
-						    buffer,
-						    RAZOR_PROPERTY_CONFLICTS);
-			break;
-		}
+		flags = ctx->property_type | relation | pre;
+		razor_importer_add_property(ctx->importer, n, flags, buffer);
 	}
 }
 
@@ -299,7 +285,7 @@ razor_set_create_from_yum(void)
 	gzFile primary, filelists;
 	XML_ParsingStatus status;
 
-	ctx.importer = razor_importer_new();	
+	ctx.importer = razor_importer_new();
 	ctx.state = YUM_STATE_BEGIN;
 
 	ctx.primary_parser = XML_ParserCreate(NULL);

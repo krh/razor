@@ -30,15 +30,14 @@
 #include <fnmatch.h>
 #include <errno.h>
 #include "razor.h"
-#include "razor-internal.h"
 
 static const char system_repo_filename[] = "system.repo";
 static const char next_repo_filename[] = "system-next.repo";
 static const char rawhide_repo_filename[] = "rawhide.repo";
 static const char updated_repo_filename[] = "system-updated.repo";
-static const char razor_root_path[] = "/var/lib/razor";
-static const char root[] = "install";
+static const char install_root[] = "install";
 static const char *repo_filename = system_repo_filename;
+static const char *yum_url;
 
 static int
 command_list(int argc, const char *argv[])
@@ -74,16 +73,14 @@ command_list(int argc, const char *argv[])
 }
 
 static int
-list_properties(const char *package_name,
-		enum razor_property_type required_type)
+list_properties(const char *package_name, uint32_t type)
 {
 	struct razor_set *set;
 	struct razor_property *property;
 	struct razor_package *package;
 	struct razor_property_iterator *pi;
 	const char *name, *version;
-	enum razor_property_type type;
-	enum razor_version_relation relation;
+	uint32_t flags;
 
 	set = razor_set_open(repo_filename);
 	if (package_name)
@@ -93,15 +90,28 @@ list_properties(const char *package_name,
 
 	pi = razor_property_iterator_create(set, package);
 	while (razor_property_iterator_next(pi, &property,
-					    &name, &relation, &version,
-					    &type)) {
-		if (type != required_type)
+					    &name, &flags, &version)) {
+		if ((flags & RAZOR_PROPERTY_TYPE_MASK) != type)
 			continue;
-		if (version[0] == '\0')
-			printf("%s\n", name);
-		else
-			printf("%s %s %s\n", name,
-			       razor_version_relations[relation], version);
+		printf("%s", name);
+		if (version[0] != '\0')
+			printf(" %s %s",
+			       razor_property_relation_to_string(property),
+			       version);
+
+		if (flags & ~(RAZOR_PROPERTY_RELATION_MASK | RAZOR_PROPERTY_TYPE_MASK)) {
+			printf(" [");
+			if (flags & RAZOR_PROPERTY_PRE)
+				printf(" pre");
+			if (flags & RAZOR_PROPERTY_POST)
+				printf(" post");
+			if (flags & RAZOR_PROPERTY_PREUN)
+				printf(" preun");
+			if (flags & RAZOR_PROPERTY_POSTUN)
+				printf(" postun");
+			printf(" ]");
+		}
+		printf("\n");
 	}
 	razor_property_iterator_destroy(pi);
 
@@ -206,14 +216,13 @@ list_packages_for_property(struct razor_set *set,
 static int
 list_property_packages(const char *ref_name,
 		       const char *ref_version,
-		       enum razor_property_type ref_type)
+		       uint32_t type)
 {
 	struct razor_set *set;
 	struct razor_property *property;
 	struct razor_property_iterator *pi;
 	const char *name, *version;
-	enum razor_property_type type;
-	enum razor_version_relation relation;
+	uint32_t flags;
 
 	if (ref_name == NULL)
 		return 0;
@@ -224,14 +233,14 @@ list_property_packages(const char *ref_name,
 
 	pi = razor_property_iterator_create(set, NULL);
 	while (razor_property_iterator_next(pi, &property,
-					    &name, &relation, &version,
-					    &type)) {
+					    &name, &flags, &version)) {
 		if (strcmp(ref_name, name) != 0)
 			continue;
-		if (ref_version && relation == RAZOR_VERSION_EQUAL &&
+		if (ref_version &&
+		    (flags & RAZOR_PROPERTY_RELATION_MASK) == RAZOR_PROPERTY_EQUAL &&
 		    strcmp(ref_version, version) != 0)
 			continue;
-		if (ref_type != type)
+		if ((flags & RAZOR_PROPERTY_TYPE_MASK) != type)
 			continue;
 
 		list_packages_for_property(set, property);
@@ -323,19 +332,23 @@ download_if_missing(const char *url, const char *file)
 	return 0;
 }
 
-#define REPO_URL "http://download.fedora.redhat.com" \
+#define YUM_URL "http://download.fedora.redhat.com" \
 	"/pub/fedora/linux/development/i386/os"
 
 static int
 command_import_yum(int argc, const char *argv[])
 {
 	struct razor_set *set;
+	char buffer[512];
 
-	if (download_if_missing(REPO_URL "/repodata/primary.xml.gz",
-				"primary.xml.gz") < 0)
+	printf("downloading from %s.\n", yum_url);
+	snprintf(buffer, sizeof buffer,
+		 "%s/repodata/primary.xml.gz", yum_url);
+	if (download_if_missing(buffer, "primary.xml.gz") < 0)
 		return -1;
-	if (download_if_missing(REPO_URL "/repodata/filelists.xml.gz",
-				"filelists.xml.gz") < 0)
+	snprintf(buffer, sizeof buffer,
+		 "%s/repodata/filelists.xml.gz", yum_url);
+	if (download_if_missing(buffer, "filelists.xml.gz") < 0)
 		return -1;
 
 	set = razor_set_create_from_yum();
@@ -368,20 +381,6 @@ command_import_rpmdb(int argc, const char *argv[])
 }
 
 static int
-command_validate(int argc, const char *argv[])
-{
-	struct razor_set *set;
-
-	set = razor_set_open(repo_filename);
-	if (set == NULL)
-		return 1;
-	razor_set_list_unsatisfied(set);
-	razor_set_destroy(set);
-
-	return 0;
-}
-
-static int
 mark_packages_for_update(struct razor_transaction *trans,
 			 struct razor_set *set, const char *pattern)
 {
@@ -394,7 +393,7 @@ mark_packages_for_update(struct razor_transaction *trans,
 	while (razor_package_iterator_next(pi, &package,
 					   &name, &version, &arch)) {
 		if (pattern && fnmatch(pattern, name, 0) == 0) {
-			razor_transaction_install_package(trans, package);
+			razor_transaction_update_package(trans, package);
 			matches++;
 		}
 	}
@@ -441,12 +440,12 @@ command_update(int argc, const char *argv[])
 	if (argc == 0)
 		razor_transaction_update_all(trans);
 	for (i = 0; i < argc; i++) {
-		if (mark_packages_for_update(trans, upstream, argv[i]) == 0) {
+		if (mark_packages_for_update(trans, set, argv[i]) == 0) {
 			fprintf(stderr, "no match for %s\n", argv[i]);
 			return 1;
 		}
 	}
-		
+
 	errors = razor_transaction_resolve(trans);
 	if (errors)
 		return 1;
@@ -463,7 +462,7 @@ command_update(int argc, const char *argv[])
 static int
 command_remove(int argc, const char *argv[])
 {
-	struct razor_set *set;
+	struct razor_set *set, *upstream;
 	struct razor_transaction *trans;
 	int i, errors;
 
@@ -471,7 +470,8 @@ command_remove(int argc, const char *argv[])
 	if (set == NULL)
 		return 1;
 
-	trans = razor_transaction_create(set, NULL);
+	upstream = razor_set_create();
+	trans = razor_transaction_create(set, upstream);
 	for (i = 0; i < argc; i++) {
 		if (mark_packages_for_removal(trans, set, argv[i]) == 0) {
 			fprintf(stderr, "no match for %s\n", argv[i]);
@@ -486,6 +486,7 @@ command_remove(int argc, const char *argv[])
 	set = razor_transaction_finish(trans);
 	razor_set_write(set, updated_repo_filename, RAZOR_REPO_FILE_MAIN);
 	razor_set_destroy(set);
+	razor_set_destroy(upstream);
 	printf("wrote system-updated.repo\n");
 
 	return 0;
@@ -512,7 +513,7 @@ command_diff(int argc, const char *argv[])
 	if (set == NULL || updated == NULL)
 		return 1;
 
-	razor_set_diff(set, updated, print_diff, NULL);	
+	razor_set_diff(set, updated, print_diff, NULL);
 
 	razor_set_destroy(set);
 	razor_set_destroy(updated);
@@ -600,7 +601,7 @@ download_package(const char *name,
 		v = new_version;
 
 	snprintf(url, sizeof url,
-		 REPO_URL "/Packages/%s-%s.%s.rpm", name, v, arch);
+		 "%s/Packages/%s-%s.%s.rpm", yum_url, name, v, arch);
 	snprintf(file, sizeof file,
 		 "rpms/%s-%s.%s.rpm", name, v, arch);
 	if (download_if_missing(url, file) < 0)
@@ -649,129 +650,68 @@ install_package(const char *name,
 static int
 command_install(int argc, const char *argv[])
 {
-	struct razor_set *system, *upstream, *next;
+	struct razor_root *root;
+	struct razor_set *upstream, *next;
 	struct razor_transaction *trans;
-	char path[PATH_MAX], new_path[PATH_MAX];
-	int i = 0, errors, fd, dependencies = 1;
+	int i = 0, errors, dependencies = 1;
 
 	if (i < argc && strcmp(argv[i], "--no-dependencies") == 0) {
 		dependencies = 0;
 		i++;
 	}
 
-	/* Create the new next repo file up front to ensure exclusive
-	 * access. */
-	snprintf(new_path, sizeof new_path,
-		 "%s%s/%s", root, razor_root_path, next_repo_filename);
-	fd = open(new_path, O_CREAT | O_WRONLY | O_TRUNC | O_EXCL, 0666);
-	if (fd < 0) {
-		fprintf(stderr, "failed to get lock file, "
-			"maybe previous operation crashed?\n");
-
-		/* FIXME: Use fcntl advisory locking to figure out
-		 * whether previous operation crashed or is still in
-		 * progress. */
-
-		return -1;
-	}
-
+	root = razor_root_open(install_root, RAZOR_ROOT_OPEN_WRITE);
 	upstream = razor_set_open(rawhide_repo_filename);
-	snprintf(path, sizeof path,
-		 "%s%s/%s", root, razor_root_path, system_repo_filename);
-	system = razor_set_open(path);
-	if (system == NULL || upstream == NULL) {
-		unlink(new_path);
-		return 1;
-	}
-	trans = razor_transaction_create(system, upstream);
+	trans = razor_root_create_transaction(root, upstream);
+
 	for (; i < argc; i++) {
 		if (mark_packages_for_update(trans, upstream, argv[i]) == 0) {
 			fprintf(stderr, "no package matched %s\n", argv[i]);
-			unlink(new_path);
+			razor_root_close(root);
 			return 1;
 		}
 	}
 
 	if (dependencies) {
-		errors = razor_transaction_resolve(trans);
-		if (errors) {
-			unlink(new_path);
+		razor_transaction_resolve(trans);
+		if (razor_transaction_describe(trans) > 0) {
+			razor_root_close(root);
 			return 1;
 		}
 	}
 
 	next = razor_transaction_finish(trans);
 
-	razor_set_write_to_fd(next, fd, RAZOR_REPO_FILE_MAIN);
-	printf("wrote %s\n", new_path);
+	razor_root_update(root, next);
 
 	if (mkdir("rpms", 0777) && errno != EEXIST) {
 		fprintf(stderr, "failed to create rpms directory.\n");
+		razor_root_close(root);
 		return 1;
 	}
 
-	razor_set_diff(system, next, download_package, &errors);
+	errors = 0;
+	razor_root_diff(root, download_package, &errors);
 	if (errors > 0) {
 		fprintf(stderr, "failed to download %d packages\n", errors);
-		unlink(new_path);
+		razor_root_close(root);
                 return 1;
         }
 
 	/* FIXME: We need to figure out the right install order here,
 	 * so the post and pre scripts can run. */
-	razor_set_diff(system, next, install_package, (void *) root);
+	razor_root_diff(root, install_package, (void *) install_root);
 
 	razor_set_destroy(next);
-	razor_set_destroy(system);
 	razor_set_destroy(upstream);
 
-	/* Make it so. */
-	rename(new_path, path);
-	printf("renamed %s to %s\n", new_path, path);
-
-	return 0;
+	return razor_root_commit(root);
 }
 
 static int
 command_init(int argc, const char *argv[])
 {
-	struct stat buf;
-	struct razor_set *set;
-	char path[PATH_MAX];
-
-	if (stat(root, &buf) < 0) {
-		if (mkdir(root, 0777) < 0) {
-			fprintf(stderr,
-				"could not create install root \"%s\"\n",
-				root);
-			return -1;
-		}
-		fprintf(stderr, "created install root \"%s\"\n", root);
-	} else if (!S_ISDIR(buf.st_mode)) {
-		fprintf(stderr,
-			"install root \"%s\" exists, but is not a directory\n",
-			root);
-		return -1;
-	}
-
-	snprintf(path, sizeof path, "%s/%s",
-		 razor_root_path, system_repo_filename);
-	if (razor_create_dir(root, path) < 0) {
-		fprintf(stderr, "could not create %s%s\n",
-			root, razor_root_path);
-		return -1;
-	}
-
-	set = razor_set_create();
-	snprintf(path, sizeof path, "%s%s/%s",
-		 root, razor_root_path, system_repo_filename);
-	if (razor_set_write(set, path, RAZOR_REPO_FILE_MAIN) < 0) {
-		fprintf(stderr, "could not write initial package set\n");
-		return -1;
-	}
-	razor_set_destroy(set);
-
-	return 0;
+	return razor_root_create(install_root);
 }
 
 static int
@@ -798,8 +738,8 @@ command_download(int argc, const char *argv[])
 
 		matches++;
 		snprintf(url, sizeof url,
-			 REPO_URL "/Packages/%s-%s.%s.rpm",
-			 name, version, arch);
+			 "%s/Packages/%s-%s.%s.rpm",
+			 yum_url, name, version, arch);
 		snprintf(file, sizeof file,
 			 "rpms/%s-%s.%s.rpm", name, version, arch);
 		download_if_missing(url, file);
@@ -871,7 +811,6 @@ static struct {
 	{ "import-yum", "import yum metadata files", command_import_yum },
 	{ "import-rpmdb", "import the system rpm database", command_import_rpmdb },
 	{ "import-rpms", "import rpms from the given directory", command_import_rpms },
-	{ "validate", "validate a package set", command_validate },
 	{ "update", "update all or specified packages", command_update },
 	{ "remove", "remove specified packages", command_remove },
 	{ "diff", "show diff between two package sets", command_diff },
@@ -903,6 +842,10 @@ main(int argc, const char *argv[])
 	repo = getenv("RAZOR_REPO");
 	if (repo != NULL)
 		repo_filename = repo;
+
+	yum_url = getenv("YUM_URL");
+	if (yum_url == NULL)
+		yum_url = YUM_URL;
 
 	if (argc < 2)
 		return usage();

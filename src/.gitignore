@@ -1,0 +1,8 @@
+.deps
+.libs
+razor
+rpm
+*.repo
+*.xml.gz
+install
+rpms

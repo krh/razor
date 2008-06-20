@@ -19,6 +19,7 @@
 
 #include <stdio.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
@@ -26,16 +27,195 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <dirent.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <rpm/rpmlib.h>
-#include <rpm/rpmdb.h>
 #include <zlib.h>
 
 #include "razor.h"
 #include "razor-internal.h"
 
 #define	RPM_LEAD_SIZE 96
+
+enum {
+    PIPE	=  1,	/*!< pipe/fifo */
+    CDEV	=  2,	/*!< character device */
+    XDIR	=  4,	/*!< directory */
+    BDEV	=  6,	/*!< block device */
+    REG		=  8,	/*!< regular file */
+    LINK	= 10,	/*!< hard link */
+    SOCK	= 12	/*!< socket */
+};
+
+enum {
+    RPMSENSE_LESS		= 1 << 1,
+    RPMSENSE_GREATER		= 1 << 2,
+    RPMSENSE_EQUAL		= 1 << 3,
+    RPMSENSE_PREREQ		= 1 << 6,
+    RPMSENSE_SCRIPT_PRE		= 1 << 9,
+    RPMSENSE_SCRIPT_POST	= 1 << 10,
+    RPMSENSE_SCRIPT_PREUN	= 1 << 11,
+    RPMSENSE_SCRIPT_POSTUN	= 1 << 12,
+};
+
+enum {
+    RPMTAG_NAME  		= 1000,	/* s */
+    RPMTAG_VERSION		= 1001,	/* s */
+    RPMTAG_RELEASE		= 1002,	/* s */
+    RPMTAG_EPOCH   		= 1003,	/* i */
+    RPMTAG_SUMMARY		= 1004,	/* s{} */
+    RPMTAG_DESCRIPTION		= 1005,	/* s{} */
+    RPMTAG_BUILDTIME		= 1006,	/* i */
+    RPMTAG_BUILDHOST		= 1007,	/* s */
+    RPMTAG_INSTALLTIME		= 1008,	/* i */
+    RPMTAG_SIZE			= 1009,	/* i */
+    RPMTAG_DISTRIBUTION		= 1010,	/* s */
+    RPMTAG_VENDOR		= 1011,	/* s */
+    RPMTAG_GIF			= 1012,	/* x */
+    RPMTAG_XPM			= 1013,	/* x */
+    RPMTAG_LICENSE		= 1014,	/* s */
+    RPMTAG_PACKAGER		= 1015,	/* s */
+    RPMTAG_GROUP		= 1016,	/* s{} */
+    RPMTAG_CHANGELOG		= 1017, /*!< s[] internal */
+    RPMTAG_SOURCE		= 1018,	/* s[] */
+    RPMTAG_PATCH		= 1019,	/* s[] */
+    RPMTAG_URL			= 1020,	/* s */
+    RPMTAG_OS			= 1021,	/* s legacy used int */
+    RPMTAG_ARCH			= 1022,	/* s legacy used int */
+    RPMTAG_PREIN		= 1023,	/* s */
+    RPMTAG_POSTIN		= 1024,	/* s */
+    RPMTAG_PREUN		= 1025,	/* s */
+    RPMTAG_POSTUN		= 1026,	/* s */
+    RPMTAG_OLDFILENAMES		= 1027, /* s[] obsolete */
+    RPMTAG_FILESIZES		= 1028,	/* i */
+    RPMTAG_FILESTATES		= 1029, /* c */
+    RPMTAG_FILEMODES		= 1030,	/* h */
+    RPMTAG_FILEUIDS		= 1031, /*!< internal */
+    RPMTAG_FILEGIDS		= 1032, /*!< internal */
+    RPMTAG_FILERDEVS		= 1033,	/* h */
+    RPMTAG_FILEMTIMES		= 1034, /* i */
+    RPMTAG_FILEMD5S		= 1035,	/* s[] */
+    RPMTAG_FILELINKTOS		= 1036,	/* s[] */
+    RPMTAG_FILEFLAGS		= 1037,	/* i */
+    RPMTAG_ROOT			= 1038, /*!< internal - obsolete */
+    RPMTAG_FILEUSERNAME		= 1039,	/* s[] */
+    RPMTAG_FILEGROUPNAME	= 1040,	/* s[] */
+    RPMTAG_EXCLUDE		= 1041, /*!< internal - obsolete */
+    RPMTAG_EXCLUSIVE		= 1042, /*!< internal - obsolete */
+    RPMTAG_ICON			= 1043,
+    RPMTAG_SOURCERPM		= 1044,	/* s */
+    RPMTAG_FILEVERIFYFLAGS	= 1045,	/* i */
+    RPMTAG_ARCHIVESIZE		= 1046,	/* i */
+    RPMTAG_PROVIDENAME		= 1047,	/* s[] */
+    RPMTAG_REQUIREFLAGS		= 1048,	/* i */
+    RPMTAG_REQUIRENAME		= 1049,	/* s[] */
+    RPMTAG_REQUIREVERSION	= 1050,	/* s[] */
+    RPMTAG_NOSOURCE		= 1051, /*!< internal */
+    RPMTAG_NOPATCH		= 1052, /*!< internal */
+    RPMTAG_CONFLICTFLAGS	= 1053, /* i */
+    RPMTAG_CONFLICTNAME		= 1054,	/* s[] */
+    RPMTAG_CONFLICTVERSION	= 1055,	/* s[] */
+    RPMTAG_DEFAULTPREFIX	= 1056, /*!< internal - deprecated */
+    RPMTAG_BUILDROOT		= 1057, /*!< internal */
+    RPMTAG_INSTALLPREFIX	= 1058, /*!< internal - deprecated */
+    RPMTAG_EXCLUDEARCH		= 1059,
+    RPMTAG_EXCLUDEOS		= 1060,
+    RPMTAG_EXCLUSIVEARCH	= 1061,
+    RPMTAG_EXCLUSIVEOS		= 1062,
+    RPMTAG_AUTOREQPROV		= 1063, /*!< internal */
+    RPMTAG_RPMVERSION		= 1064,	/* s */
+    RPMTAG_TRIGGERSCRIPTS	= 1065,	/* s[] */
+    RPMTAG_TRIGGERNAME		= 1066,	/* s[] */
+    RPMTAG_TRIGGERVERSION	= 1067,	/* s[] */
+    RPMTAG_TRIGGERFLAGS		= 1068,	/* i */
+    RPMTAG_TRIGGERINDEX		= 1069,	/* i */
+    RPMTAG_VERIFYSCRIPT		= 1079,	/* s */
+    RPMTAG_CHANGELOGTIME	= 1080,	/* i */
+    RPMTAG_CHANGELOGNAME	= 1081,	/* s[] */
+    RPMTAG_CHANGELOGTEXT	= 1082,	/* s[] */
+    RPMTAG_BROKENMD5		= 1083, /*!< internal - obsolete */
+    RPMTAG_PREREQ		= 1084, /*!< internal */
+    RPMTAG_PREINPROG		= 1085,	/* s */
+    RPMTAG_POSTINPROG		= 1086,	/* s */
+    RPMTAG_PREUNPROG		= 1087,	/* s */
+    RPMTAG_POSTUNPROG		= 1088,	/* s */
+    RPMTAG_BUILDARCHS		= 1089,
+    RPMTAG_OBSOLETENAME		= 1090,	/* s[] */
+    RPMTAG_VERIFYSCRIPTPROG	= 1091,	/* s */
+    RPMTAG_TRIGGERSCRIPTPROG	= 1092,	/* s */
+    RPMTAG_DOCDIR		= 1093, /*!< internal */
+    RPMTAG_COOKIE		= 1094,	/* s */
+    RPMTAG_FILEDEVICES		= 1095,	/* i */
+    RPMTAG_FILEINODES		= 1096,	/* i */
+    RPMTAG_FILELANGS		= 1097,	/* s[] */
+    RPMTAG_PREFIXES		= 1098,	/* s[] */
+    RPMTAG_INSTPREFIXES		= 1099,	/* s[] */
+    RPMTAG_TRIGGERIN		= 1100, /*!< internal */
+    RPMTAG_TRIGGERUN		= 1101, /*!< internal */
+    RPMTAG_TRIGGERPOSTUN	= 1102, /*!< internal */
+    RPMTAG_AUTOREQ		= 1103, /*!< internal */
+    RPMTAG_AUTOPROV		= 1104, /*!< internal */
+    RPMTAG_CAPABILITY		= 1105, /*!< internal - obsolete */
+    RPMTAG_SOURCEPACKAGE	= 1106, /*!< i src.rpm header marker */
+    RPMTAG_OLDORIGFILENAMES	= 1107, /*!< internal - obsolete */
+    RPMTAG_BUILDPREREQ		= 1108, /*!< internal */
+    RPMTAG_BUILDREQUIRES	= 1109, /*!< internal */
+    RPMTAG_BUILDCONFLICTS	= 1110, /*!< internal */
+    RPMTAG_BUILDMACROS		= 1111, /*!< internal - unused */
+    RPMTAG_PROVIDEFLAGS		= 1112,	/* i */
+    RPMTAG_PROVIDEVERSION	= 1113,	/* s[] */
+    RPMTAG_OBSOLETEFLAGS	= 1114,	/* i */
+    RPMTAG_OBSOLETEVERSION	= 1115,	/* s[] */
+    RPMTAG_DIRINDEXES		= 1116,	/* i */
+    RPMTAG_BASENAMES		= 1117,	/* s[] */
+    RPMTAG_DIRNAMES		= 1118,	/* s[] */
+    RPMTAG_ORIGDIRINDEXES	= 1119, /*!< internal */
+    RPMTAG_ORIGBASENAMES	= 1120, /*!< internal */
+    RPMTAG_ORIGDIRNAMES		= 1121, /*!< internal */
+    RPMTAG_OPTFLAGS		= 1122,	/* s */
+    RPMTAG_DISTURL		= 1123,	/* s */
+    RPMTAG_PAYLOADFORMAT	= 1124,	/* s */
+    RPMTAG_PAYLOADCOMPRESSOR	= 1125,	/* s */
+    RPMTAG_PAYLOADFLAGS		= 1126,	/* s */
+    RPMTAG_INSTALLCOLOR		= 1127, /*!< i transaction color when installed */
+    RPMTAG_INSTALLTID		= 1128,	/* i */
+    RPMTAG_REMOVETID		= 1129,	/* i */
+    RPMTAG_SHA1RHN		= 1130, /*!< internal - obsolete */
+    RPMTAG_RHNPLATFORM		= 1131,	/* s */
+    RPMTAG_PLATFORM		= 1132,	/* s */
+    RPMTAG_PATCHESNAME		= 1133, /*!< placeholder (SuSE) */
+    RPMTAG_PATCHESFLAGS		= 1134, /*!< placeholder (SuSE) */
+    RPMTAG_PATCHESVERSION	= 1135, /*!< placeholder (SuSE) */
+    RPMTAG_CACHECTIME		= 1136,	/* i */
+    RPMTAG_CACHEPKGPATH		= 1137,	/* s */
+    RPMTAG_CACHEPKGSIZE		= 1138,	/* i */
+    RPMTAG_CACHEPKGMTIME	= 1139,	/* i */
+    RPMTAG_FILECOLORS		= 1140,	/* i */
+    RPMTAG_FILECLASS		= 1141,	/* i */
+    RPMTAG_CLASSDICT		= 1142,	/* s[] */
+    RPMTAG_FILEDEPENDSX		= 1143,	/* i */
+    RPMTAG_FILEDEPENDSN		= 1144,	/* i */
+    RPMTAG_DEPENDSDICT		= 1145,	/* i */
+    RPMTAG_SOURCEPKGID		= 1146,	/* x */
+    RPMTAG_FILECONTEXTS		= 1147,	/* s[] */
+    RPMTAG_FSCONTEXTS		= 1148,	/*!< s[] extension */
+    RPMTAG_RECONTEXTS		= 1149,	/*!< s[] extension */
+    RPMTAG_POLICIES		= 1150,	/*!< s[] selinux *.te policy file. */
+    RPMTAG_PRETRANS		= 1151,	/* s */
+    RPMTAG_POSTTRANS		= 1152,	/* s */
+    RPMTAG_PRETRANSPROG		= 1153,	/* s */
+    RPMTAG_POSTTRANSPROG	= 1154,	/* s */
+    RPMTAG_DISTTAG		= 1155,	/* s */
+    RPMTAG_SUGGESTSNAME		= 1156,	/* s[] extension placeholder */
+    RPMTAG_SUGGESTSVERSION	= 1157,	/* s[] extension placeholder */
+    RPMTAG_SUGGESTSFLAGS	= 1158,	/* i   extension placeholder */
+    RPMTAG_ENHANCESNAME		= 1159,	/* s[] extension placeholder */
+    RPMTAG_ENHANCESVERSION	= 1160,	/* s[] extension placeholder */
+    RPMTAG_ENHANCESFLAGS	= 1161,	/* i   extension placeholder */
+    RPMTAG_PRIORITY		= 1162, /* i   extension placeholder */
+    RPMTAG_CVSID		= 1163, /* s */
+    RPMTAG_TRIGGERPREIN		= 1171, /*!< internal */
+};
 
 struct rpm_header {
 	unsigned char magic[4];
@@ -94,34 +274,39 @@ razor_rpm_get_indirect(struct razor_rpm *rpm,
 	return NULL;
 }
 
-static enum razor_version_relation
-rpm_to_razor_flags (uint_32 flags)
+static uint32_t
+rpm_to_razor_flags(uint32_t flags)
 {
-	switch (flags & (RPMSENSE_LESS | RPMSENSE_EQUAL | RPMSENSE_GREATER)) {
-	case RPMSENSE_LESS:
-		return RAZOR_VERSION_LESS;
-	case RPMSENSE_LESS|RPMSENSE_EQUAL:
-		return RAZOR_VERSION_LESS_OR_EQUAL;
-	case RPMSENSE_EQUAL:
-		return RAZOR_VERSION_EQUAL;
-	case RPMSENSE_GREATER|RPMSENSE_EQUAL:
-		return RAZOR_VERSION_GREATER_OR_EQUAL;
-	case RPMSENSE_GREATER:
-		return RAZOR_VERSION_GREATER;
-	}
+	uint32_t razor_flags;
 
-	/* FIXME? */
-	return RAZOR_VERSION_EQUAL;
+	razor_flags = 0;
+	if (flags & RPMSENSE_LESS)
+		razor_flags |= RAZOR_PROPERTY_LESS;
+	if (flags & RPMSENSE_EQUAL)
+		razor_flags |= RAZOR_PROPERTY_EQUAL;
+	if (flags & RPMSENSE_GREATER)
+		razor_flags |= RAZOR_PROPERTY_GREATER;
+
+	if (flags & RPMSENSE_SCRIPT_PRE)
+		razor_flags |= RAZOR_PROPERTY_PRE;
+	if (flags & RPMSENSE_SCRIPT_POST)
+		razor_flags |= RAZOR_PROPERTY_POST;
+	if (flags & RPMSENSE_SCRIPT_PREUN)
+		razor_flags |= RAZOR_PROPERTY_PREUN;
+	if (flags & RPMSENSE_SCRIPT_POSTUN)
+		razor_flags |= RAZOR_PROPERTY_POSTUN;
+	
+	return razor_flags;
 }
 
 static void
-import_properties(struct razor_importer *importer, unsigned long type,
+import_properties(struct razor_importer *importer, uint32_t type,
 		  struct razor_rpm *rpm,
 		  int name_tag, int version_tag, int flags_tag)
 {
 	const char *name, *version;
-	const uint_32 *flags;
-	uint_32 f;
+	const uint32_t *flags;
+	uint32_t f;
 	unsigned int i, count;
 
 	name = razor_rpm_get_indirect(rpm, name_tag, &count);
@@ -133,7 +318,7 @@ import_properties(struct razor_importer *importer, unsigned long type,
 	version = razor_rpm_get_indirect(rpm, version_tag, &count);
 	for (i = 0; i < count; i++) {
 		f = rpm_to_razor_flags(ntohl(flags[i]));
-		razor_importer_add_property(importer, name, f, version, type);
+		razor_importer_add_property(importer, name, f | type, version);
 		name += strlen(name) + 1;
 		version += strlen(version) + 1;
 	}
@@ -147,8 +332,10 @@ import_files(struct razor_importer *importer, struct razor_rpm *rpm)
 	unsigned int i, count;
 	char buffer[256];
 
-	/* assert: count is the same for all arrays */
+	if (rpm->dirs == NULL)
+		return;
 
+	/* assert: count is the same for all arrays */
 	index = razor_rpm_get_indirect(rpm, RPMTAG_DIRINDEXES, &count);
 	name = razor_rpm_get_indirect(rpm, RPMTAG_BASENAMES, &count);
 	for (i = 0; i < count; i++) {
@@ -171,6 +358,8 @@ razor_rpm_open(const char *filename)
 	int fd;
 
 	rpm = malloc(sizeof *rpm);
+	if (rpm == NULL)
+		return NULL;
 	memset(rpm, 0, sizeof *rpm);
 
 	fd = open(filename, O_RDONLY);
@@ -493,7 +682,7 @@ installer_finish(struct installer *installer)
 	if (err != Z_OK) {
 		fprintf(stderr, "inflateEnd error: %d\n", err);
 		return -1;
-	}	    
+	}
 
 	return 0;
 }
@@ -544,7 +733,7 @@ razor_rpm_install(struct razor_rpm *rpm, const char *root)
 		installer.rest = sizeof *header;
 		if (installer_inflate(&installer))
 			return -1;
-		
+
 		header = (struct cpio_file_header *) installer.buffer;
 		mode = fixed_hex_to_ulong(header->mode, sizeof header->mode);
 		filesize = fixed_hex_to_ulong(header->filesize,
@@ -593,7 +782,7 @@ int
 razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 {
 	const char *name, *version, *release, *arch, *summary;
-	const uint_32 *epoch;
+	const uint32_t *epoch;
 	char evr[128], buf[16];
 
 	name = razor_rpm_get_indirect(rpm, RPMTAG_NAME, NULL);
@@ -636,122 +825,4 @@ razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 	razor_importer_finish_package(importer);
 
 	return 0;
-}
-
-union rpm_entry {
-	void *p;
-	char *string;
-	char **list;
-	uint_32 *flags;
-	uint_32 integer;
-};
-
-static void
-add_properties(struct razor_importer *importer,
-	       enum razor_property_type property_type,
-	       Header h, int_32 name_tag, int_32 version_tag, int_32 flags_tag)
-{
-	union rpm_entry names, versions, flags;
-	int_32 i, type, count;
-
-	headerGetEntry(h, name_tag, &type, &names.p, &count);
-	headerGetEntry(h, version_tag, &type, &versions.p, &count);
-	headerGetEntry(h, flags_tag, &type, &flags.p, &count);
-
-	for (i = 0; i < count; i++)
-		razor_importer_add_property(importer,
-					    names.list[i],
-					    rpm_to_razor_flags (flags.flags[i]),
-					    versions.list[i],
-					    property_type);
-}
-
-struct razor_set *
-razor_set_create_from_rpmdb(void)
-{
-	struct razor_importer *importer;
-	rpmdbMatchIterator iter;
-	Header h;
-	int_32 type, count, i;
-	union rpm_entry name, epoch, version, release, arch;
-	union rpm_entry summary, description, url, license;
-	union rpm_entry basenames, dirnames, dirindexes;
-	char filename[PATH_MAX], evr[128], buf[16];
-	rpmdb db;
-
-	rpmReadConfigFiles(NULL, NULL);
-
-	if (rpmdbOpen("", &db, O_RDONLY, 0644) != 0) {
-		fprintf(stderr, "cannot open rpm database\n");
-		exit(1);
-	}
-
-	importer = razor_importer_new();
-
-	iter = rpmdbInitIterator(db, 0, NULL, 0);
-	while (h = rpmdbNextIterator(iter), h != NULL) {
-		headerGetEntry(h, RPMTAG_NAME, &type, &name.p, &count);
-		headerGetEntry(h, RPMTAG_EPOCH, &type, &epoch.p, &count);
-		headerGetEntry(h, RPMTAG_VERSION, &type, &version.p, &count);
-		headerGetEntry(h, RPMTAG_RELEASE, &type, &release.p, &count);
-		headerGetEntry(h, RPMTAG_ARCH, &type, &arch.p, &count);
-		headerGetEntry(h, RPMTAG_SUMMARY, &type, &summary.p, &count);
-		headerGetEntry(h, RPMTAG_DESCRIPTION, &type, &description.p, &count);
-		headerGetEntry(h, RPMTAG_URL, &type, &url.p, &count);
-		headerGetEntry(h, RPMTAG_LICENSE, &type, &license.p, &count);
-
-		if (epoch.flags != NULL) {
-			snprintf(buf, sizeof buf, "%u", *epoch.flags);
-			razor_build_evr(evr, sizeof evr,
-					buf, version.string, release.string);
-		} else {
-			razor_build_evr(evr, sizeof evr,
-					NULL, version.string, release.string);
-		}
-
-		razor_importer_begin_package(importer,
-					     name.string, evr, arch.string);
-		razor_importer_add_details(importer, summary.string,
-					   description.string, url.string,
-					   license.string);
-
-		add_properties(importer, RAZOR_PROPERTY_REQUIRES, h,
-			       RPMTAG_REQUIRENAME,
-			       RPMTAG_REQUIREVERSION,
-			       RPMTAG_REQUIREFLAGS);
-
-		add_properties(importer, RAZOR_PROPERTY_PROVIDES, h,
-			       RPMTAG_PROVIDENAME,
-			       RPMTAG_PROVIDEVERSION,
-			       RPMTAG_PROVIDEFLAGS);
-
-		add_properties(importer, RAZOR_PROPERTY_OBSOLETES, h,
-			       RPMTAG_OBSOLETENAME,
-			       RPMTAG_OBSOLETEVERSION,
-			       RPMTAG_OBSOLETEFLAGS);
-
-		add_properties(importer, RAZOR_PROPERTY_CONFLICTS, h,
-			       RPMTAG_CONFLICTNAME,
-			       RPMTAG_CONFLICTVERSION,
-			       RPMTAG_CONFLICTFLAGS);
-
-		headerGetEntry(h, RPMTAG_BASENAMES, &type,
-			       &basenames.p, &count);
-		headerGetEntry(h, RPMTAG_DIRNAMES, &type,
-			       &dirnames.p, &count);
-		headerGetEntry(h, RPMTAG_DIRINDEXES, &type,
-			       &dirindexes.p, &count);
-		for (i = 0; i < count; i++) {
-			snprintf(filename, sizeof filename, "%s%s",
-				 dirnames.list[dirindexes.flags[i]],
-				 basenames.list[i]);
-			razor_importer_add_file(importer, filename);
-		}
-
-		razor_importer_finish_package(importer);
-	}
-
-	rpmdbClose(db);
-
-	return razor_importer_finish(importer);
 }

@@ -20,6 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <dirent.h>
 #include "razor.h"
 
 enum option_type {
@@ -72,10 +74,12 @@ static const struct option query_options[] = {
 	{ }
 };
 
+static int option_nodeps;
+
 static const struct option verify_options[] = {
 	{ OPTION_BOOL, "nomd5", 0, NULL, "don't verify MD5 digest of files", NULL },
 	{ OPTION_BOOL, "nofiles", 0, NULL, "don't verify files in package", NULL },
-	{ OPTION_BOOL, "nodeps", 0, NULL, "don't verify package dependencies", NULL },
+	{ OPTION_BOOL, "nodeps", 0, NULL, "don't verify package dependencies", &option_nodeps },
 	{ OPTION_BOOL, "noscript", 0, NULL, "don't execute verify script(s)", NULL, },
 	{ OPTION_BOOL, "all", 'a', NULL, "query/verify all packages", &option_all },
 	{ OPTION_BOOL, "file", 'f', NULL, "query/verify package(s) owning file", NULL },
@@ -116,13 +120,16 @@ static const struct option signature_options[] = {
 	{ }
 };
 
+static int option_initdb;
+
 static const struct option database_options[] = {
-	{ OPTION_BOOL, "initdb", 0, NULL, "initialize database", NULL },
+	{ OPTION_BOOL, "initdb", 0, NULL, "initialize database", &option_initdb },
 	{ OPTION_BOOL, "rebuilddb", 0, NULL, "rebuild database inverted lists from installed package headers", NULL },
 	{ }
 };
 
-static int option_erase, option_install, option_upgrade;
+static int option_erase, option_install, option_upgrade, option_justdb;
+static int option_test;
 
 static const struct option install_options[] = {
 	{ OPTION_BOOL, "aid", 0, NULL, "add suggested packages to transaction", NULL, },
@@ -140,8 +147,8 @@ static const struct option install_options[] = {
 	{ OPTION_BOOL, "ignoreos", 0, NULL, "don't verify package operating system", NULL, },
 	{ OPTION_BOOL, "ignoresize", 0, NULL, "don't check disk space before installing", NULL },
 	{ OPTION_BOOL, "install", 'i', NULL, "install package(s)", &option_install },
-	{ OPTION_BOOL, "justdb", 0, NULL, "update the database, but do not modify the filesystem", NULL, },
-	{ OPTION_BOOL, "nodeps", 0, NULL, "do not verify package dependencies", NULL, },
+	{ OPTION_BOOL, "justdb", 0, NULL, "update the database, but do not modify the filesystem", &option_justdb, },
+	{ OPTION_BOOL, "nodeps", 0, NULL, "do not verify package dependencies", &option_nodeps, },
 	{ OPTION_BOOL, "nomd5", 0, NULL, "don't verify MD5 digest of files", NULL, },
 	{ OPTION_BOOL, "nocontexts", 0, NULL, "don't install file security contexts", NULL, },
 	{ OPTION_BOOL, "noorder", 0, NULL, "do not reorder package installation to satisfy dependencies", NULL, },
@@ -155,12 +162,13 @@ static const struct option install_options[] = {
 	{ OPTION_BOOL, "repackage", 0, NULL, "save erased package files by repackaging", NULL, },
 	{ OPTION_BOOL, "replacefiles", 0, NULL, "ignore file conflicts between packages", NULL, },
 	{ OPTION_BOOL, "replacepkgs", 0, NULL, "reinstall if the package is already present", NULL, },
-	{ OPTION_BOOL, "test", 0, NULL, "don't install, but tell if it would work or not", NULL },
+	{ OPTION_BOOL, "test", 0, NULL, "don't install, but tell if it would work or not", &option_test },
 	{ OPTION_BOOL, "upgrade", 'U', "<packagefile>+", "upgrade package(s)", &option_upgrade },
 	{ }
 };
 
 static int option_version;
+static const char *option_root = "install";
 
 static const struct option common_options[] = {
 	{ OPTION_STRING, "define", 'D', "MACRO EXPR", "define MACRO with value EXPR", NULL, },
@@ -169,7 +177,7 @@ static const struct option common_options[] = {
 	{ OPTION_BOOL, "nodigest", 0, NULL, "don't verify package digest(s)", NULL, },
 	{ OPTION_BOOL, "nosignature", 0, NULL, "don't verify package signature(s)", NULL, },
 	{ OPTION_STRING, "rcfile", 0, "<FILE:...>", "read <FILE:...> instead of default file(s)", NULL },
-	{ OPTION_STRING, "root", 'r', "ROOT", "use ROOT as top level directory (default: \"/\")", NULL },
+	{ OPTION_STRING, "root", 'r', "ROOT", "use ROOT as top level directory (default: \"/\")", &option_root },
 	{ OPTION_BOOL, "querytags", 0, NULL, "display known query tags", NULL, },
 	{ OPTION_BOOL, "showrc", 0, NULL, "display final rpmrc and macro configuration", NULL, },
 	{ OPTION_BOOL, "quiet", 0, NULL, "provide less detailed output", NULL },
@@ -239,29 +247,35 @@ static const struct option rpm_options[] = {
 static const char system_repo_filename[] = "system.repo";
 static const char *repo_filename = system_repo_filename;
 
+static void
+command_initdb(int argc, const char *argv[])
+{
+	razor_root_create(option_root);
+}
+
 static struct razor_property *
-add_property_packages(struct razor_set *set, 
+add_property_packages(struct razor_set *set,
 		      struct razor_package_query *query,
 		      const char *ref_name,
 		      const char *ref_version,
-		      enum razor_property_type ref_type)
+		      uint32_t ref_type)
 {
 	struct razor_property *property;
 	struct razor_property_iterator *pi;
 	struct razor_package_iterator *pkgi;
 	const char *name, *version;
-	enum razor_property_type type;
-	enum razor_version_relation relation;
+	uint32_t flags;
 
 	pi = razor_property_iterator_create(set, NULL);
 	while (razor_property_iterator_next(pi, &property, &name,
-					    &relation, &version, &type)) {
+					    &flags, &version)) {
 		if (strcmp(ref_name, name) != 0)
 			continue;
-		if (ref_version && relation == RAZOR_VERSION_EQUAL &&
+		if (ref_version &&
+		    (flags & RAZOR_PROPERTY_RELATION_MASK) == RAZOR_PROPERTY_EQUAL &&
 		    strcmp(ref_version, version) != 0)
 			continue;
-		if (ref_type != type)
+		if ((flags & RAZOR_PROPERTY_TYPE_MASK) != ref_type)
 			continue;
 
 		pkgi = razor_package_iterator_create_for_property(set,
@@ -288,17 +302,20 @@ add_command_line_packages(struct razor_set *set,
 	struct razor_package *package;
 	struct razor_package_iterator *pi;
 	const char *name, *version, *arch;
-	int i, cmp;
+	int i, cmp, errors;
 
 	qsort(argv, argc, sizeof(*argv), strcmpp);
 	i = 0;
+	errors = 0;
 
 	pi = razor_package_iterator_create(set);
 
 	while (razor_package_iterator_next(pi, &package,
 					   &name, &version, &arch)) {
 		while (cmp = strcmp(argv[i], name), cmp < 0 && i < argc) {
-			printf("package %s is not installed\n", argv[i]);
+			fprintf(stderr, "error: package %s is not installed\n",
+				argv[i]);
+			errors++;
 			i++;
 		}
 
@@ -309,6 +326,9 @@ add_command_line_packages(struct razor_set *set,
 	}
 
 	razor_package_iterator_destroy(pi);
+
+	if (errors)
+		exit(1);
 }
 
 static struct razor_package_iterator *
@@ -353,25 +373,24 @@ get_query_packages(struct razor_set *set, int argc, const char *argv[])
 static void
 print_package_properties(struct razor_set *set,
 			 struct razor_package *package,
-			 enum razor_property_type ref_type)
+			 uint32_t ref_type)
 {
 	struct razor_property *property;
 	struct razor_property_iterator *pi;
 	const char *name, *version;
-	enum razor_property_type type;
-	enum razor_version_relation relation;
+	uint32_t flags;
 
 	pi = razor_property_iterator_create(set, package);
 	while (razor_property_iterator_next(pi, &property,
-					    &name, &relation, &version,
-					    &type)) {
-		if (type != ref_type)
+					    &name, &flags, &version)) {
+		if ((flags & RAZOR_PROPERTY_TYPE_MASK) != ref_type)
 			continue;
 		if (version[0] == '\0')
 			printf("%s\n", name);
 		else
 			printf("%s %s %s\n", name,
-			       razor_version_relations[relation], version);
+			       razor_property_relation_to_string(property),
+			       version);
 	}
 	razor_property_iterator_destroy(pi);
 }
@@ -423,7 +442,7 @@ command_query(int argc, const char *argv[])
 		argc = 0;
 		option_all = 1;
 	} else {
-		set = razor_set_open(repo_filename);
+		set = razor_root_open_read_only(option_root);
 	}
 
 	pi = get_query_packages(set, argc, argv);
@@ -473,7 +492,7 @@ command_verify(int argc, const char *argv[])
 		argc = 0;
 		option_all = 1;
 	} else {
-		set = razor_set_open(repo_filename);
+		set = razor_root_open_read_only(option_root);
 	}
 
 	pi = get_query_packages(set, argc, argv);
@@ -488,9 +507,18 @@ command_verify(int argc, const char *argv[])
 }
 
 static void
+remove_package(const char *name,
+	       const char *old_version, const char *new_version,
+	       const char *arch, void *data)
+{
+	if (old_version)
+		printf("remove %s-%s.%s\n", name, old_version, arch);
+}
+
+static void
 command_erase(int argc, const char *argv[])
 {
-	struct razor_set *set, *next;
+	struct razor_set *set, *upstream, *next;
 	struct razor_transaction *trans;
 	struct razor_package_query *query;
 	struct razor_package_iterator *pi;
@@ -503,8 +531,9 @@ command_erase(int argc, const char *argv[])
 	}
 
 	set = razor_set_open(repo_filename);
+	upstream = razor_set_create();
 
-	trans = razor_transaction_create(set, NULL);
+	trans = razor_transaction_create(set, upstream);
 
 	query = razor_package_query_create(set);
 	add_command_line_packages(set, query, argc, argv);
@@ -515,11 +544,32 @@ command_erase(int argc, const char *argv[])
 		razor_transaction_remove_package(trans, package);
 	razor_package_iterator_destroy(pi);
 
-	next = razor_transaction_finish(trans);
-	razor_set_destroy(set);
+	if (!option_nodeps && razor_transaction_describe(trans) > 0) {
+		printf("unsatisfied dependencies.\n");
+		exit(1);
+	}
 
-	razor_set_list_unsatisfied(next);
+	if (option_test)
+		exit(0);
+
+	next = razor_transaction_finish(trans);
+
+	if (!option_justdb)
+		razor_set_diff(set, next, remove_package, NULL);
+
+	razor_set_destroy(set);
+	razor_set_destroy(upstream);
+
 	razor_set_destroy(next);
+}
+
+static void
+install_package(const char *name,
+		const char *old_version, const char *new_version,
+		const char *arch, void *data)
+{
+	if (new_version)
+		printf("install %s-%s.%s\n", name, new_version, arch);
 }
 
 static void
@@ -547,24 +597,78 @@ command_install(int argc, const char *argv[])
 		razor_transaction_install_package(trans, package);
 	razor_package_iterator_destroy(pi);
 
+	if (!option_nodeps && razor_transaction_describe(trans) > 0) {
+		printf("unsatisfied dependencies.\n");
+		exit(1);
+	}
+
+	if (option_test)
+		exit(0);
+
 	next = razor_transaction_finish(trans);
+
+	if (!option_justdb)
+		razor_set_diff(set, next, install_package, NULL);
+
 	razor_set_destroy(set);
 	razor_set_destroy(upstream);
-
-	razor_set_list_unsatisfied(next);
 
 	razor_set_destroy(next);
 }
 
 static void
+update_package(const char *name,
+	       const char *old_version, const char *new_version,
+	       const char *arch, void *data)
+{
+	if (old_version)
+		printf("remove %s-%s.%s\n", name, old_version, arch);
+	if (new_version)
+		printf("install %s-%s.%s\n", name, new_version, arch);
+}
+
+static void
 command_update(int argc, const char *argv[])
 {
+	struct razor_set *set, *upstream, *next;
+	struct razor_transaction *trans;
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *name, *version, *arch;
+
 	if (argc == 0) {
 		printf("no packages given for update\n");
 		exit(1);
 	}
 
-	printf("command update - not implemented\n");
+	set = razor_set_open(repo_filename);
+	upstream = create_set_from_command_line(argc, argv);
+
+	trans = razor_transaction_create(set, upstream);
+
+	pi = razor_package_iterator_create(upstream);
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch))
+		razor_transaction_update_package(trans, package);
+	razor_package_iterator_destroy(pi);
+
+	if (!option_nodeps && razor_transaction_describe(trans) > 0) {
+		printf("unsatisfied dependencies.\n");
+		exit(1);
+	}
+
+	if (option_test)
+		exit(0);
+
+	next = razor_transaction_finish(trans);
+
+	if (!option_justdb)
+		razor_set_diff(set, next, update_package, NULL);
+
+	razor_set_destroy(set);
+	razor_set_destroy(upstream);
+
+	razor_set_destroy(next);
 }
 
 static int
@@ -769,7 +873,9 @@ main(int argc, const char *argv[])
 		exit(0);
 	}
 
-	if (option_verify) {
+	if (option_initdb) {
+		command_initdb(argc, argv);
+	} else if (option_verify) {
 		command_verify(argc, argv);
 	} else if (option_query) {
 		command_query(argc, argv);
