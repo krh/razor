@@ -73,17 +73,14 @@ command_list(int argc, const char *argv[])
 }
 
 static int
-list_properties(const char *package_name,
-		enum razor_property_type required_type)
+list_properties(const char *package_name, uint32_t type)
 {
-	static const char *relation_string[] = { "<", "<=", "=", ">=", ">" };
 	struct razor_set *set;
 	struct razor_property *property;
 	struct razor_package *package;
 	struct razor_property_iterator *pi;
 	const char *name, *version;
-	enum razor_property_type type;
-	enum razor_version_relation relation;
+	uint32_t flags;
 
 	set = razor_set_open(repo_filename);
 	if (package_name)
@@ -93,15 +90,28 @@ list_properties(const char *package_name,
 
 	pi = razor_property_iterator_create(set, package);
 	while (razor_property_iterator_next(pi, &property,
-					    &name, &relation, &version,
-					    &type)) {
-		if (type != required_type)
+					    &name, &flags, &version)) {
+		if ((flags & RAZOR_PROPERTY_TYPE_MASK) != type)
 			continue;
-		if (version[0] == '\0')
-			printf("%s\n", name);
-		else
-			printf("%s %s %s\n", name,
-			       relation_string[relation], version);
+		printf("%s", name);
+		if (version[0] != '\0')
+			printf(" %s %s",
+			       razor_property_relation_to_string(property),
+			       version);
+
+		if (flags & ~(RAZOR_PROPERTY_RELATION_MASK | RAZOR_PROPERTY_TYPE_MASK)) {
+			printf(" [");
+			if (flags & RAZOR_PROPERTY_PRE)
+				printf(" pre");
+			if (flags & RAZOR_PROPERTY_POST)
+				printf(" post");
+			if (flags & RAZOR_PROPERTY_PREUN)
+				printf(" preun");
+			if (flags & RAZOR_PROPERTY_POSTUN)
+				printf(" postun");
+			printf(" ]");
+		}
+		printf("\n");
 	}
 	razor_property_iterator_destroy(pi);
 
@@ -203,14 +213,13 @@ list_packages_for_property(struct razor_set *set,
 static int
 list_property_packages(const char *ref_name,
 		       const char *ref_version,
-		       enum razor_property_type ref_type)
+		       uint32_t type)
 {
 	struct razor_set *set;
 	struct razor_property *property;
 	struct razor_property_iterator *pi;
 	const char *name, *version;
-	enum razor_property_type type;
-	enum razor_version_relation relation;
+	uint32_t flags;
 
 	if (ref_name == NULL)
 		return 0;
@@ -221,14 +230,14 @@ list_property_packages(const char *ref_name,
 
 	pi = razor_property_iterator_create(set, NULL);
 	while (razor_property_iterator_next(pi, &property,
-					    &name, &relation, &version,
-					    &type)) {
+					    &name, &flags, &version)) {
 		if (strcmp(ref_name, name) != 0)
 			continue;
-		if (ref_version && relation == RAZOR_VERSION_EQUAL &&
+		if (ref_version &&
+		    (flags & RAZOR_PROPERTY_RELATION_MASK) == RAZOR_PROPERTY_EQUAL &&
 		    strcmp(ref_version, version) != 0)
 			continue;
-		if (ref_type != type)
+		if ((flags & RAZOR_PROPERTY_TYPE_MASK) != type)
 			continue;
 
 		list_packages_for_property(set, property);

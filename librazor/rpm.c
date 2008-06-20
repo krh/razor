@@ -48,9 +48,14 @@ enum {
 };
 
 enum {
-    RPMSENSE_LESS	= (1 << 1),
-    RPMSENSE_GREATER	= (1 << 2),
-    RPMSENSE_EQUAL	= (1 << 3),
+    RPMSENSE_LESS		= 1 << 1,
+    RPMSENSE_GREATER		= 1 << 2,
+    RPMSENSE_EQUAL		= 1 << 3,
+    RPMSENSE_PREREQ		= 1 << 6,
+    RPMSENSE_SCRIPT_PRE		= 1 << 9,
+    RPMSENSE_SCRIPT_POST	= 1 << 10,
+    RPMSENSE_SCRIPT_PREUN	= 1 << 11,
+    RPMSENSE_SCRIPT_POSTUN	= 1 << 12,
 };
 
 enum {
@@ -269,28 +274,33 @@ razor_rpm_get_indirect(struct razor_rpm *rpm,
 	return NULL;
 }
 
-static enum razor_version_relation
+static uint32_t
 rpm_to_razor_flags(uint32_t flags)
 {
-	switch (flags & (RPMSENSE_LESS | RPMSENSE_EQUAL | RPMSENSE_GREATER)) {
-	case RPMSENSE_LESS:
-		return RAZOR_VERSION_LESS;
-	case RPMSENSE_LESS|RPMSENSE_EQUAL:
-		return RAZOR_VERSION_LESS_OR_EQUAL;
-	case RPMSENSE_EQUAL:
-		return RAZOR_VERSION_EQUAL;
-	case RPMSENSE_GREATER|RPMSENSE_EQUAL:
-		return RAZOR_VERSION_GREATER_OR_EQUAL;
-	case RPMSENSE_GREATER:
-		return RAZOR_VERSION_GREATER;
-	}
+	uint32_t razor_flags;
 
-	/* FIXME? */
-	return RAZOR_VERSION_EQUAL;
+	razor_flags = 0;
+	if (flags & RPMSENSE_LESS)
+		razor_flags |= RAZOR_PROPERTY_LESS;
+	if (flags & RPMSENSE_EQUAL)
+		razor_flags |= RAZOR_PROPERTY_EQUAL;
+	if (flags & RPMSENSE_GREATER)
+		razor_flags |= RAZOR_PROPERTY_GREATER;
+
+	if (flags & RPMSENSE_SCRIPT_PRE)
+		razor_flags |= RAZOR_PROPERTY_PRE;
+	if (flags & RPMSENSE_SCRIPT_POST)
+		razor_flags |= RAZOR_PROPERTY_POST;
+	if (flags & RPMSENSE_SCRIPT_PREUN)
+		razor_flags |= RAZOR_PROPERTY_PREUN;
+	if (flags & RPMSENSE_SCRIPT_POSTUN)
+		razor_flags |= RAZOR_PROPERTY_POSTUN;
+	
+	return razor_flags;
 }
 
 static void
-import_properties(struct razor_importer *importer, unsigned long type,
+import_properties(struct razor_importer *importer, uint32_t type,
 		  struct razor_rpm *rpm,
 		  int name_tag, int version_tag, int flags_tag)
 {
@@ -308,7 +318,7 @@ import_properties(struct razor_importer *importer, unsigned long type,
 	version = razor_rpm_get_indirect(rpm, version_tag, &count);
 	for (i = 0; i < count; i++) {
 		f = rpm_to_razor_flags(ntohl(flags[i]));
-		razor_importer_add_property(importer, name, f, version, type);
+		razor_importer_add_property(importer, name, f | type, version);
 		name += strlen(name) + 1;
 		version += strlen(version) + 1;
 	}

@@ -26,21 +26,31 @@ struct razor_set;
 struct razor_package;
 struct razor_property;
 
-enum razor_property_type {
-	RAZOR_PROPERTY_REQUIRES,
-	RAZOR_PROPERTY_PROVIDES,
-	RAZOR_PROPERTY_CONFLICTS,
-	RAZOR_PROPERTY_OBSOLETES
+enum razor_property_flags {
+	RAZOR_PROPERTY_LESS		= 1 << 0,
+	RAZOR_PROPERTY_GREATER		= 1 << 1,
+	RAZOR_PROPERTY_EQUAL		= 1 << 2,
+	RAZOR_PROPERTY_RELATION_MASK	=
+		RAZOR_PROPERTY_LESS |
+		RAZOR_PROPERTY_GREATER |
+		RAZOR_PROPERTY_EQUAL,
+
+	RAZOR_PROPERTY_REQUIRES		= 0 << 3,
+	RAZOR_PROPERTY_PROVIDES		= 1 << 3,
+	RAZOR_PROPERTY_CONFLICTS	= 2 << 3,
+	RAZOR_PROPERTY_OBSOLETES	= 3 << 3,
+	RAZOR_PROPERTY_TYPE_MASK	= 3 << 3,
+		
+	RAZOR_PROPERTY_PRE		= 1 << 5,
+	RAZOR_PROPERTY_POST		= 1 << 6,
+	RAZOR_PROPERTY_PREUN		= 1 << 7,
+	RAZOR_PROPERTY_POSTUN		= 1 << 8
 };
 
-enum razor_version_relation {
-	RAZOR_VERSION_LESS,
-	RAZOR_VERSION_LESS_OR_EQUAL,
-	RAZOR_VERSION_EQUAL,
-	RAZOR_VERSION_GREATER_OR_EQUAL,
-	RAZOR_VERSION_GREATER
-};
-extern const char * const razor_version_relations[];
+const char *
+razor_property_relation_to_string(struct razor_property *p);
+const char *
+razor_property_type_to_string(struct razor_property *p);
 
 struct razor_set *razor_set_create(void);
 struct razor_set *razor_set_open(const char *filename);
@@ -86,9 +96,8 @@ razor_property_iterator_create(struct razor_set *set,
 int razor_property_iterator_next(struct razor_property_iterator *pi,
 				 struct razor_property **property,
 				 const char **name,
-				 enum razor_version_relation *relation,
-				 const char **version,
-				 enum razor_property_type *type);
+				 uint32_t *flags,
+				 const char **version);
 void
 razor_property_iterator_destroy(struct razor_property_iterator *pi);
 
@@ -125,9 +134,8 @@ void razor_transaction_destroy(struct razor_transaction *trans);
 /* Temporary helper for test suite. */
 int razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 					   const char *name,
-					   enum razor_version_relation rel,
-					   const char *version,
-					   enum razor_property_type type);
+					   uint32_t flags,
+					   const char *version);
 
 /* Importer interface; for building a razor set from external sources,
  * like yum, rpmdb or razor package files. */
@@ -143,9 +151,8 @@ void razor_importer_begin_package(struct razor_importer *importer,
 				  const char *arch);
 void razor_importer_add_property(struct razor_importer *importer,
 				 const char *name,
-				 enum razor_version_relation relation,
-				 const char *version,
-				 enum razor_property_type type);
+				 uint32_t flags,
+				 const char *version);
 void razor_importer_add_file(struct razor_importer *importer,
 			     const char *name);
 void razor_importer_finish_package(struct razor_importer *importer);

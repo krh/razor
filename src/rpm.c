@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <dirent.h>
 #include "razor.h"
 
@@ -257,24 +258,24 @@ add_property_packages(struct razor_set *set,
 		      struct razor_package_query *query,
 		      const char *ref_name,
 		      const char *ref_version,
-		      enum razor_property_type ref_type)
+		      uint32_t ref_type)
 {
 	struct razor_property *property;
 	struct razor_property_iterator *pi;
 	struct razor_package_iterator *pkgi;
 	const char *name, *version;
-	enum razor_property_type type;
-	enum razor_version_relation relation;
+	uint32_t flags;
 
 	pi = razor_property_iterator_create(set, NULL);
 	while (razor_property_iterator_next(pi, &property, &name,
-					    &relation, &version, &type)) {
+					    &flags, &version)) {
 		if (strcmp(ref_name, name) != 0)
 			continue;
-		if (ref_version && relation == RAZOR_VERSION_EQUAL &&
+		if (ref_version &&
+		    (flags & RAZOR_PROPERTY_RELATION_MASK) == RAZOR_PROPERTY_EQUAL &&
 		    strcmp(ref_version, version) != 0)
 			continue;
-		if (ref_type != type)
+		if ((flags & RAZOR_PROPERTY_TYPE_MASK) != ref_type)
 			continue;
 
 		pkgi = razor_package_iterator_create_for_property(set,
@@ -369,30 +370,27 @@ get_query_packages(struct razor_set *set, int argc, const char *argv[])
 	return razor_package_query_finish(query);
 }
 
-static const char *relation_string[] = { "<", "<=", "=", ">=", ">" };
-
 static void
 print_package_properties(struct razor_set *set,
 			 struct razor_package *package,
-			 enum razor_property_type ref_type)
+			 uint32_t ref_type)
 {
 	struct razor_property *property;
 	struct razor_property_iterator *pi;
 	const char *name, *version;
-	enum razor_property_type type;
-	enum razor_version_relation relation;
+	uint32_t flags;
 
 	pi = razor_property_iterator_create(set, package);
 	while (razor_property_iterator_next(pi, &property,
-					    &name, &relation, &version,
-					    &type)) {
-		if (type != ref_type)
+					    &name, &flags, &version)) {
+		if ((flags & RAZOR_PROPERTY_TYPE_MASK) != ref_type)
 			continue;
 		if (version[0] == '\0')
 			printf("%s\n", name);
 		else
 			printf("%s %s %s\n", name,
-			       relation_string[relation], version);
+			       razor_property_relation_to_string(property),
+			       version);
 	}
 	razor_property_iterator_destroy(pi);
 }

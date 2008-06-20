@@ -34,29 +34,34 @@ union rpm_entry {
 	uint_32 integer;
 };
 
-static enum razor_version_relation
-rpm_to_razor_flags (uint_32 flags)
+static uint32_t
+rpm_to_razor_flags(uint32_t flags)
 {
-	switch (flags & (RPMSENSE_LESS | RPMSENSE_EQUAL | RPMSENSE_GREATER)) {
-	case RPMSENSE_LESS:
-		return RAZOR_VERSION_LESS;
-	case RPMSENSE_LESS|RPMSENSE_EQUAL:
-		return RAZOR_VERSION_LESS_OR_EQUAL;
-	case RPMSENSE_EQUAL:
-		return RAZOR_VERSION_EQUAL;
-	case RPMSENSE_GREATER|RPMSENSE_EQUAL:
-		return RAZOR_VERSION_GREATER_OR_EQUAL;
-	case RPMSENSE_GREATER:
-		return RAZOR_VERSION_GREATER;
-	}
+	uint32_t razor_flags;
 
-	/* FIXME? */
-	return RAZOR_VERSION_EQUAL;
+	razor_flags = 0;
+	if (flags & RPMSENSE_LESS)
+		razor_flags |= RAZOR_PROPERTY_LESS;
+	if (flags & RPMSENSE_EQUAL)
+		razor_flags |= RAZOR_PROPERTY_EQUAL;
+	if (flags & RPMSENSE_GREATER)
+		razor_flags |= RAZOR_PROPERTY_GREATER;
+
+	if (flags & RPMSENSE_SCRIPT_PRE)
+		razor_flags |= RAZOR_PROPERTY_PRE;
+	if (flags & RPMSENSE_SCRIPT_POST)
+		razor_flags |= RAZOR_PROPERTY_POST;
+	if (flags & RPMSENSE_SCRIPT_PREUN)
+		razor_flags |= RAZOR_PROPERTY_PREUN;
+	if (flags & RPMSENSE_SCRIPT_POSTUN)
+		razor_flags |= RAZOR_PROPERTY_POSTUN;
+
+	return razor_flags;
 }
 
 static void
 add_properties(struct razor_importer *importer,
-	       enum razor_property_type property_type,
+	       uint32_t type_flags,
 	       Header h, int_32 name_tag, int_32 version_tag, int_32 flags_tag)
 {
 	union rpm_entry names, versions, flags;
@@ -69,9 +74,8 @@ add_properties(struct razor_importer *importer,
 	for (i = 0; i < count; i++)
 		razor_importer_add_property(importer,
 					    names.list[i],
-					    rpm_to_razor_flags (flags.flags[i]),
-					    versions.list[i],
-					    property_type);
+					    rpm_to_razor_flags (flags.flags[i]) | type_flags,
+					    versions.list[i]);
 }
 
 struct razor_set *

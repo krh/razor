@@ -70,10 +70,8 @@ struct razor_package {
 };
 
 struct razor_property {
-	uint name  : 24;
-	uint flags : 6;
-	enum razor_property_type type : 2;
-	enum razor_version_relation relation : 32;
+	uint32_t name;
+	uint32_t flags;
 	uint32_t version;
 	struct list_head packages;
 };
@@ -316,6 +314,7 @@ razor_importer_begin_package(struct razor_importer *importer,
 	array_init(&importer->properties);
 }
 
+
 void
 razor_importer_finish_package(struct razor_importer *importer)
 {
@@ -330,18 +329,15 @@ razor_importer_finish_package(struct razor_importer *importer)
 void
 razor_importer_add_property(struct razor_importer *importer,
 			    const char *name,
-			    enum razor_version_relation relation,
-			    const char *version,
-			    enum razor_property_type type)
+			    uint32_t flags,
+			    const char *version)
 {
 	struct razor_property *p;
 	uint32_t *r;
 
 	p = array_add(&importer->set->properties, sizeof *p);
 	p->name = hashtable_tokenize(&importer->table, name);
-	p->flags = 0;
-	p->type = type;
-	p->relation = relation;
+	p->flags = flags;
 	p->version = hashtable_tokenize(&importer->table, version);
 	list_set_ptr(&p->packages, importer->package -
 		     (struct razor_package *) importer->set->packages.data);
@@ -349,7 +345,8 @@ razor_importer_add_property(struct razor_importer *importer,
 	r = array_add(&importer->properties, sizeof *r);
 	*r = p - (struct razor_property *) importer->set->properties.data;
 
-	if (type == RAZOR_PROPERTY_REQUIRES && *name == '/') {
+	if (((flags & RAZOR_PROPERTY_TYPE_MASK) == RAZOR_PROPERTY_REQUIRES) &&
+	    *name == '/') {
 		r = array_add(&importer->file_requires, sizeof *r);
 		*r = p->name;
 	}
@@ -446,10 +443,8 @@ compare_properties(const void *p1, const void *p2, void *data)
 
 	if (prop1->name != prop2->name)
 		return strcmp(&pool[prop1->name], &pool[prop2->name]);
-	else if (prop1->type != prop2->type)
-		return prop1->type - prop2->type;
-	else if (prop1->relation != prop2->relation)
-		return prop1->relation - prop2->relation;
+	else if (prop1->flags != prop2->flags)
+		return prop1->flags - prop2->flags;
 	else
 		return versioncmp(&pool[prop1->version], &pool[prop2->version]);
 }
@@ -474,13 +469,12 @@ uniqueify_properties(struct razor_set *set)
 	rmap = malloc(count * sizeof *map);
 	pkgs = zalloc(count * sizeof *pkgs);
 	for (rp = set->properties.data, up = rp, i = 0; rp < rp_end; rp++, i++) {
-		if (rp->name != up->name || rp->type != up->type ||
-		    rp->relation != up->relation || rp->version != up->version) {
+		if (rp->name != up->name ||
+		    rp->flags != up->flags ||
+		    rp->version != up->version) {
 			up++;
 			up->name = rp->name;
-			up->flags = 0;
-			up->type = rp->type;
-			up->relation = rp->relation;
+			up->flags = rp->flags;
 			up->version = rp->version;
 		}
 
@@ -718,8 +712,8 @@ find_file_provides(struct razor_importer *importer)
 		for (pkg = list_first(&entry->packages, &importer->set->package_pool); pkg; pkg = list_next(pkg)) {
 			prop = array_add(&importer->set->properties, sizeof *prop);
 			prop->name = *req;
-			prop->type = RAZOR_PROPERTY_PROVIDES;
-			prop->relation = RAZOR_VERSION_EQUAL;
+			prop->flags =
+				RAZOR_PROPERTY_PROVIDES | RAZOR_PROPERTY_EQUAL;
 			prop->version = hashtable_tokenize(&importer->table, "");
 			list_set_ptr(&prop->packages, pkg->data);
 
@@ -950,9 +944,8 @@ int
 razor_property_iterator_next(struct razor_property_iterator *pi,
 			     struct razor_property **property,
 			     const char **name,
-			     enum razor_version_relation *relation,
-			     const char **version,
-			     enum razor_property_type *type)
+			     uint32_t *flags,
+			     const char **version)
 {
 	char *pool;
 	int valid;
@@ -973,9 +966,8 @@ razor_property_iterator_next(struct razor_property_iterator *pi,
 		pool = pi->set->string_pool.data;
 		*property = p;
 		*name = &pool[p->name];
-		*relation = p->relation;
+		*flags = p->flags;
 		*version = &pool[p->version];
-		*type = p->type;
 	} else {
 		*property = NULL;
 	}
@@ -1242,16 +1234,13 @@ razor_merger_add_package(struct razor_merger *merger,
 
 static uint32_t
 add_property(struct razor_merger *merger,
-	     const char *name, enum razor_version_relation relation,
-	     const char *version, int type)
+	     const char *name, uint32_t flags, const char *version)
 {
 	struct razor_property *p;
 
 	p = array_add(&merger->set->properties, sizeof *p);
 	p->name = hashtable_tokenize(&merger->table, name);
-	p->flags = 0;
-	p->type = type;
-	p->relation = relation;
+	p->flags = flags;
 	p->version = hashtable_tokenize(&merger->table, version);
 
 	return p - (struct razor_property *) merger->set->properties.data;
@@ -1296,30 +1285,26 @@ merge_properties(struct razor_merger *merger)
 		else
 			cmp = 1;
 		if (cmp == 0)
-			cmp = p1->type - p2->type;
-		if (cmp == 0)
-			cmp = p1->relation - p2->relation;
+			cmp = p1->flags - p2->flags;
 		if (cmp == 0)
 			cmp = versioncmp(&pool1[p1->version],
 					 &pool2[p2->version]);
 		if (cmp < 0) {
 			map1[i++] = add_property(merger,
 						 &pool1[p1->name],
-						 p1->relation,
-						 &pool1[p1->version],
-						 p1->type);
+						 p1->flags,
+						 &pool1[p1->version]);
 		} else if (cmp > 0) {
 			map2[j++] = add_property(merger,
 						 &pool2[p2->name],
-						 p2->relation,
-						 &pool2[p2->version],
-						 p2->type);
+						 p2->flags,
+						 &pool2[p2->version]);
 		} else  {
-			map1[i++] = map2[j++] = add_property(merger,
-							     &pool1[p1->name],
-							     p1->relation,
-							     &pool1[p1->version],
-							     p1->type);
+			map1[i++] = map2[j++] =
+				add_property(merger,
+					     &pool1[p1->name],
+					     p1->flags,
+					     &pool1[p1->version]);
 		}
 	}
 }
@@ -1709,7 +1694,7 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 static int
 provider_satisfies_requirement(struct razor_property *provider,
 			       const char *provider_strings,
-			       enum razor_version_relation relation,
+			       uint32_t flags,
 			       const char *required)
 {
 	int cmp, len;
@@ -1718,24 +1703,24 @@ provider_satisfies_requirement(struct razor_property *provider,
 	if (!*required)
 		return 1;
 	if (!*provided) {
-		if (relation >= RAZOR_VERSION_EQUAL)
-			return 1;
-		else
+		if (flags & RAZOR_PROPERTY_LESS)
 			return 0;
+		else
+			return 1;
 	}
 
 	cmp = versioncmp(provided, required);
 
-	switch (relation) {
-	case RAZOR_VERSION_LESS:
+	switch (flags & RAZOR_PROPERTY_RELATION_MASK) {
+	case RAZOR_PROPERTY_LESS:
 		return cmp < 0;
 
-	case RAZOR_VERSION_LESS_OR_EQUAL:
+	case RAZOR_PROPERTY_LESS | RAZOR_PROPERTY_EQUAL:
 		if (cmp <= 0)
 			return 1;
 		/* fall through: FIXME, make sure this is correct */
 
-	case RAZOR_VERSION_EQUAL:
+	case RAZOR_PROPERTY_EQUAL:
 		if (cmp == 0)
 			return 1;
 
@@ -1745,10 +1730,10 @@ provider_satisfies_requirement(struct razor_property *provider,
 			return 1;
 		return 0;
 
-	case RAZOR_VERSION_GREATER_OR_EQUAL:
+	case RAZOR_PROPERTY_GREATER | RAZOR_PROPERTY_EQUAL:
 		return cmp >= 0;
 
-	case RAZOR_VERSION_GREATER:
+	case RAZOR_PROPERTY_GREATER:
 		return cmp > 0;
 	}
 
@@ -1903,12 +1888,11 @@ prop_iter_init(struct prop_iter *pi, struct transaction_set *ts)
 }
 
 static int
-prop_iter_next(struct prop_iter *pi,
-	       enum razor_property_type type, struct razor_property **p)
+prop_iter_next(struct prop_iter *pi, uint32_t flags, struct razor_property **p)
 {
 	while (pi->p < pi->end) {
 		if ((pi->present[pi->p - pi->start] & ~TRANS_PROPERTY_SATISFIED) &&
-		    pi->p->type == type) {
+		    (pi->p->flags & RAZOR_PROPERTY_TYPE_MASK) == flags) {
 			*p = pi->p++;
 			return 1;
 		}
@@ -1920,7 +1904,7 @@ prop_iter_next(struct prop_iter *pi,
 
 static struct razor_property *
 prop_iter_seek_to(struct prop_iter *pi,
-		  enum razor_property_type type, const char *match)
+		  uint32_t flags, const char *match)
 {
 	uint32_t name;
 
@@ -1933,7 +1917,7 @@ prop_iter_seek_to(struct prop_iter *pi,
 	name = pi->p->name;
 	while (pi->p < pi->end &&
 	       pi->p->name == name &&
-	       pi->p->type != type)
+	       (pi->p->flags & RAZOR_PROPERTY_TYPE_MASK) != flags)
 		pi->p++;
 
 	if (pi->p == pi->end || pi->p->name != name)
@@ -1948,7 +1932,7 @@ prop_iter_seek_to(struct prop_iter *pi,
 static void
 remove_matching_providers(struct razor_transaction *trans,
 			  struct prop_iter *ppi,
-			  enum razor_version_relation relation,
+			  uint32_t flags,
 			  const char *version)
 {
 	struct razor_property *p;
@@ -1956,6 +1940,7 @@ remove_matching_providers(struct razor_transaction *trans,
 	struct razor_package_iterator pkg_iter;
 	struct razor_set *set;
 	const char *n, *v, *a;
+	uint32_t type;
 
 	if (ppi->present == trans->system.properties)
 		set = trans->system.set;
@@ -1963,15 +1948,16 @@ remove_matching_providers(struct razor_transaction *trans,
 		set = trans->upstream.set;
 
 	pkgs = (struct razor_package *) set->packages.data;
+	type = ppi->p->flags & RAZOR_PROPERTY_TYPE_MASK;
 	for (p = ppi->p;
 	     p < ppi->end &&
 	     p->name == ppi->p->name &&
-	     p->type == ppi->p->type;
+	     (p->flags & RAZOR_PROPERTY_TYPE_MASK) == type;
 	     p++) {
 		if (!ppi->present[p - ppi->start])
 			continue;
 		if (!provider_satisfies_requirement(p, ppi->pool,
-						    relation, version))
+						    flags, version))
 			continue;
 
 		razor_package_iterator_init_for_property(&pkg_iter, set, p);
@@ -1995,7 +1981,7 @@ flag_matching_providers(struct razor_transaction *trans,
 	struct razor_package_iterator pkg_iter;
 	struct razor_set *set;
 	const char *name, *version, *arch;
-	uint32_t *flags;
+	uint32_t *flags, type;
 
 	if (ppi->present == trans->system.properties) {
 		set = trans->system.set;
@@ -2006,15 +1992,16 @@ flag_matching_providers(struct razor_transaction *trans,
 	}
 
 	pkgs = (struct razor_package *) set->packages.data;
+	type = ppi->p->flags & RAZOR_PROPERTY_TYPE_MASK;
 	for (p = ppi->p;
 	     p < ppi->end &&
 		     p->name == ppi->p->name &&
-		     p->type == ppi->p->type;
+		     (p->flags & RAZOR_PROPERTY_TYPE_MASK) == type;
 	     p++) {
 		if (!ppi->present[p - ppi->start])
 			continue;
 		if (!provider_satisfies_requirement(p, ppi->pool,
-						    r->relation,
+						    r->flags,
 						    &rpi->pool[r->version]))
 			continue;
 
@@ -2035,12 +2022,13 @@ flag_matching_providers(struct razor_transaction *trans,
 static struct razor_package *
 pick_matching_provider(struct razor_set *set,
 		       struct prop_iter *ppi,
-		       enum razor_version_relation relation,
+		       uint32_t flags,
 		       const char *version)
 {
 	struct razor_property *p;
 	struct razor_package *pkgs;
 	struct list *i;
+	uint32_t type;
 
 	/* This is where we decide which pkgs to pull in to satisfy a
 	 * requirement.  There may be several different providers
@@ -2049,14 +2037,15 @@ pick_matching_provider(struct razor_set *set,
 	 * from the first provider that matches. */
 
 	pkgs = set->packages.data;
+	type = ppi->p->flags & RAZOR_PROPERTY_TYPE_MASK;
 	for (p = ppi->p;
 	     p < ppi->end &&
 		     p->name == ppi->p->name &&
-		     p->type == ppi->p->type &&
+		     (p->flags & RAZOR_PROPERTY_TYPE_MASK) == type &&
 		     ppi->present[p - ppi->start] == 0;
 	     p++) {
 		if (!provider_satisfies_requirement(p, ppi->pool,
-						    relation, version))
+						    flags, version))
 			continue;
 
 		i = list_first(&p->packages, &set->package_pool);
@@ -2082,26 +2071,28 @@ remove_obsoleted_packages(struct razor_transaction *trans)
 		if (!prop_iter_seek_to(&spi, RAZOR_PROPERTY_PROVIDES,
 				       &upi.pool[up->name]))
 			continue;
-		remove_matching_providers(trans, &spi, up->relation,
+		remove_matching_providers(trans, &spi, up->flags,
 					  &upi.pool[up->version]);
 	}
 }
 
 static int
 any_provider_satisfies_requirement(struct prop_iter *ppi,
-				   enum razor_version_relation relation,
+				   uint32_t flags,
 				   const char *version)
 {
 	struct razor_property *p;
+	uint32_t type;
 
+	type = ppi->p->flags & RAZOR_PROPERTY_TYPE_MASK;
 	for (p = ppi->p;
 	     p < ppi->end &&
 		     p->name == ppi->p->name &&
-		     p->type == ppi->p->type;
+		     (p->flags & RAZOR_PROPERTY_TYPE_MASK) == type;
 	     p++) {
 		if (ppi->present[p - ppi->start] > 0 &&
 		    provider_satisfies_requirement(p, ppi->pool,
-						   relation, version))
+						   flags, version))
 			return 1;
 	}
 
@@ -2125,7 +2116,46 @@ clear_requires_flags(struct transaction_set *ts)
 	}
 }
 
-static const char *relation_string[] = { "<", "<=", "=", ">=", ">" };
+const char *
+razor_property_relation_to_string(struct razor_property *p)
+{
+	switch (p->flags & RAZOR_PROPERTY_RELATION_MASK) {
+	case RAZOR_PROPERTY_LESS:
+		return "<";
+
+	case RAZOR_PROPERTY_LESS | RAZOR_PROPERTY_EQUAL:
+		return "<=";
+
+	case RAZOR_PROPERTY_EQUAL:
+		return "=";
+
+	case RAZOR_PROPERTY_GREATER | RAZOR_PROPERTY_EQUAL:
+		return ">=";
+
+	case RAZOR_PROPERTY_GREATER:
+		return ">";
+
+	default:
+		return "?";
+	}
+}
+
+const char *
+razor_property_type_to_string(struct razor_property *p)
+{
+	switch (p->flags & RAZOR_PROPERTY_TYPE_MASK) {
+	case RAZOR_PROPERTY_REQUIRES:
+		return "requires";
+	case RAZOR_PROPERTY_PROVIDES:
+		return "provides";
+	case RAZOR_PROPERTY_CONFLICTS:
+		return "conflicts";
+	case RAZOR_PROPERTY_OBSOLETES:
+		return "obsoletes";
+	default:
+		return NULL;
+	}
+}
 
 static void
 mark_satisfied_requires(struct razor_transaction *trans,
@@ -2143,7 +2173,7 @@ mark_satisfied_requires(struct razor_transaction *trans,
 				       &rpi.pool[rp->name]))
 			continue;
 
-		if (any_provider_satisfies_requirement(&ppi, rp->relation,
+		if (any_provider_satisfies_requirement(&ppi, rp->flags,
 						       &rpi.pool[rp->version]))
 			rpi.present[rp - rpi.start] |= TRANS_PROPERTY_SATISFIED;
 	}
@@ -2184,7 +2214,7 @@ update_unsatisfied_packages(struct razor_transaction *trans)
 			fprintf(stderr, "updating %s because %s %s %s "
 				"isn't satisfied\n",
 				name, spi.pool + sp->name,
-				relation_string[sp->relation],
+				razor_property_relation_to_string(sp),
 				spi.pool + sp->version);
 			trans->system.packages[pkg - spkgs] |=
 				TRANS_PACKAGE_UPDATE;
@@ -2221,7 +2251,7 @@ update_conflicted_packages(struct razor_transaction *trans)
 				       &spi.pool[sp->name]))
 			continue;
 
-		if (!any_provider_satisfies_requirement(&upi, sp->relation,
+		if (!any_provider_satisfies_requirement(&upi, sp->flags,
 							&spi.pool[sp->version]))
 			continue;
 
@@ -2267,7 +2297,7 @@ pull_in_requirements(struct razor_transaction *trans,
 		if (pp == NULL)
 			continue;
 		pkg = pick_matching_provider(trans->upstream.set,
-					     ppi, rp->relation,
+					     ppi, rp->flags,
 					     &rpi->pool[rp->version]);
 		if (pkg == NULL)
 			continue;
@@ -2278,10 +2308,10 @@ pull_in_requirements(struct razor_transaction *trans,
 			"to satisfy %s %s %s\n",
 			ppi->pool + pkg->name,
 			ppi->pool + pp->name,
-			relation_string[pp->relation],
+			razor_property_relation_to_string(pp),
 			ppi->pool + pp->version,
 			&rpi->pool[rp->name],
-			relation_string[rp->relation],
+			razor_property_relation_to_string(rp),
 			&rpi->pool[rp->version]);
 
 		trans->upstream.packages[pkg - upkgs] |= TRANS_PACKAGE_UPDATE;
@@ -2322,7 +2352,7 @@ flush_scheduled_system_updates(struct razor_transaction *trans)
 			continue;
 
 		pkg = pick_matching_provider(trans->upstream.set, &ppi,
-					     RAZOR_VERSION_GREATER, version);
+					     RAZOR_PROPERTY_GREATER, version);
 		if (pkg == NULL)
 			continue;
 
@@ -2354,8 +2384,10 @@ flush_scheduled_upstream_updates(struct razor_transaction *trans)
 			continue;
 
 		if (prop_iter_seek_to(&spi, RAZOR_PROPERTY_PROVIDES, name))
-			remove_matching_providers(trans, &spi,
-						  RAZOR_VERSION_LESS, version);
+			remove_matching_providers(trans,
+						  &spi,
+						  RAZOR_PROPERTY_LESS,
+						  version);
 		razor_transaction_install_package(trans, p);
 		fprintf(stderr, "installing %s-%s\n", name, version);
 	}
@@ -2404,7 +2436,7 @@ describe_unsatisfied(struct razor_set *set, struct razor_property *rp)
 						   &name, &version, &arch))
 			fprintf(stderr, "%s %s %s is needed by %s-%s.%s\n",
 				&pool[rp->name],
-				relation_string[rp->relation],
+				razor_property_relation_to_string(rp),
 				&pool[rp->version],
 				name, version, arch);
 	}
@@ -2444,17 +2476,16 @@ razor_transaction_describe(struct razor_transaction *trans)
 int
 razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 				       const char *name,
-				       enum razor_version_relation rel,
-				       const char *version,
-				       enum razor_property_type type)
+				       uint32_t flags,
+				       const char *version)
 {
 	struct prop_iter pi;
 	struct razor_property *p;
 
 	prop_iter_init(&pi, &trans->system);
-	while (prop_iter_next(&pi, type, &p)) {
+	while (prop_iter_next(&pi, flags, &p)) {
 		if (!(trans->system.properties[p - pi.start] & TRANS_PROPERTY_SATISFIED) &&
-		    p->relation == rel &&
+		    p->flags == flags &&
 		    strcmp(&pi.pool[p->name], name) == 0 &&
 		    strcmp(&pi.pool[p->version], version) == 0)
 
@@ -2462,9 +2493,9 @@ razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 	}
 
 	prop_iter_init(&pi, &trans->upstream);
-	while (prop_iter_next(&pi, type, &p)) {
+	while (prop_iter_next(&pi, flags, &p)) {
 		if (!(trans->upstream.properties[p - pi.start] & TRANS_PROPERTY_SATISFIED) &&
-		    p->relation == rel &&
+		    p->flags == flags &&
 		    strcmp(&pi.pool[p->name], name) == 0 &&
 		    strcmp(&pi.pool[p->version], version) == 0)
 
