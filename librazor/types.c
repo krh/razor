@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "types.h"
+#include "razor-internal.h"
 
 void
 array_init(struct array *array)

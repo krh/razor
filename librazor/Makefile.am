@@ -21,11 +21,14 @@ librazor_la_SOURCES =                                	\
 	razor-internal.h				\
 	razor.h						\
 	razor.c						\
-	razor-root.c					\
-	types.h						\
+	root.c						\
 	types.c						\
 	util.c						\
-	rpm.c
+	rpm.c						\
+	iterator.c					\
+	importer.c					\
+	merger.c					\
+	transaction.c
 
 librazor_la_LIBADD = $(ZLIB_LIBS)
 

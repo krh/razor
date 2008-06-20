@@ -1,7 +1,165 @@
 #ifndef _RAZOR_INTERNAL_H_
 #define _RAZOR_INTERNAL_H_
 
+#include <stdlib.h>
+#include <stdint.h>
+
+void *zalloc(size_t size);
+
+struct array {
+	void *data;
+	int size, alloc;
+};
+
+void array_init(struct array *array);
+void array_release(struct array *array);
+void *array_add(struct array *array, int size);
+
+
+struct list_head {
+	uint32_t list_ptr : 24;
+	uint32_t flags    : 8;
+};
+
+struct list {
+	uint32_t data  : 24;
+	uint32_t flags : 8;
+};
+
+void list_set_empty(struct list_head *head);
+void list_set_ptr(struct list_head *head, uint32_t ptr);
+void list_set_array(struct list_head *head, struct array *pool, struct array *items, int force_indirect);
+
+struct list *list_first(struct list_head *head, struct array *pool);
+struct list *list_next(struct list *list);
+
+void list_remap_pool(struct array *pool, uint32_t *map);
+void list_remap_head(struct list_head *list, uint32_t *map);
+
+
+struct hashtable {
+	struct array buckets;
+	struct array *pool;
+};
+
+void hashtable_init(struct hashtable *table, struct array *pool);
+void hashtable_release(struct hashtable *table);
+uint32_t hashtable_insert(struct hashtable *table, const char *key);
+uint32_t hashtable_lookup(struct hashtable *table, const char *key);
+uint32_t hashtable_tokenize(struct hashtable *table, const char *string);
+
+
+struct razor_set_section {
+	uint32_t type;
+	uint32_t offset;
+	uint32_t size;
+};
+
+struct razor_set_header {
+	uint32_t magic;
+	uint32_t version;
+	struct razor_set_section sections[0];
+};
+
+#define RAZOR_MAGIC 0x7a7a7a7a
+#define RAZOR_VERSION 1
+
+#define RAZOR_STRING_POOL	0
+#define RAZOR_PACKAGES		1
+#define RAZOR_PROPERTIES	2
+#define RAZOR_FILES		3
+#define RAZOR_PACKAGE_POOL	4
+#define RAZOR_PROPERTY_POOL	5
+#define RAZOR_FILE_POOL		6
+
+struct razor_package {
+	uint32_t name  : 24;
+	uint32_t flags : 8;
+	uint32_t version;
+	uint32_t arch;
+	struct list_head properties;
+	struct list_head files;
+};
+
+struct razor_property {
+	uint32_t name;
+	uint32_t flags;
+	uint32_t version;
+	struct list_head packages;
+};
+
+struct razor_entry {
+	uint32_t name  : 24;
+	uint32_t flags : 8;
+	uint32_t start;
+	struct list_head packages;
+};
+
+#define RAZOR_ENTRY_LAST	0x80
+
+struct razor_set {
+	struct array string_pool;
+ 	struct array packages;
+ 	struct array properties;
+ 	struct array files;
+	struct array package_pool;
+ 	struct array property_pool;
+ 	struct array file_pool;
+	struct razor_set_header *header;
+};
+
+struct import_entry {
+	uint32_t package;
+	char *name;
+};
+
+struct import_directory {
+	uint32_t name, count;
+	struct array files;
+	struct array packages;
+	struct import_directory *last;
+};
+
+struct razor_importer {
+	struct razor_set *set;
+	struct hashtable table;
+	struct razor_package *package;
+	struct array properties;
+	struct array files;
+	struct array file_requires;
+};
+
+struct razor_package_iterator {
+	struct razor_set *set;
+	struct razor_package *package, *end;
+	struct list *index;
+	int free_index;
+};
+
+void
+razor_package_iterator_init_for_property(struct razor_package_iterator *pi,
+					 struct razor_set *set,
+					 struct razor_property *property);
+
+struct razor_property_iterator {
+	struct razor_set *set;
+	struct razor_property *property, *end;
+	struct list *index;
+};
+
 #define ALIGN(value, base) (((value) + (base - 1)) & ~((base) - 1))
+
+struct razor_entry *
+razor_set_find_entry(struct razor_set *set,
+		     struct razor_entry *dir, const char *pattern);
+
+struct razor_merger *
+razor_merger_create(struct razor_set *set1, struct razor_set *set2);
+void
+razor_merger_add_package(struct razor_merger *merger,
+			 struct razor_package *package);
+struct razor_set *
+razor_merger_finish(struct razor_merger *merger);
 
 /* Utility functions */
 

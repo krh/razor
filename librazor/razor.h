@@ -164,6 +164,7 @@ struct razor_set *razor_importer_finish(struct razor_importer *importer);
 
 void razor_build_evr(char *evr_buf, int size, const char *epoch,
 		     const char *version, const char *release);
+int razor_versioncmp(const char *s1, const char *s2);
 
 struct razor_set *razor_set_create_from_yum(void);
 struct razor_set *razor_set_create_from_rpmdb(void);
