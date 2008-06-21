@@ -594,16 +594,16 @@ run_script(struct installer *installer,
 	} else if (pid == 0) {
 		if (dup2(fd[0], STDIN_FILENO) < 0) {
 			fprintf(stderr, "failed redirect stdin, %m\n");
-			return -1;
+			exit(-1);
 		}
 		if (close(fd[0]) < 0 || close(fd[1]) < 0) {
 			fprintf(stderr, "failed to close pipe, %m\n");
-			return -1;
+			exit(-1);
 		}
 		if (chroot(installer->root) < 0) {
 			fprintf(stderr, "failed to chroot to %s, %m\n",
 				installer->root);
-			return -1;
+			exit(-1);
 		}
 		printf("executing program %s in chroot %s\n",
 		       program, installer->root);
