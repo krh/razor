@@ -674,6 +674,9 @@ command_install(int argc, const char *argv[])
 	}
 
 	root = razor_root_open(install_root);
+	if (root == NULL)
+		return 1;
+
 	system = razor_root_get_system_set(root);
 	upstream = razor_set_open(rawhide_repo_filename);
 	trans = razor_transaction_create(system, upstream);
