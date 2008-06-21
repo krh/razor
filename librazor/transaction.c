@@ -649,9 +649,11 @@ pull_in_requirements(struct razor_transaction *trans,
 
 		rpi->present[rp - rpi->start] |= TRANS_PROPERTY_SATISFIED;
 
-		fprintf(stderr, "pulling in %s which provides %s %s %s "
+		fprintf(stderr, "pulling in %s-%s.%s which provides %s %s %s "
 			"to satisfy %s %s %s\n",
 			ppi->pool + pkg->name,
+			ppi->pool + pkg->version,
+			ppi->pool + pkg->arch,
 			ppi->pool + pp->name,
 			razor_property_relation_to_string(pp),
 			ppi->pool + pp->version,

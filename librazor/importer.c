@@ -135,8 +135,10 @@ compare_properties(const void *p1, const void *p2, void *data)
 		return strcmp(&pool[prop1->name], &pool[prop2->name]);
 	else if (prop1->flags != prop2->flags)
 		return prop1->flags - prop2->flags;
-	else
+	else if (prop1->version != prop2->version)
 		return razor_versioncmp(&pool[prop1->version], &pool[prop2->version]);
+	else
+		return prop1->packages.list_ptr - prop2->packages.list_ptr;
 }
 
 static uint32_t *
