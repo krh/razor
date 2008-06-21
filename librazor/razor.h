@@ -106,14 +106,21 @@ void razor_set_list_package_files(struct razor_set *set, const char *name);
 
 void razor_set_list_unsatisfied(struct razor_set *set);
 
-typedef void (*razor_package_callback_t)(const char *name,
-					 const char *old_version,
-					 const char *new_version,
-					 const char *arch,
-					 void *data);
+enum razor_diff_action {
+	RAZOR_DIFF_ACTION_ADD,
+	RAZOR_DIFF_ACTION_REMOVE,
+};
+
+typedef void (*razor_diff_callback_t)(enum razor_diff_action action,
+				      struct razor_package *package,
+				      const char *name,
+				      const char *version,
+				      const char *arch,
+				      void *data);
+
 void
 razor_set_diff(struct razor_set *set, struct razor_set *upstream,
-	       razor_package_callback_t callback, void *data);
+	       razor_diff_callback_t callback, void *data);
 
 /* Package transactions */
 

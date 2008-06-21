@@ -33,8 +33,8 @@
 #include <ctype.h>
 #include <fnmatch.h>
 
-#include "razor.h"
 #include "razor-internal.h"
+#include "razor.h"
 
 void *
 zalloc(size_t size)
@@ -423,7 +423,7 @@ razor_set_list_package_files(struct razor_set *set, const char *name)
 
 void
 razor_set_diff(struct razor_set *set, struct razor_set *upstream,
-	       razor_package_callback_t callback, void *data)
+	       razor_diff_callback_t callback, void *data)
 {
  	struct razor_package_iterator *pi1, *pi2;
  	struct razor_package *p1, *p2;
@@ -446,9 +446,11 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 		}
 
 		if (p2 == NULL || res < 0)
-			callback(name1, version1, NULL, arch1, data);
+			callback(RAZOR_DIFF_ACTION_REMOVE,
+				 p1, name1, version1, arch1, data);
 		else if (p1 == NULL || res > 0)
-			callback(name2, NULL, version2, arch2, data);
+			callback(RAZOR_DIFF_ACTION_ADD,
+				 p2, name2, version2, arch2, data);
 
 		if (p1 != NULL && res <= 0)
 			razor_package_iterator_next(pi1, &p1,

@@ -489,14 +489,17 @@ command_remove(int argc, const char *argv[])
 }
 
 static void
-print_diff(const char *name,
-	   const char *old_version, const char *new_version, const char *arch,
+print_diff(enum razor_diff_action action,
+	   struct razor_package *package,
+	   const char *name,
+	   const char *version,
+	   const char *arch,
 	   void *data)
 {
-	if (old_version)
-		printf("removing %s %s\n", name, old_version);
-	else
-		printf("install %s %s\n", name, new_version);
+	if (action == RAZOR_DIFF_ACTION_ADD)
+		printf("install %s-%s.%s\n", name, version, arch);
+	if (action == RAZOR_DIFF_ACTION_REMOVE)
+		printf("remove %s-%s.%s\n", name, version, arch);
 }
 
 static int
@@ -576,9 +579,10 @@ command_import_rpms(int argc, const char *argv[])
 }
 
 static void
-download_package(const char *name,
-		 const char *old_version,
-		 const char *new_version,
+download_package(enum razor_diff_action action,
+		 struct razor_package *package,
+		 const char *name,
+		 const char *version,
 		 const char *arch,
 		 void *data)
 {
@@ -586,15 +590,15 @@ download_package(const char *name,
 	const char *v;
 	int *errors = data;
 
-	if (old_version)
+	if (action != RAZOR_DIFF_ACTION_ADD)
 		return;
 
 	/* Skip epoch */
-	v = strchr(new_version, ':');
+	v = strchr(version, ':');
 	if (v != NULL)
 		v = v + 1;
 	else
-		v = new_version;
+		v = version;
 
 	snprintf(url, sizeof url,
 		 "%s/Packages/%s-%s.%s.rpm", yum_url, name, v, arch);
@@ -605,9 +609,10 @@ download_package(const char *name,
 }
 
 static void
-install_package(const char *name,
-		const char *old_version,
-		const char *new_version,
+install_package(enum razor_diff_action action,
+		struct razor_package *package,
+		const char *name,
+		const char *version,
 		const char *arch,
 		void *data)
 {
@@ -615,17 +620,17 @@ install_package(const char *name,
 	char file[PATH_MAX];
 	struct razor_rpm *rpm;
 
-	if (old_version) {
-		printf("removing %s %s not handled\n", name, old_version);
+	if (action == RAZOR_DIFF_ACTION_REMOVE) {
+		printf("removing %s %s not handled\n", name, version);
 		return;
 	}
 
 	/* Skip epoch */
-	v = strchr(new_version, ':');
+	v = strchr(version, ':');
 	if (v != NULL)
 		v = v + 1;
 	else
-		v = new_version;
+		v = version;
 
 	printf("install %s %s\n", name, v);
 	snprintf(file, sizeof file, "rpms/%s-%s.%s.rpm", name, v, arch);

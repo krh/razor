@@ -507,12 +507,17 @@ command_verify(int argc, const char *argv[])
 }
 
 static void
-remove_package(const char *name,
-	       const char *old_version, const char *new_version,
-	       const char *arch, void *data)
+update_package(enum razor_diff_action action,
+	       struct razor_package *package,
+	       const char *name,
+	       const char *version,
+	       const char *arch,
+	       void *data)
 {
-	if (old_version)
-		printf("remove %s-%s.%s\n", name, old_version, arch);
+	if (action == RAZOR_DIFF_ACTION_ADD)
+		printf("install %s-%s.%s\n", name, version, arch);
+	if (action == RAZOR_DIFF_ACTION_REMOVE)
+		printf("remove %s-%s.%s\n", name, version, arch);
 }
 
 static void
@@ -555,21 +560,12 @@ command_erase(int argc, const char *argv[])
 	next = razor_transaction_finish(trans);
 
 	if (!option_justdb)
-		razor_set_diff(set, next, remove_package, NULL);
+		razor_set_diff(set, next, update_package, NULL);
 
 	razor_set_destroy(set);
 	razor_set_destroy(upstream);
 
 	razor_set_destroy(next);
-}
-
-static void
-install_package(const char *name,
-		const char *old_version, const char *new_version,
-		const char *arch, void *data)
-{
-	if (new_version)
-		printf("install %s-%s.%s\n", name, new_version, arch);
 }
 
 static void
@@ -608,23 +604,12 @@ command_install(int argc, const char *argv[])
 	next = razor_transaction_finish(trans);
 
 	if (!option_justdb)
-		razor_set_diff(set, next, install_package, NULL);
+		razor_set_diff(set, next, update_package, NULL);
 
 	razor_set_destroy(set);
 	razor_set_destroy(upstream);
 
 	razor_set_destroy(next);
-}
-
-static void
-update_package(const char *name,
-	       const char *old_version, const char *new_version,
-	       const char *arch, void *data)
-{
-	if (old_version)
-		printf("remove %s-%s.%s\n", name, old_version, arch);
-	if (new_version)
-		printf("install %s-%s.%s\n", name, new_version, arch);
 }
 
 static void
