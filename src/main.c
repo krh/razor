@@ -439,9 +439,12 @@ command_update(int argc, const char *argv[])
 		}
 	}
 
-	errors = razor_transaction_resolve(trans);
-	if (errors)
+	razor_transaction_resolve(trans);
+	errors = razor_transaction_describe(trans);
+	if (errors) {
+		fprintf(stderr, "unresolved dependencies\n");
 		return 1;
+	}
 
 	set = razor_transaction_finish(trans);
 	razor_set_write(set, updated_repo_filename);
