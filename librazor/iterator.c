@@ -240,13 +240,15 @@ razor_package_query_finish(struct razor_package_query *pq)
 	struct razor_package_iterator *pi;
 	struct razor_set *set;
 	struct list *index;
-	int i, j, count;
+	int i, j;
 
 	set = pq->set;
-	count = set->packages.size / sizeof(struct razor_package);
-	index = zalloc(pq->count * sizeof *index);
+	if (pq->count > 0)
+		index = zalloc(pq->count * sizeof *index);
+	else
+		index = NULL;
 
-	for (i = 0, j = 0; i < count; i++) {
+	for (i = 0, j = 0; i < pq->count; i++) {
 		if (!pq->vector[i])
 			continue;
 
@@ -256,6 +258,7 @@ razor_package_query_finish(struct razor_package_query *pq)
 		j++;
 	}
 
+	free(pq->vector);
 	free(pq);
 
 	pi = razor_package_iterator_create_with_index(set, index);
