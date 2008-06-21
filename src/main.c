@@ -578,74 +578,86 @@ command_import_rpms(int argc, const char *argv[])
 	return 0;
 }
 
-static void
-download_package(enum razor_diff_action action,
-		 struct razor_package *package,
-		 const char *name,
-		 const char *version,
-		 const char *arch,
-		 void *data)
+static const char *
+rpm_filename(const char *name, const char *version, const char *arch)
 {
-	char file[PATH_MAX], url[256];
-	const char *v;
-	int *errors = data;
-
-	if (action != RAZOR_DIFF_ACTION_ADD)
-		return;
-
-	/* Skip epoch */
+	static char file[PATH_MAX];
+ 	const char *v;
+ 
+ 	/* Skip epoch */
 	v = strchr(version, ':');
-	if (v != NULL)
-		v = v + 1;
-	else
+ 	if (v != NULL)
+ 		v = v + 1;
+ 	else
 		v = version;
 
-	snprintf(url, sizeof url,
-		 "%s/Packages/%s-%s.%s.rpm", yum_url, name, v, arch);
-	snprintf(file, sizeof file,
-		 "rpms/%s-%s.%s.rpm", name, v, arch);
-	if (download_if_missing(url, file) < 0)
-		(*errors)++;
+	snprintf(file, sizeof file, "%s-%s.%s.rpm", name, v, arch);
+
+	return file;
 }
 
-static void
-install_package(enum razor_diff_action action,
-		struct razor_package *package,
-		const char *name,
-		const char *version,
-		const char *arch,
-		void *data)
+static int
+download_packages(struct razor_set *system, struct razor_set *next)
 {
-	const char *v, *root = data;
-	char file[PATH_MAX];
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *name, *version, *arch;
+	char file[PATH_MAX], url[256];
+	int errors;
+ 
+	pi = razor_set_create_install_iterator(system, next);
+	errors = 0;
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch)) {
+		snprintf(url, sizeof url,
+			 "%s/Packages/%s",
+			 yum_url, rpm_filename(name, version, arch));
+		snprintf(file, sizeof file,
+			 "rpms/%s", rpm_filename(name, version, arch));
+		if (download_if_missing(url, file) < 0)
+			errors++;
+	}
+	razor_package_iterator_destroy(pi);
+
+	if (errors > 0) {
+		fprintf(stderr, "failed to download %d packages\n", errors);
+                return -1;
+        }
+
+	return 0;
+}
+
+static int
+install_packages(struct razor_set *system, struct razor_set *next)
+{
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
 	struct razor_rpm *rpm;
+	const char *name, *version, *arch;
+	char file[PATH_MAX];
 
-	if (action == RAZOR_DIFF_ACTION_REMOVE) {
-		printf("removing %s %s not handled\n", name, version);
-		return;
+	pi = razor_set_create_install_iterator(system, next);
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch)) {
+		printf("install %s-%s\n", name, version);
+
+		snprintf(file, sizeof file,
+			 "rpms/%s", rpm_filename(name, version, arch));
+		rpm = razor_rpm_open(file);
+		if (rpm == NULL) {
+			fprintf(stderr, "failed to open rpm %s\n", file);
+			return -1;
+		}
+		if (razor_rpm_install(rpm, install_root) < 0) {
+			fprintf(stderr,
+				"failed to install rpm %s\n", file);
+			return -1;
+		}
+		razor_rpm_close(rpm);
 	}
+	razor_package_iterator_destroy(pi);
 
-	/* Skip epoch */
-	v = strchr(version, ':');
-	if (v != NULL)
-		v = v + 1;
-	else
-		v = version;
-
-	printf("install %s %s\n", name, v);
-	snprintf(file, sizeof file, "rpms/%s-%s.%s.rpm", name, v, arch);
-
- 	rpm = razor_rpm_open(file);
-	if (rpm == NULL) {
-		fprintf(stderr, "failed to open rpm %s\n", file);
-		return;
-	}
-	if (razor_rpm_install(rpm, root) < 0) {
-		fprintf(stderr,
-			"failed to install rpm %s\n", file);
-		return;
-	}
-	razor_rpm_close(rpm);
+	return 0;
 }
 
 static int
@@ -692,17 +704,12 @@ command_install(int argc, const char *argv[])
 		return 1;
 	}
 
-	errors = 0;
-	razor_set_diff(system, next, download_package, &errors);
-	if (errors > 0) {
-		fprintf(stderr, "failed to download %d packages\n", errors);
+	if (download_packages(system, next) < 0) {
 		razor_root_close(root);
                 return 1;
         }
 
-	/* FIXME: We need to figure out the right install order here,
-	 * so the post and pre scripts can run. */
-	razor_set_diff(system, next, install_package, (void *) install_root);
+	install_packages(system, next);
 
 	razor_set_destroy(next);
 	razor_set_destroy(upstream);

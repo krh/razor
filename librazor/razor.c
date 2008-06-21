@@ -463,3 +463,55 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 	razor_package_iterator_destroy(pi1);
 	razor_package_iterator_destroy(pi2);
 }
+
+static void
+add_new_package(enum razor_diff_action action,
+		struct razor_package *package,
+		const char *name,
+		const char *version,
+		const char *arch,
+		void *data)
+{
+	if (action == RAZOR_DIFF_ACTION_ADD)
+		razor_package_query_add_package(data, package);
+}
+
+struct razor_package_iterator *
+razor_set_create_remove_iterator(struct razor_set *set,
+				 struct razor_set *next)
+{
+	struct razor_package_query *query;
+	struct razor_package_iterator *pi;
+
+	query = razor_package_query_create(set);
+	razor_set_diff(next, set, add_new_package, query);
+
+	pi = razor_package_query_finish(query);
+
+	/* FIXME: We need to figure out the right install order here,
+	 * so the post and pre scripts can run. */
+
+	/* sort */
+
+	return pi;
+}
+
+struct razor_package_iterator *
+razor_set_create_install_iterator(struct razor_set *set,
+				  struct razor_set *next)
+{
+	struct razor_package_query *query;
+	struct razor_package_iterator *pi;
+
+	query = razor_package_query_create(next);
+	razor_set_diff(set, next, add_new_package, query);
+
+	pi = razor_package_query_finish(query);
+
+	/* FIXME: We need to figure out the right install order here,
+	 * so the post and pre scripts can run. */
+
+	/* sort */
+
+	return pi;
+}

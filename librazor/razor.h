@@ -121,6 +121,12 @@ typedef void (*razor_diff_callback_t)(enum razor_diff_action action,
 void
 razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 	       razor_diff_callback_t callback, void *data);
+struct razor_package_iterator *
+razor_set_create_remove_iterator(struct razor_set *set,
+				 struct razor_set *next);
+struct razor_package_iterator *
+razor_set_create_install_iterator(struct razor_set *set,
+				  struct razor_set *next);
 
 /* Package transactions */
 
