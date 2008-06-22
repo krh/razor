@@ -6,25 +6,25 @@ __razor_commands () {
 __razor_packages () {
     local IFS=$'\n'
 
-    COMPREPLY=($(./razor list --only-names "$1*" | while read p; do echo "$p "; done))
+    COMPREPLY=($(razor list --only-names "$1*" | while read p; do echo "$p "; done))
 }
 
 __razor_upstream_packages () {
     local IFS=$'\n'
 
-    COMPREPLY=($(RAZOR_REPO=rawhide.repo ./razor list --only-names "$1*" | while read p; do echo "$p "; done))
+    COMPREPLY=($(RAZOR_REPO=rawhide.repo razor list --only-names "$1*" | while read p; do echo "$p "; done))
 }
 
 __razor_files() {
-    COMPREPLY=($(./razor list-files "$1*"))
+    COMPREPLY=($(razor list-files "$1*"))
 }
 
 __razor_requires() {
-    COMPREPLY=($(compgen -W "$(./razor list-requires)" -- $1))
+    COMPREPLY=($(compgen -W "$(razor list-requires)" -- $1))
 }
 
 __razor_provides() {
-    COMPREPLY=($(compgen -W "$(./razor list-provides)" -- $1))
+    COMPREPLY=($(compgen -W "$(razor list-provides)" -- $1))
 }
 
 __razor() {
