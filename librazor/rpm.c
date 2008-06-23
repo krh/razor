@@ -781,7 +781,7 @@ razor_rpm_close(struct razor_rpm *rpm)
 int
 razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 {
-	const char *name, *version, *release, *arch;
+	const char *name, *version, *release, *arch, *summary;
 	const uint32_t *epoch;
 	char evr[128], buf[16];
 
@@ -790,6 +790,7 @@ razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 	version = razor_rpm_get_indirect(rpm, RPMTAG_VERSION, NULL);
 	release = razor_rpm_get_indirect(rpm, RPMTAG_RELEASE, NULL);
 	arch = razor_rpm_get_indirect(rpm, RPMTAG_ARCH, NULL);
+	summary = razor_rpm_get_indirect(rpm, RPMTAG_SUMMARY, NULL);
 
 	if (epoch) {
 		snprintf(buf, sizeof buf, "%u", ntohl(*epoch));

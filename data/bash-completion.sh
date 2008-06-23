@@ -1,6 +1,6 @@
 __razor_commands () {
     local IFS=$'\n'
-    COMPREPLY=($(IFS=: compgen -S' ' -W "list-requires:list-provides:list-files:list-file-packages:list-package-files:what-requires:what-provides:import-yum:import-rpmdb:validate:update:diff:install:init:download" -- $1))
+    COMPREPLY=($(IFS=: compgen -S' ' -W "info:list-requires:list-provides:list-files:list-file-packages:list-package-files:what-requires:what-provides:import-yum:import-rpmdb:validate:update:diff:install:init:download" -- $1))
 }
 
 __razor_packages () {
@@ -34,7 +34,7 @@ __razor() {
 	__razor_commands $cur
     else
 	case "${COMP_WORDS[1]}" in
-	    list-requires|list-provides|list-package-files)
+	    info|list-requires|list-provides|list-package-files)
 		__razor_packages $cur ;;
 	    list-files|list-file-packages) __razor_files $cur ;;
 	    what-requires) __razor_requires $cur ;;

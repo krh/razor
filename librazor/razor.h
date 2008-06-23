@@ -26,6 +26,12 @@ struct razor_set;
 struct razor_package;
 struct razor_property;
 
+enum razor_repo_file_type {
+	RAZOR_REPO_FILE_MAIN,
+	RAZOR_REPO_FILE_DETAILS,
+	RAZOR_REPO_FILE_FILES
+};
+
 enum razor_property_flags {
 	RAZOR_PROPERTY_LESS		= 1 << 0,
 	RAZOR_PROPERTY_GREATER		= 1 << 1,
@@ -55,11 +61,21 @@ razor_property_type_to_string(struct razor_property *p);
 struct razor_set *razor_set_create(void);
 struct razor_set *razor_set_open(const char *filename);
 void razor_set_destroy(struct razor_set *set);
-int razor_set_write_to_fd(struct razor_set *set, int fd);
-int razor_set_write(struct razor_set *set, const char *filename);
+int razor_set_write_to_fd(struct razor_set *set, int fd,
+			  enum razor_repo_file_type type);
+int razor_set_write(struct razor_set *set, const char *filename,
+		    enum razor_repo_file_type type);
+
+void razor_set_open_details(struct razor_set *set, const char *filename);
+void razor_set_open_files(struct razor_set *set, const char *filename);
 
 struct razor_package *
 razor_set_get_package(struct razor_set *set, const char *package);
+
+void
+razor_package_get_details(struct razor_set *set, struct razor_package *package,
+			  const char **summary, const char **description,
+			  const char **url, const char **license);
 
 struct razor_package_iterator;
 struct razor_package_iterator *
@@ -162,6 +178,11 @@ void razor_importer_begin_package(struct razor_importer *importer,
 				  const char *name,
 				  const char *version,
 				  const char *arch);
+void razor_importer_add_details(struct razor_importer *importer,
+				const char *summary,
+				const char *description,
+				const char *url,
+				const char *license);
 void razor_importer_add_property(struct razor_importer *importer,
 				 const char *name,
 				 uint32_t flags,

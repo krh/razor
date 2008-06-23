@@ -61,25 +61,36 @@ struct razor_set_header {
 	struct razor_set_section sections[0];
 };
 
-#define RAZOR_MAGIC 0x7a7a7a7a
+#define RAZOR_MAGIC 		0x7a7a7a7a
+#define RAZOR_DETAILS_MAGIC 	0x7a7a7a7b
+#define RAZOR_FILES_MAGIC 	0x7a7a7a7c
 #define RAZOR_VERSION 1
 
-#define RAZOR_STRING_POOL	0
-#define RAZOR_PACKAGES		1
-#define RAZOR_PROPERTIES	2
-#define RAZOR_FILES		3
-#define RAZOR_PACKAGE_POOL	4
-#define RAZOR_PROPERTY_POOL	5
-#define RAZOR_FILE_POOL		6
+#define RAZOR_STRING_POOL		0
+#define RAZOR_PACKAGES			1
+#define RAZOR_PROPERTIES		2
+#define RAZOR_PACKAGE_POOL		3
+#define RAZOR_PROPERTY_POOL		4
+
+#define RAZOR_DETAILS_STRING_POOL	0
+
+#define RAZOR_FILES			0
+#define RAZOR_FILE_POOL			1
+#define RAZOR_FILE_STRING_POOL		2
 
 struct razor_package {
-	uint32_t name  : 24;
-	uint32_t flags : 8;
+	uint name  : 24;
+	uint flags : 8;
 	uint32_t version;
 	uint32_t arch;
+	uint32_t summary;
+	uint32_t description;
+	uint32_t url;
+	uint32_t license;
 	struct list_head properties;
 	struct list_head files;
 };
+
 
 struct razor_property {
 	uint32_t name;
@@ -105,7 +116,11 @@ struct razor_set {
 	struct array package_pool;
  	struct array property_pool;
  	struct array file_pool;
+	struct array file_string_pool;
+	struct array details_string_pool;
 	struct razor_set_header *header;
+	struct razor_set_header *details_header;
+	struct razor_set_header *files_header;
 };
 
 struct import_entry {
@@ -123,6 +138,8 @@ struct import_directory {
 struct razor_importer {
 	struct razor_set *set;
 	struct hashtable table;
+	struct hashtable file_table;
+	struct hashtable details_table;
 	struct razor_package *package;
 	struct array properties;
 	struct array files;

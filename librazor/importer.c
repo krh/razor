@@ -54,6 +54,19 @@ razor_importer_finish_package(struct razor_importer *importer)
 }
 
 void
+razor_importer_add_details(struct razor_importer *importer,
+			   const char *summary,
+			   const char *description,
+			   const char *url,
+			   const char *license)
+{
+	importer->package->summary = hashtable_tokenize(&importer->details_table, summary);
+	importer->package->description = hashtable_tokenize(&importer->details_table, description);
+	importer->package->url = hashtable_tokenize(&importer->details_table, url);
+	importer->package->license = hashtable_tokenize(&importer->details_table, license);
+}
+
+void
 razor_importer_add_property(struct razor_importer *importer,
 			    const char *name,
 			    uint32_t flags,
@@ -99,6 +112,10 @@ razor_importer_create(void)
 	importer = zalloc(sizeof *importer);
 	importer->set = razor_set_create();
 	hashtable_init(&importer->table, &importer->set->string_pool);
+	hashtable_init(&importer->details_table,
+		       &importer->set->details_string_pool);
+	hashtable_init(&importer->file_table,
+		       &importer->set->file_string_pool);
 
 	return importer;
 }

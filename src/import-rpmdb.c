@@ -86,6 +86,7 @@ razor_set_create_from_rpmdb(void)
 	Header h;
 	int_32 type, count, i;
 	union rpm_entry name, epoch, version, release, arch;
+	union rpm_entry summary, description, url, license;
 	union rpm_entry basenames, dirnames, dirindexes;
 	char filename[PATH_MAX], evr[128], buf[16];
 	rpmdb db;
@@ -106,6 +107,11 @@ razor_set_create_from_rpmdb(void)
 		headerGetEntry(h, RPMTAG_VERSION, &type, &version.p, &count);
 		headerGetEntry(h, RPMTAG_RELEASE, &type, &release.p, &count);
 		headerGetEntry(h, RPMTAG_ARCH, &type, &arch.p, &count);
+		headerGetEntry(h, RPMTAG_SUMMARY, &type, &summary.p, &count);
+		headerGetEntry(h, RPMTAG_DESCRIPTION, &type, &description.p,
+			       &count);
+		headerGetEntry(h, RPMTAG_URL, &type, &url.p, &count);
+		headerGetEntry(h, RPMTAG_LICENSE, &type, &license.p, &count);
 
 		if (epoch.flags != NULL) {
 			snprintf(buf, sizeof buf, "%u", *epoch.flags);
@@ -118,6 +124,9 @@ razor_set_create_from_rpmdb(void)
 
 		razor_importer_begin_package(importer,
 					     name.string, evr, arch.string);
+		razor_importer_add_details(importer, summary.string,
+					   description.string, url.string,
+					   license.string);
 
 		add_properties(importer, RAZOR_PROPERTY_REQUIRES, h,
 			       RPMTAG_REQUIRENAME,

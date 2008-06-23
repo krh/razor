@@ -150,6 +150,7 @@ command_list_files(int argc, const char *argv[])
 	struct razor_set *set;
 
 	set = razor_set_open(repo_filename);
+	razor_set_open_files(set, "system-files.repo");
 	if (set == NULL)
 		return 1;
 	razor_set_list_files(set, argv[0]);
@@ -167,6 +168,7 @@ command_list_file_packages(int argc, const char *argv[])
 	const char *name, *version, *arch;
 
 	set = razor_set_open(repo_filename);
+	razor_set_open_files(set, "system-files.repo");
 	if (set == NULL)
 		return 1;
 
@@ -187,6 +189,7 @@ command_list_package_files(int argc, const char *argv[])
 	struct razor_set *set;
 
 	set = razor_set_open(repo_filename);
+	razor_set_open_files(set, "system-files.repo");
 	if (set == NULL)
 		return 1;
 	razor_set_list_package_files(set, argv[0]);
@@ -351,7 +354,9 @@ command_import_yum(int argc, const char *argv[])
 	set = razor_set_create_from_yum();
 	if (set == NULL)
 		return 1;
-	razor_set_write(set, rawhide_repo_filename);
+	razor_set_write(set, rawhide_repo_filename, RAZOR_REPO_FILE_MAIN);
+	razor_set_write(set, "rawhide-details.repo", RAZOR_REPO_FILE_DETAILS);
+	razor_set_write(set, "rawhide-files.repo", RAZOR_REPO_FILE_FILES);
 	razor_set_destroy(set);
 	printf("wrote %s\n", rawhide_repo_filename);
 
@@ -366,7 +371,9 @@ command_import_rpmdb(int argc, const char *argv[])
 	set = razor_set_create_from_rpmdb();
 	if (set == NULL)
 		return 1;
-	razor_set_write(set, repo_filename);
+	razor_set_write(set, repo_filename, RAZOR_REPO_FILE_MAIN);
+	razor_set_write(set, "system-details.repo", RAZOR_REPO_FILE_DETAILS);
+	razor_set_write(set, "system-files.repo", RAZOR_REPO_FILE_FILES);
 	razor_set_destroy(set);
 	printf("wrote %s\n", repo_filename);
 
@@ -447,7 +454,7 @@ command_update(int argc, const char *argv[])
 	}
 
 	set = razor_transaction_finish(trans);
-	razor_set_write(set, updated_repo_filename);
+	razor_set_write(set, updated_repo_filename, RAZOR_REPO_FILE_MAIN);
 	razor_set_destroy(set);
 	razor_set_destroy(upstream);
 	printf("wrote system-updated.repo\n");
@@ -480,7 +487,7 @@ command_remove(int argc, const char *argv[])
 		return 1;
 
 	set = razor_transaction_finish(trans);
-	razor_set_write(set, updated_repo_filename);
+	razor_set_write(set, updated_repo_filename, RAZOR_REPO_FILE_MAIN);
 	razor_set_destroy(set);
 	razor_set_destroy(upstream);
 	printf("wrote system-updated.repo\n");
@@ -571,7 +578,7 @@ command_import_rpms(int argc, const char *argv[])
 
 	set = razor_importer_finish(importer);
 
-	razor_set_write(set, repo_filename);
+	razor_set_write(set, repo_filename, RAZOR_REPO_FILE_MAIN);
 	razor_set_destroy(set);
 	printf("wrote %s\n", repo_filename);
 
@@ -769,6 +776,42 @@ command_download(int argc, const char *argv[])
 	return 0;
 }
 
+static int
+command_info(int argc, const char *argv[])
+{
+	struct razor_set *set;
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *pattern = argv[0], *name, *version, *arch;
+	const char *summary, *description, *url, *license;
+
+	set = razor_set_open(repo_filename);
+	razor_set_open_details(set, "system-details.repo");
+	pi = razor_package_iterator_create(set);
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch)) {
+		if (pattern && fnmatch(pattern, name, 0) != 0)
+			continue;
+
+		razor_package_get_details (set, package, &summary, &description,
+					   &url, &license);
+
+		printf ("Name:        %s\n", name);
+		printf ("Arch:        %s\n", arch);
+		printf ("Version:     %s\n", version);
+		printf ("URL:         %s\n", url);
+		printf ("License:     %s\n", license);
+		printf ("Summary:     %s\n", summary);
+		printf ("Description:\n");
+		printf ("%s\n", description);
+		printf ("\n");
+	}
+	razor_package_iterator_destroy(pi);
+	razor_set_destroy(set);
+
+	return 0;
+}
+
 static struct {
 	const char *name;
 	const char *description;
@@ -792,7 +835,8 @@ static struct {
 	{ "diff", "show diff between two package sets", command_diff },
 	{ "install", "install rpm", command_install },
 	{ "init", "init razor root", command_init },
-	{ "download", "download packages", command_download }
+	{ "download", "download packages", command_download },
+	{ "info", "display package details", command_info }
 };
 
 static int

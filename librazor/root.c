@@ -58,7 +58,7 @@ razor_root_create(const char *root)
 			"a razor install root is already initialized\n");
 		return -1;
 	}
-	if (razor_set_write(set, path) < 0) {
+	if (razor_set_write(set, path, RAZOR_REPO_FILE_MAIN) < 0) {
 		fprintf(stderr, "could not write initial package set\n");
 		return -1;
 	}
@@ -138,7 +138,7 @@ razor_root_close(struct razor_root *root)
 void
 razor_root_update(struct razor_root *root, struct razor_set *next)
 {
-	razor_set_write_to_fd(next, root->fd);
+	razor_set_write_to_fd(next, root->fd, RAZOR_REPO_FILE_MAIN);
 	root->next = next;
 
 	/* Sync the new repo file so the new package set is on disk
