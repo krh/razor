@@ -248,7 +248,7 @@ razor_package_query_finish(struct razor_package_query *pq)
 	else
 		index = NULL;
 
-	for (i = 0, j = 0; i < pq->count; i++) {
+	for (i = 0, j = 0; j < pq->count; i++) {
 		if (!pq->vector[i])
 			continue;
 
