@@ -314,7 +314,7 @@ build_file_tree(struct razor_importer *importer)
 			      compare_filenames,
 			      NULL);
 
-	root.name = hashtable_tokenize(&importer->table, "");
+	root.name = hashtable_tokenize(&importer->file_table, "");
 	array_init(&root.files);
 	array_init(&root.packages);
 	root.last = NULL;
@@ -334,7 +334,8 @@ build_file_tree(struct razor_importer *importer)
 			length = end - f;
 			memcpy(dirname, f, length);
 			dirname[length] ='\0';
-			name = hashtable_tokenize(&importer->table, dirname);
+			name = hashtable_tokenize(&importer->file_table,
+						  dirname);
 			if (d->last == NULL || d->last->name != name) {
 				d->last = array_add(&d->files, sizeof *d);
 				d->last->name = name;
@@ -501,6 +502,8 @@ razor_importer_finish(struct razor_importer *importer)
 
 	set = importer->set;
 	hashtable_release(&importer->table);
+	hashtable_release(&importer->details_table);
+	hashtable_release(&importer->file_table);
 	free(importer);
 
 	return set;
