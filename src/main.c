@@ -535,7 +535,7 @@ command_import_rpms(int argc, const char *argv[])
 	struct razor_importer *importer;
 	struct razor_set *set;
 	struct razor_rpm *rpm;
-	int len;
+	int len, imported_count = 0;
 	char filename[256];
 	const char *dirname = argv[0];
 
@@ -569,6 +569,9 @@ command_import_rpms(int argc, const char *argv[])
 			break;
 		}
 		razor_rpm_close(rpm);
+
+		printf("\rimporting %d", ++imported_count);
+		fflush(stdout);
 	}
 
 	if (de != NULL) {
@@ -576,6 +579,7 @@ command_import_rpms(int argc, const char *argv[])
 		return -1;
 	}
 
+	printf("\nsaving\n");
 	set = razor_importer_finish(importer);
 
 	razor_set_write(set, repo_filename, RAZOR_REPO_FILE_MAIN);

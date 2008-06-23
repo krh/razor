@@ -90,6 +90,7 @@ razor_set_create_from_rpmdb(void)
 	union rpm_entry basenames, dirnames, dirindexes;
 	char filename[PATH_MAX], evr[128], buf[16];
 	rpmdb db;
+	int imported_count = 0;
 
 	rpmReadConfigFiles(NULL, NULL);
 
@@ -162,9 +163,13 @@ razor_set_create_from_rpmdb(void)
 		}
 
 		razor_importer_finish_package(importer);
+
+		printf("\rimporting %d", ++imported_count);
+		fflush(stdout);
 	}
 
 	rpmdbClose(db);
 
+	printf("\nsaving\n");
 	return razor_importer_finish(importer);
 }

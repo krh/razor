@@ -62,6 +62,8 @@ struct yum_context {
 	char pkgid[128];
 	uint32_t property_type;
 	int state;
+
+	int total, current;
 };
 
 static uint32_t
@@ -90,7 +92,12 @@ yum_primary_start_element(void *data, const char *name, const char **atts)
 	uint32_t pre, relation, flags;
 	int i;
 
-	if (strcmp(name, "name") == 0) {
+	if (strcmp(name, "metadata") == 0) {
+		for (i = 0; atts[i]; i += 2) {
+			if (strcmp(atts[i], "packages") == 0)
+				ctx->total = atoi(atts[i + 1]);
+		}
+	} else if (strcmp(name, "name") == 0) {
 		ctx->state = YUM_STATE_PACKAGE_NAME;
 		ctx->p = ctx->name;
 	} else if (strcmp(name, "arch") == 0) {
@@ -208,6 +215,9 @@ yum_primary_end_element (void *data, const char *name)
 
 		XML_StopParser(ctx->current_parser, XML_TRUE);
 		ctx->current_parser = ctx->filelists_parser;
+
+		printf("\rimporting %d/%d", ++ctx->current, ctx->total);
+		fflush(stdout);
 	}
 }
 
@@ -313,6 +323,8 @@ razor_set_create_from_yum(void)
 
 	ctx.current_parser = ctx.primary_parser;
 
+	ctx.current = 0;
+
 	do {
 		XML_GetParsingStatus(ctx.current_parser, &status);
 		switch (status.parsing) {
@@ -348,5 +360,6 @@ razor_set_create_from_yum(void)
 	gzclose(primary);
 	gzclose(filelists);
 
+	printf ("\nsaving\n");
 	return razor_importer_finish(ctx.importer);
 }
