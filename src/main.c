@@ -39,6 +39,8 @@ static const char install_root[] = "install";
 static const char *repo_filename = system_repo_filename;
 static const char *yum_url;
 
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+
 static int
 command_list(int argc, const char *argv[])
 {

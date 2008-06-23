@@ -11,6 +11,8 @@
 #define RAZOR_EXPORT
 #endif
 
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#define ALIGN(value, base) (((value) + (base - 1)) & ~((base) - 1))
 
 void *zalloc(size_t size);
 
@@ -171,8 +173,6 @@ struct razor_property_iterator {
 	struct razor_property *property, *end;
 	struct list *index;
 };
-
-#define ALIGN(value, base) (((value) + (base - 1)) & ~((base) - 1))
 
 struct razor_entry *
 razor_set_find_entry(struct razor_set *set,

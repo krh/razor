@@ -20,8 +20,6 @@
 #ifndef _RAZOR_H_
 #define _RAZOR_H_
 
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
-
 enum razor_repo_file_type {
 	RAZOR_REPO_FILE_MAIN,
 	RAZOR_REPO_FILE_DETAILS,
@@ -158,8 +156,6 @@ razor_property_iterator_destroy(struct razor_property_iterator *pi);
 
 void razor_set_list_files(struct razor_set *set, const char *prefix);
 void razor_set_list_package_files(struct razor_set *set, const char *name);
-
-void razor_set_list_unsatisfied(struct razor_set *set);
 
 enum razor_diff_action {
 	RAZOR_DIFF_ACTION_ADD,
