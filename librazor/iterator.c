@@ -36,7 +36,7 @@ razor_package_iterator_create_with_index(struct razor_set *set,
 	return pi;
 }
 
-struct razor_package_iterator *
+RAZOR_EXPORT struct razor_package_iterator *
 razor_package_iterator_create(struct razor_set *set)
 {
 	struct razor_package_iterator *pi;
@@ -49,7 +49,7 @@ razor_package_iterator_create(struct razor_set *set)
 	return pi;
 }
 
-void
+RAZOR_EXPORT void
 razor_package_iterator_init_for_property(struct razor_package_iterator *pi,
 					 struct razor_set *set,
 					 struct razor_property *property)
@@ -59,7 +59,7 @@ razor_package_iterator_init_for_property(struct razor_package_iterator *pi,
 	pi->index = list_first(&property->packages, &set->package_pool);
 }
 
-struct razor_package_iterator *
+RAZOR_EXPORT struct razor_package_iterator *
 razor_package_iterator_create_for_property(struct razor_set *set,
 					   struct razor_property *property)
 {
@@ -69,7 +69,7 @@ razor_package_iterator_create_for_property(struct razor_set *set,
 	return razor_package_iterator_create_with_index(set, index);
 }
 
-struct razor_package_iterator *
+RAZOR_EXPORT struct razor_package_iterator *
 razor_package_iterator_create_for_file(struct razor_set *set,
 				       const char *filename)
 {
@@ -84,7 +84,7 @@ razor_package_iterator_create_for_file(struct razor_set *set,
 	return razor_package_iterator_create_with_index(set, index);
 }
 
-int
+RAZOR_EXPORT int
 razor_package_iterator_next(struct razor_package_iterator *pi,
 			    struct razor_package **package,
 			    const char **name,
@@ -119,7 +119,7 @@ razor_package_iterator_next(struct razor_package_iterator *pi,
 	return valid;
 }
 
-void
+RAZOR_EXPORT void
 razor_package_iterator_destroy(struct razor_package_iterator *pi)
 {
 	if (pi->free_index)
@@ -128,7 +128,7 @@ razor_package_iterator_destroy(struct razor_package_iterator *pi)
 	free(pi);
 }
 
-struct razor_property_iterator *
+RAZOR_EXPORT struct razor_property_iterator *
 razor_property_iterator_create(struct razor_set *set,
 			       struct razor_package *package)
 {
@@ -148,7 +148,7 @@ razor_property_iterator_create(struct razor_set *set,
 	return pi;
 }
 
-int
+RAZOR_EXPORT int
 razor_property_iterator_next(struct razor_property_iterator *pi,
 			     struct razor_property **property,
 			     const char **name,
@@ -183,7 +183,7 @@ razor_property_iterator_next(struct razor_property_iterator *pi,
 	return valid;
 }
 
-void
+RAZOR_EXPORT void
 razor_property_iterator_destroy(struct razor_property_iterator *pi)
 {
 	free(pi);
@@ -195,7 +195,7 @@ struct razor_package_query {
 	int count;
 };
 
-struct razor_package_query *
+RAZOR_EXPORT struct razor_package_query *
 razor_package_query_create(struct razor_set *set)
 {
 	struct razor_package_query *pq;
@@ -209,7 +209,7 @@ razor_package_query_create(struct razor_set *set)
 	return pq;
 }
 
-void
+RAZOR_EXPORT void
 razor_package_query_add_package(struct razor_package_query *pq,
 				struct razor_package *p)
 {
@@ -220,7 +220,7 @@ razor_package_query_add_package(struct razor_package_query *pq,
 	pq->vector[p - packages] = 1;
 }
 
-void
+RAZOR_EXPORT void
 razor_package_query_add_iterator(struct razor_package_query *pq,
 				 struct razor_package_iterator *pi)
 {
@@ -234,7 +234,7 @@ razor_package_query_add_iterator(struct razor_package_query *pq,
 	}
 }
 
-struct razor_package_iterator *
+RAZOR_EXPORT struct razor_package_iterator *
 razor_package_query_finish(struct razor_package_query *pq)
 {
 	struct razor_package_iterator *pi;

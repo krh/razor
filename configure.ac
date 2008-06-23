@@ -103,6 +103,25 @@ if test "x$GCC" = "xyes"; then
   changequote([,])dnl
 fi
 
+
+# gcc default visibility stuff
+
+have_gcc4=no
+AC_MSG_CHECKING(for -fvisibility)
+AC_COMPILE_IFELSE([
+#if defined(__GNUC__) && (__GNUC__ >= 4)
+#else
+#error Need GCC 4.0 for visibility
+#endif
+int main () { return 0; } 
+], have_gcc4=yes)
+
+if test "x$have_gcc4" = "xyes"; then
+   CFLAGS="$CFLAGS -fvisibility=hidden"
+fi
+AC_MSG_RESULT($have_gcc4)
+
+
 PKG_CHECK_MODULES(CURL, [libcurl])
 AC_SUBST(CURL_CFLAGS)
 AC_SUBST(CURL_LIBS)

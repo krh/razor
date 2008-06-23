@@ -23,7 +23,7 @@
 #include "razor-internal.h"
 #include "razor.h"
 
-void
+RAZOR_EXPORT void
 razor_importer_begin_package(struct razor_importer *importer,
 			     const char *name,
 			     const char *version,
@@ -42,7 +42,7 @@ razor_importer_begin_package(struct razor_importer *importer,
 }
 
 
-void
+RAZOR_EXPORT void
 razor_importer_finish_package(struct razor_importer *importer)
 {
 	list_set_array(&importer->package->properties,
@@ -53,7 +53,7 @@ razor_importer_finish_package(struct razor_importer *importer)
 	array_release(&importer->properties);
 }
 
-void
+RAZOR_EXPORT void
 razor_importer_add_details(struct razor_importer *importer,
 			   const char *summary,
 			   const char *description,
@@ -66,7 +66,7 @@ razor_importer_add_details(struct razor_importer *importer,
 	importer->package->license = hashtable_tokenize(&importer->details_table, license);
 }
 
-void
+RAZOR_EXPORT void
 razor_importer_add_property(struct razor_importer *importer,
 			    const char *name,
 			    uint32_t flags,
@@ -92,7 +92,7 @@ razor_importer_add_property(struct razor_importer *importer,
 	}
 }
 
-void
+RAZOR_EXPORT void
 razor_importer_add_file(struct razor_importer *importer, const char *name)
 {
 	struct import_entry *e;
@@ -104,7 +104,7 @@ razor_importer_add_file(struct razor_importer *importer, const char *name)
 	e->name = strdup(name);
 }
 
-struct razor_importer *
+RAZOR_EXPORT struct razor_importer *
 razor_importer_create(void)
 {
 	struct razor_importer *importer;
@@ -121,7 +121,7 @@ razor_importer_create(void)
 }
 
 /* Destroy an importer without creating the set. */
-void
+RAZOR_EXPORT void
 razor_importer_destroy(struct razor_importer *importer)
 {
 	/* FIXME: write this */
@@ -469,7 +469,7 @@ build_package_file_lists(struct razor_set *set, uint32_t *rmap)
 	free(pkgs);
 }
 
-struct razor_set *
+RAZOR_EXPORT struct razor_set *
 razor_importer_finish(struct razor_importer *importer)
 {
 	struct razor_set *set;

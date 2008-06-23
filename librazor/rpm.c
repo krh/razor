@@ -347,7 +347,7 @@ import_files(struct razor_importer *importer, struct razor_rpm *rpm)
 	}
 }
 
-struct razor_rpm *
+RAZOR_EXPORT struct razor_rpm *
 razor_rpm_open(const char *filename)
 {
 	struct razor_rpm *rpm;
@@ -703,7 +703,7 @@ fixed_hex_to_ulong(const char *hex, int length)
 	return l;
 }
 
-int
+RAZOR_EXPORT int
 razor_rpm_install(struct razor_rpm *rpm, const char *root)
 {
 	struct installer installer;
@@ -766,7 +766,7 @@ razor_rpm_install(struct razor_rpm *rpm, const char *root)
 	return 0;
 }
 
-int
+RAZOR_EXPORT int
 razor_rpm_close(struct razor_rpm *rpm)
 {
 	int err;
@@ -778,7 +778,7 @@ razor_rpm_close(struct razor_rpm *rpm)
 	return err;
 }
 
-int
+RAZOR_EXPORT int
 razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 {
 	const char *name, *version, *release, *arch, *summary;

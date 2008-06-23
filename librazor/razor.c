@@ -65,7 +65,7 @@ struct razor_set_section razor_details_sections[] = {
 	{ RAZOR_DETAILS_STRING_POOL,	offsetof(struct razor_set, details_string_pool) },
 };
 
-struct razor_set *
+RAZOR_EXPORT struct razor_set *
 razor_set_create(void)
 {
 	struct razor_set *set;
@@ -85,7 +85,7 @@ razor_set_create(void)
 	return set;
 }
 
-struct razor_set *
+RAZOR_EXPORT struct razor_set *
 razor_set_open(const char *filename)
 {
 	struct razor_set *set;
@@ -119,7 +119,7 @@ razor_set_open(const char *filename)
 	return set;
 }
 
-void
+RAZOR_EXPORT void
 razor_set_open_details(struct razor_set *set, const char *filename)
 {
 	struct razor_set_section *s;
@@ -147,7 +147,7 @@ razor_set_open_details(struct razor_set *set, const char *filename)
 	close(fd);
 }
 
-void
+RAZOR_EXPORT void
 razor_set_open_files(struct razor_set *set, const char *filename)
 {
 	struct razor_set_section *s;
@@ -175,7 +175,7 @@ razor_set_open_files(struct razor_set *set, const char *filename)
 	close(fd);
 }
 
-void
+RAZOR_EXPORT void
 razor_set_destroy(struct razor_set *set)
 {
 	unsigned int size;
@@ -264,7 +264,7 @@ razor_set_write_sections_to_fd(struct razor_set *set, int fd, int magic,
 	return 0;
 }
 
-int
+RAZOR_EXPORT int
 razor_set_write_to_fd(struct razor_set *set, int fd,
 		      enum razor_repo_file_type type)
 {
@@ -287,7 +287,7 @@ razor_set_write_to_fd(struct razor_set *set, int fd,
 	}
 }
 
-int
+RAZOR_EXPORT int
 razor_set_write(struct razor_set *set, const char *filename,
 		enum razor_repo_file_type type)
 {
@@ -305,7 +305,8 @@ razor_set_write(struct razor_set *set, const char *filename,
 
 	return close(fd);
 }
-void
+
+RAZOR_EXPORT void
 razor_build_evr(char *evr_buf, int size, const char *epoch,
 		const char *version, const char *release)
 {
@@ -328,7 +329,7 @@ razor_build_evr(char *evr_buf, int size, const char *epoch,
 		snprintf(evr_buf, size, "-%s", release);
 }
 
-int
+RAZOR_EXPORT int
 razor_versioncmp(const char *s1, const char *s2)
 {
 	const char *p1, *p2;
@@ -365,7 +366,7 @@ razor_versioncmp(const char *s1, const char *s2)
 	return *p1 - *p2;
 }
 
-struct razor_package *
+RAZOR_EXPORT struct razor_package *
 razor_set_get_package(struct razor_set *set, const char *package)
 {
 	struct razor_package_iterator *pi;
@@ -382,8 +383,9 @@ razor_set_get_package(struct razor_set *set, const char *package)
 	return p;
 }
 
-void
-razor_package_get_details(struct razor_set *set, struct razor_package *package,
+RAZOR_EXPORT void
+razor_package_get_details(struct razor_set *set,
+			  struct razor_package *package,
 			  const char **summary, const char **description,
 			  const char **url, const char **license)
 {
@@ -395,7 +397,7 @@ razor_package_get_details(struct razor_set *set, struct razor_package *package,
 	*license = &pool[package->license];
 }
 
-struct razor_entry *
+RAZOR_EXPORT struct razor_entry *
 razor_set_find_entry(struct razor_set *set,
 		     struct razor_entry *dir, const char *pattern)
 {
@@ -441,7 +443,7 @@ list_dir(struct razor_set *set, struct razor_entry *dir,
 	} while (!((e++)->flags & RAZOR_ENTRY_LAST));
 }
 
-void
+RAZOR_EXPORT void
 razor_set_list_files(struct razor_set *set, const char *pattern)
 {
 	struct razor_entry *e;
@@ -526,7 +528,7 @@ list_package_files(struct razor_set *set, struct list *r,
 	return r;
 }
 
-void
+RAZOR_EXPORT void
 razor_set_list_package_files(struct razor_set *set, const char *name)
 {
 	struct razor_package *package;
@@ -547,7 +549,7 @@ razor_set_list_package_files(struct razor_set *set, const char *name)
  * requires for a package have been installed before the package.
  **/
 
-void
+RAZOR_EXPORT void
 razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 	       razor_diff_callback_t callback, void *data)
 {
@@ -602,7 +604,7 @@ add_new_package(enum razor_diff_action action,
 		razor_package_query_add_package(data, package);
 }
 
-struct razor_package_iterator *
+RAZOR_EXPORT struct razor_package_iterator *
 razor_set_create_remove_iterator(struct razor_set *set,
 				 struct razor_set *next)
 {
@@ -622,7 +624,7 @@ razor_set_create_remove_iterator(struct razor_set *set,
 	return pi;
 }
 
-struct razor_package_iterator *
+RAZOR_EXPORT struct razor_package_iterator *
 razor_set_create_install_iterator(struct razor_set *set,
 				  struct razor_set *next)
 {

@@ -165,7 +165,7 @@ transaction_set_remove_package(struct transaction_set *ts,
 	}
 }
 
-struct razor_transaction *
+RAZOR_EXPORT struct razor_transaction *
 razor_transaction_create(struct razor_set *system, struct razor_set *upstream)
 {
 	struct razor_transaction *trans;
@@ -184,7 +184,7 @@ razor_transaction_create(struct razor_set *system, struct razor_set *upstream)
 	return trans;
 }
 
-void
+RAZOR_EXPORT void
 razor_transaction_install_package(struct razor_transaction *trans,
 				  struct razor_package *package)
 {
@@ -192,7 +192,7 @@ razor_transaction_install_package(struct razor_transaction *trans,
 	trans->changes++;
 }
 
-void
+RAZOR_EXPORT void
 razor_transaction_remove_package(struct razor_transaction *trans,
 				 struct razor_package *package)
 {
@@ -200,7 +200,7 @@ razor_transaction_remove_package(struct razor_transaction *trans,
 	trans->changes++;
 }
 
-void
+RAZOR_EXPORT void
 razor_transaction_update_package(struct razor_transaction *trans,
 				  struct razor_package *package)
 {
@@ -461,7 +461,7 @@ clear_requires_flags(struct transaction_set *ts)
 	}
 }
 
-const char *
+RAZOR_EXPORT const char *
 razor_property_relation_to_string(struct razor_property *p)
 {
 	switch (p->flags & RAZOR_PROPERTY_RELATION_MASK) {
@@ -485,7 +485,7 @@ razor_property_relation_to_string(struct razor_property *p)
 	}
 }
 
-const char *
+RAZOR_EXPORT const char *
 razor_property_type_to_string(struct razor_property *p)
 {
 	switch (p->flags & RAZOR_PROPERTY_TYPE_MASK) {
@@ -567,7 +567,7 @@ update_unsatisfied_packages(struct razor_transaction *trans)
 	}
 }
 
-void
+RAZOR_EXPORT void
 razor_transaction_update_all(struct razor_transaction *trans)
 {
 	struct razor_package *p;
@@ -740,7 +740,7 @@ flush_scheduled_upstream_updates(struct razor_transaction *trans)
 	}
 }
 
-int
+RAZOR_EXPORT int
 razor_transaction_resolve(struct razor_transaction *trans)
 {
 	int last = 0;
@@ -789,7 +789,7 @@ describe_unsatisfied(struct razor_set *set, struct razor_property *rp)
 	}
 }
 
-int
+RAZOR_EXPORT int
 razor_transaction_describe(struct razor_transaction *trans)
 {
 	struct prop_iter rpi;
@@ -820,7 +820,7 @@ razor_transaction_describe(struct razor_transaction *trans)
 	return unsatisfied;
 }
 
-int
+RAZOR_EXPORT int
 razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 				       const char *name,
 				       uint32_t flags,
@@ -852,7 +852,7 @@ razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 	return 0;
 }
 
-struct razor_set *
+RAZOR_EXPORT struct razor_set *
 razor_transaction_finish(struct razor_transaction *trans)
 {
 	struct razor_merger *merger;
@@ -905,7 +905,7 @@ razor_transaction_finish(struct razor_transaction *trans)
 	return razor_merger_finish(merger);
 }
 
-void
+RAZOR_EXPORT void
 razor_transaction_destroy(struct razor_transaction *trans)
 {
 	transaction_set_release(&trans->system);

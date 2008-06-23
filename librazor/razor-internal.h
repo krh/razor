@@ -4,6 +4,14 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+/* GCC visibility */
+#if defined(__GNUC__) && __GNUC__ >= 4
+#define RAZOR_EXPORT __attribute__ ((visibility("default")))
+#else
+#define RAZOR_EXPORT
+#endif
+
+
 void *zalloc(size_t size);
 
 struct array {

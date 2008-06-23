@@ -20,7 +20,7 @@ struct razor_root {
 	char new_path[PATH_MAX];
 };
 
-int
+RAZOR_EXPORT int
 razor_root_create(const char *root)
 {
 	struct stat buf;
@@ -67,7 +67,7 @@ razor_root_create(const char *root)
 	return 0;
 }
 
-struct razor_root *
+RAZOR_EXPORT struct razor_root *
 razor_root_open(const char *root)
 {
 	struct razor_root *image;
@@ -107,7 +107,7 @@ razor_root_open(const char *root)
 	return image;
 }
 
-struct razor_set *
+RAZOR_EXPORT struct razor_set *
 razor_root_open_read_only(const char *root)
 {
 	char path[PATH_MAX];
@@ -118,13 +118,13 @@ razor_root_open_read_only(const char *root)
 	return razor_set_open(path);
 }
 
-struct razor_set *
+RAZOR_EXPORT struct razor_set *
 razor_root_get_system_set(struct razor_root *root)
 {
 	return root->system;
 }
 
-int
+RAZOR_EXPORT int
 razor_root_close(struct razor_root *root)
 {
 	razor_set_destroy(root->system);
@@ -135,7 +135,7 @@ razor_root_close(struct razor_root *root)
 	return 0;
 }
 
-void
+RAZOR_EXPORT void
 razor_root_update(struct razor_root *root, struct razor_set *next)
 {
 	razor_set_write_to_fd(next, root->fd, RAZOR_REPO_FILE_MAIN);
@@ -147,7 +147,7 @@ razor_root_update(struct razor_root *root, struct razor_set *next)
 	printf("wrote %s\n", root->new_path);
 }
 
-int
+RAZOR_EXPORT int
 razor_root_commit(struct razor_root *root)
 {
 	/* Make it so. */
