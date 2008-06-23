@@ -466,7 +466,7 @@ list_dir(struct razor_set *set, struct razor_entry *dir,
 	 char *prefix, const char *pattern)
 {
 	struct razor_entry *e;
-	const char *n, *pool = set->string_pool.data;
+	const char *n, *pool = set->file_string_pool.data;
 
 	e = (struct razor_entry *) set->files.data + dir->start;
 	do {
@@ -525,7 +525,7 @@ list_package_files(struct razor_set *set, struct list *r,
 	int len;
 
 	entries = (struct razor_entry *) set->files.data;
-	pool = set->string_pool.data;
+	pool = set->file_string_pool.data;
 
 	e = entries + dir->start;
 	do {
