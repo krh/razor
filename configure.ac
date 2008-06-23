@@ -1,7 +1,7 @@
 dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ(2.59c)
-AC_INIT(razor, 0.8, krh@redhat.com)
+AC_INIT(razor, 0.1, krh@redhat.com)
 AM_INIT_AUTOMAKE(razor, 0.1)
 AM_CONFIG_HEADER(config.h)
 AM_MAINTAINER_MODE

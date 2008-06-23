@@ -60,7 +60,6 @@ make install DESTDIR=$RPM_BUILD_ROOT
 
 rm -f $RPM_BUILD_ROOT%{_libdir}/librazor*.a
 rm -f $RPM_BUILD_ROOT%{_libdir}/librazor*.la
-mv $RPM_BUILD_ROOT%{_bindir}/rpm $RPM_BUILD_ROOT%{_bindir}/rpm-razor
 
 #%find_lang %name
 
@@ -79,7 +78,6 @@ rm -rf $RPM_BUILD_ROOT
 %doc %{_datadir}/doc/razor/*.txt
 %config %{_sysconfdir}/bash_completion.d/*.sh
 %{_bindir}/razor
-%{_bindir}/rpm-razor
 %exclude %{_libdir}/librazor*.so.*
 
 %files libs
