@@ -9,6 +9,9 @@
 #include "razor-internal.h"
 
 static const char system_repo_filename[] = "system.repo";
+static const char system_repo_details_filename[] = "system-details.repo";
+static const char system_repo_files_filename[] = "system-files.repo";
+
 static const char next_repo_filename[] = "system-next.repo";
 static const char razor_root_path[] = "/var/lib/razor";
 
@@ -25,7 +28,7 @@ razor_root_create(const char *root)
 {
 	struct stat buf;
 	struct razor_set *set;
-	char path[PATH_MAX];
+	char path[PATH_MAX], details_path[PATH_MAX], files_path[PATH_MAX];
 
 	if (stat(root, &buf) < 0) {
 		if (mkdir(root, 0777) < 0) {
@@ -53,12 +56,18 @@ razor_root_create(const char *root)
 	set = razor_set_create();
 	snprintf(path, sizeof path, "%s%s/%s",
 		 root, razor_root_path, system_repo_filename);
+	snprintf(details_path, sizeof details_path, "%s%s/%s",
+		 root, razor_root_path, system_repo_details_filename);
+	snprintf(files_path, sizeof files_path, "%s%s/%s",
+		 root, razor_root_path, system_repo_files_filename);
 	if (stat(path, &buf) == 0) {
 		fprintf(stderr,
 			"a razor install root is already initialized\n");
 		return -1;
 	}
-	if (razor_set_write(set, path, RAZOR_REPO_FILE_MAIN) < 0) {
+	if (razor_set_write(set, path, RAZOR_REPO_FILE_MAIN) < 0 ||
+	    razor_set_write(set, details_path, RAZOR_REPO_FILE_DETAILS) < 0 ||
+	    razor_set_write(set, files_path, RAZOR_REPO_FILE_FILES) < 0 ) {
 		fprintf(stderr, "could not write initial package set\n");
 		return -1;
 	}
