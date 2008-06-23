@@ -13,7 +13,8 @@ INCLUDES = \
 	-DPACKAGE_LOCALSTATEDIR=\""$(localstatedir)"\" \
 	-DPACKAGE_LOCALE_DIR=\""$(localedir)"\"
 
-bin_PROGRAMS = razor rpm
+bin_PROGRAMS = razor
+noinst_PROGRAMS = rpm
 
 razor_SOURCES = main.c import-rpmdb.c import-yum.c
 razor_LDADD = $(RPM_LIBS) $(EXPAT_LIBS) $(CURL_LIBS) $(top_builddir)/librazor/librazor.la
