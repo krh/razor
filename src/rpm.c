@@ -396,9 +396,23 @@ print_package_properties(struct razor_set *set,
 }
 
 static void
-print_package_info(struct razor_set *set, struct razor_package *package)
+print_package_info(struct razor_set *set, struct razor_package *package,
+		   const char *name, const char *version, const char *arch)
 {
-	printf("FIXME: Package info not tracked.\n");
+	const char *summary, *description, *url, *license;
+
+	razor_package_get_details(set, package, &summary, &description,
+				  &url, &license);
+
+	printf("Name:        %s\n", name);
+	printf("Arch:        %s\n", arch);
+	printf("Version:     %s\n", version);
+	printf("URL:         %s\n", url);
+	printf("License:     %s\n", license);
+	printf("Summary:     %s\n", summary);
+	printf("Description:\n");
+	printf("%s\n", description);
+	printf("\n");
 }
 
 static void
@@ -435,7 +449,7 @@ command_query(int argc, const char *argv[])
 	struct razor_set *set;
 	struct razor_package_iterator *pi;
 	struct razor_package *package;
-	const char *name, *version, *arch;
+	const char *name, *version, *arch, *details;
 
 	if (option_package) {
 		set = create_set_from_command_line(argc, argv);
@@ -446,6 +460,11 @@ command_query(int argc, const char *argv[])
 	}
 
 	pi = get_query_packages(set, argc, argv);
+
+	/* FIXME: We need to figure out how to do this right. */
+	details = "install/var/lib/razor/system-details.repo";
+	if (option_info)
+		razor_set_open_details(set, details);
 
 	while (razor_package_iterator_next(pi, &package,
 					   &name, &version, &arch)) {
@@ -462,7 +481,7 @@ command_query(int argc, const char *argv[])
 			print_package_properties(set, package,
 						 RAZOR_PROPERTY_PROVIDES);
 		if (option_info)
-			print_package_info(set, package);
+			print_package_info(set, package, name, version, arch);
 		if (option_changelog)
 			print_package_changelog(set, package);
 
