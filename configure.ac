@@ -168,6 +168,8 @@ AC_SUBST([GETTEXT_PACKAGE])
 AM_GLIB_GNU_GETTEXT
 AC_DEFINE_UNQUOTED([GETTEXT_PACKAGE],["$GETTEXT_PACKAGE"],[gettext domain])
 
+GTK_DOC_CHECK([1.9])
+
 AC_OUTPUT([
 Makefile
 data/razor.pc
@@ -175,6 +177,7 @@ data/Makefile
 librazor/Makefile
 src/Makefile
 docs/Makefile
+docs/version.xml
 po/Makefile.in
 ])
 

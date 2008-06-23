@@ -22,10 +22,6 @@
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
-struct razor_set;
-struct razor_package;
-struct razor_property;
-
 enum razor_repo_file_type {
 	RAZOR_REPO_FILE_MAIN,
 	RAZOR_REPO_FILE_DETAILS,
@@ -53,11 +49,26 @@ enum razor_property_flags {
 	RAZOR_PROPERTY_POSTUN		= 1 << 8
 };
 
-const char *
-razor_property_relation_to_string(struct razor_property *p);
-const char *
-razor_property_type_to_string(struct razor_property *p);
+/**
+ * SECTION:set
+ * @title: Package Set
+ * @short_description: Represents a set of packages and their metadata.
+ *
+ * This object represents a set of packages, their dependency
+ * information, the file lists and a number of other details.
+ **/
 
+struct razor_set;
+struct razor_package;
+struct razor_property;
+
+/**
+ * razor_set_create:
+ * 
+ * Create a new #razor_set object.
+ * 
+ * Returns: the new #razor_set object.
+ **/
 struct razor_set *razor_set_create(void);
 struct razor_set *razor_set_open(const char *filename);
 void razor_set_destroy(struct razor_set *set);
@@ -77,9 +88,37 @@ razor_package_get_details(struct razor_set *set, struct razor_package *package,
 			  const char **summary, const char **description,
 			  const char **url, const char **license);
 
+
+/**
+ * SECTION:iterator
+ * @title: Iterators
+ * @short_description: Objects for traversing packages or properties.
+ *
+ * The razor iterator objects provides a way to iterate through a set
+ * of packages or properties.
+ **/
+
 struct razor_package_iterator;
+
+/**
+ * razor_package_iterator_create:
+ * 
+ * Create a new #razor_package_iterator object.
+ * 
+ * Returns: the new #razor_package_iterator object.
+ **/
+
 struct razor_package_iterator *
 razor_package_iterator_create(struct razor_set *set);
+
+/**
+ * razor_package_iterator_create_for_property:
+ * 
+ * Create a new #razor_package_iterator object for the packages that
+ * own the given property.
+ * 
+ * Returns: the new #razor_package_iterator object.
+ **/
 struct razor_package_iterator *
 razor_package_iterator_create_for_property(struct razor_set *set,
 					   struct razor_property *property);
@@ -144,7 +183,14 @@ struct razor_package_iterator *
 razor_set_create_install_iterator(struct razor_set *set,
 				  struct razor_set *next);
 
-/* Package transactions */
+/**
+ * SECTION:transaction
+ * @title: Transaction
+ * @short_description: Create a new package set by merging two or more sets.
+ *
+ * The razor transaction object provides a way to create a new package set
+ * from packages from one or more other package sets.
+ **/
 
 struct razor_transaction *
 razor_transaction_create(struct razor_set *system, struct razor_set *upstream);
@@ -166,11 +212,30 @@ int razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 					   uint32_t flags,
 					   const char *version);
 
-/* Importer interface; for building a razor set from external sources,
- * like yum, rpmdb or razor package files. */
+/**
+ * SECTION:rpm
+ * @title: Razor RPM
+ * @short_description: Operating on RPM files.
+ *
+ * Functions for open RPM files and extracting information and
+ * installing or removing RPM files.
+ **/
 
-struct razor_importer;
 struct razor_rpm;
+
+struct razor_rpm *razor_rpm_open(const char *filename);
+int razor_rpm_install(struct razor_rpm *rpm, const char *root);
+int razor_rpm_close(struct razor_rpm *rpm);
+
+/**
+ * SECTION:importer
+ * @title: Importer
+ * @short_description: A mechanism for building #razor_set objects
+ *
+ * For building a razor set from external sources, like yum, rpmdb or
+ * RPM files.
+ **/
+struct razor_importer;
 
 struct razor_importer *razor_importer_create(void);
 void razor_importer_destroy(struct razor_importer *importer);
@@ -196,23 +261,17 @@ int razor_importer_add_rpm(struct razor_importer *importer,
 
 struct razor_set *razor_importer_finish(struct razor_importer *importer);
 
-void razor_build_evr(char *evr_buf, int size, const char *epoch,
-		     const char *version, const char *release);
-int razor_versioncmp(const char *s1, const char *s2);
-
 struct razor_set *razor_set_create_from_yum(void);
 struct razor_set *razor_set_create_from_rpmdb(void);
 
-/* RPM functions */
-
-struct razor_rpm *razor_rpm_open(const char *filename);
-int razor_rpm_install(struct razor_rpm *rpm, const char *root);
-int razor_rpm_close(struct razor_rpm *rpm);
-
-
-/* Razor root functions. The root data structure encapsulates
- * filesystem conventions and the locking protocol. */
-
+/**
+ * SECTION:root
+ * @title: Root
+ * @short_description: Functions for accessing an install root.
+ *
+ * The #razor_root object encapsulate access to and locking of a razor
+ * install root.
+ **/
 struct razor_root;
 
 int razor_root_create(const char *root);
@@ -222,5 +281,24 @@ struct razor_set *razor_root_get_system_set(struct razor_root *root);
 int razor_root_close(struct razor_root *root);
 void razor_root_update(struct razor_root *root, struct razor_set *next);
 int razor_root_commit(struct razor_root *root);
+
+
+/**
+ * SECTION:misc
+ * @title: Miscellaneous Functions
+ * @short_description: Various helper functions
+ *
+ * Functions that doesn't fit anywhere else.
+ **/
+
+const char *
+razor_property_relation_to_string(struct razor_property *p);
+const char *
+razor_property_type_to_string(struct razor_property *p);
+
+void razor_build_evr(char *evr_buf, int size, const char *epoch,
+		     const char *version, const char *release);
+int razor_versioncmp(const char *s1, const char *s2);
+
 
 #endif /* _RAZOR_H_ */

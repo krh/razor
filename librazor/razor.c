@@ -64,6 +64,7 @@ struct razor_set_section razor_files_sections[] = {
 struct razor_set_section razor_details_sections[] = {
 	{ RAZOR_DETAILS_STRING_POOL,	offsetof(struct razor_set, details_string_pool) },
 };
+
 struct razor_set *
 razor_set_create(void)
 {

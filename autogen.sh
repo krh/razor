@@ -84,6 +84,8 @@ esac
 
 intltoolize --copy --force --automake                  || exit 1
 
+gtkdocize --copy --flavour no-tmpl
+
 conf_flags="--enable-maintainer-mode"
 
 if test x$NOCONFIGURE = x; then
