@@ -397,6 +397,47 @@ razor_package_get_details(struct razor_set *set,
 	*license = &pool[package->license];
 }
 
+RAZOR_EXPORT const char *
+razor_property_relation_to_string(struct razor_property *p)
+{
+	switch (p->flags & RAZOR_PROPERTY_RELATION_MASK) {
+	case RAZOR_PROPERTY_LESS:
+		return "<";
+
+	case RAZOR_PROPERTY_LESS | RAZOR_PROPERTY_EQUAL:
+		return "<=";
+
+	case RAZOR_PROPERTY_EQUAL:
+		return "=";
+
+	case RAZOR_PROPERTY_GREATER | RAZOR_PROPERTY_EQUAL:
+		return ">=";
+
+	case RAZOR_PROPERTY_GREATER:
+		return ">";
+
+	default:
+		return "?";
+	}
+}
+
+RAZOR_EXPORT const char *
+razor_property_type_to_string(struct razor_property *p)
+{
+	switch (p->flags & RAZOR_PROPERTY_TYPE_MASK) {
+	case RAZOR_PROPERTY_REQUIRES:
+		return "requires";
+	case RAZOR_PROPERTY_PROVIDES:
+		return "provides";
+	case RAZOR_PROPERTY_CONFLICTS:
+		return "conflicts";
+	case RAZOR_PROPERTY_OBSOLETES:
+		return "obsoletes";
+	default:
+		return NULL;
+	}
+}
+
 RAZOR_EXPORT struct razor_entry *
 razor_set_find_entry(struct razor_set *set,
 		     struct razor_entry *dir, const char *pattern)
