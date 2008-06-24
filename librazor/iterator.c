@@ -36,6 +36,13 @@ razor_package_iterator_create_with_index(struct razor_set *set,
 	return pi;
 }
 
+static struct razor_package_iterator *
+razor_package_iterator_create_empty(struct razor_set *set)
+{
+	struct razor_package_iterator *pi;
+	return zalloc(sizeof *pi);
+}
+
 RAZOR_EXPORT struct razor_package_iterator *
 razor_package_iterator_create(struct razor_set *set)
 {
@@ -78,7 +85,7 @@ razor_package_iterator_create_for_file(struct razor_set *set,
 
 	entry = razor_set_find_entry(set, set->files.data, filename);
 	if (entry == NULL)
-		return NULL;
+		return razor_package_iterator_create_empty(set);
 
 	index = list_first(&entry->packages, &set->package_pool);
 	return razor_package_iterator_create_with_index(set, index);
