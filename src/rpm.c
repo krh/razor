@@ -48,14 +48,14 @@ struct option {
  * install and info), and then look at the relevent one depending on
  * what else in on the command line. */
 
-static int option_all, option_whatrequires, option_whatprovides;
+static int option_all, option_list, option_whatrequires, option_whatprovides;
 static int option_package;
 
 static const struct option query_options[] = {
 	{ OPTION_BOOL, "configfiles", 'c', NULL, "list all configuration files", NULL },
 	{ OPTION_BOOL, "docfiles", 'd', NULL, "list all documentation files", NULL },
 	{ OPTION_BOOL, "dump", 0, NULL, "dump basic file information", NULL },
-	{ OPTION_BOOL, "list", 0, NULL, "list files in package", NULL },
+	{ OPTION_BOOL, "list", 'l', NULL, "list files in package", &option_list },
 	{ OPTION_STRING, "queryformat", 0, "QUERYFORMAT", "use the following query format", NULL },
 	{ OPTION_BOOL, "state", 's', NULL, "display the states of the listed files", NULL },
 	{ OPTION_BOOL, "all", 'a', NULL, "query/verify all packages", &option_all },
@@ -449,7 +449,7 @@ command_query(int argc, const char *argv[])
 	struct razor_set *set;
 	struct razor_package_iterator *pi;
 	struct razor_package *package;
-	const char *name, *version, *arch, *details;
+	const char *name, *version, *arch, *details, *files;
 
 	if (option_package) {
 		set = create_set_from_command_line(argc, argv);
@@ -465,6 +465,9 @@ command_query(int argc, const char *argv[])
 	details = "install/var/lib/razor/system-details.repo";
 	if (option_info)
 		razor_set_open_details(set, details);
+	files = "install/var/lib/razor/system-files.repo";
+	if (option_list)
+		razor_set_open_files(set, files);
 
 	while (razor_package_iterator_next(pi, &package,
 					   &name, &version, &arch)) {
@@ -484,10 +487,12 @@ command_query(int argc, const char *argv[])
 			print_package_info(set, package, name, version, arch);
 		if (option_changelog)
 			print_package_changelog(set, package);
+		if (option_list)
+			razor_set_list_package_files(set, name);
 
 		if (option_conflicts + option_obsoletes +
 		    option_requires + option_provides +
-		    option_info + option_changelog == 0)
+		    option_info + option_changelog + option_list == 0)
 			printf("%s-%s.%s\n", name, version, arch);
 	}
 
