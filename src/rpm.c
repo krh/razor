@@ -198,7 +198,7 @@ static const struct option alias_options[] = {
 	{ OPTION_BOOL, "conflicts", 0, NULL, "list capabilities this package conflicts with", &option_conflicts, },
 	{ OPTION_BOOL, "obsoletes", 0, NULL, "list other packages removed by installing this package", &option_obsoletes, },
 	{ OPTION_BOOL, "provides", 0, NULL, "list capabilities that this package provides", &option_provides, },
-	{ OPTION_BOOL, "requires", 0, NULL, "list capabilities required by package(s)", &option_requires, },
+	{ OPTION_BOOL, "requires", 'R', NULL, "list capabilities required by package(s)", &option_requires, },
 	{ OPTION_BOOL, "info", 'i', NULL, "list descriptive information from package(s)", &option_info, },
 	{ OPTION_BOOL, "changelog", 0, NULL, "list change logs for this package", &option_changelog, },
 	{ OPTION_BOOL, "xml", 0, NULL, "list metadata in xml", NULL, },
