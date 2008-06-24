@@ -17,6 +17,8 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -865,7 +867,7 @@ main(int argc, const char *argv[])
 	argc = parse_options(rpm_options, argc, argv);
 
 	if (option_version) {
-		printf("razor rpm version hoopla.\n");
+		printf("razor rpm version " VERSION "\n");
 		exit(0);
 	}
 
