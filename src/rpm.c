@@ -51,7 +51,7 @@ struct option {
  * what else in on the command line. */
 
 static int option_all, option_list, option_whatrequires, option_whatprovides;
-static int option_package;
+static int option_package, option_file;
 
 static const struct option query_options[] = {
 	{ OPTION_BOOL, "configfiles", 'c', NULL, "list all configuration files", NULL },
@@ -61,7 +61,7 @@ static const struct option query_options[] = {
 	{ OPTION_STRING, "queryformat", 0, "QUERYFORMAT", "use the following query format", NULL },
 	{ OPTION_BOOL, "state", 's', NULL, "display the states of the listed files", NULL },
 	{ OPTION_BOOL, "all", 'a', NULL, "query/verify all packages", &option_all },
-	{ OPTION_BOOL, "file", 'f', NULL, "query/verify package(s) owning file", NULL },
+	{ OPTION_BOOL, "file", 'f', NULL, "query/verify package(s) owning file", &option_file },
 	{ OPTION_BOOL, "group", 'g', NULL, "query/verify package(s) in group", NULL },
 	{ OPTION_BOOL, "package", 'p', NULL, "query/verify a package file", &option_package },
 	{ OPTION_BOOL, "ftswalk", 'W', NULL, "query/verify package(s) from TOP file tree walk", NULL },
@@ -84,7 +84,7 @@ static const struct option verify_options[] = {
 	{ OPTION_BOOL, "nodeps", 0, NULL, "don't verify package dependencies", &option_nodeps },
 	{ OPTION_BOOL, "noscript", 0, NULL, "don't execute verify script(s)", NULL, },
 	{ OPTION_BOOL, "all", 'a', NULL, "query/verify all packages", &option_all },
-	{ OPTION_BOOL, "file", 'f', NULL, "query/verify package(s) owning file", NULL },
+	{ OPTION_BOOL, "file", 'f', NULL, "query/verify package(s) owning file", &option_file },
 	{ OPTION_BOOL, "group", 'g', NULL, "query/verify package(s) in group", NULL },
 	{ OPTION_BOOL, "package", 'p', NULL, "query/verify a package file", &option_package },
 	{ OPTION_BOOL, "ftswalk", 'W', NULL, "query/verify package(s) from TOP file tree walk", NULL },
@@ -338,13 +338,19 @@ get_query_packages(struct razor_set *set, int argc, const char *argv[])
 {
 	struct razor_package_query *query;
 	struct razor_package_iterator *pi;
+	char *files;
 	int i;
 
-	if (option_all + option_whatprovides + option_whatrequires > 1) {
+	if (option_all + option_whatprovides + option_whatrequires +
+	    option_file > 1) {
 		printf("only one type of query/verify "
 		       "may be performed at a time\n");
 		exit(1);
 	}
+
+	files = "install/var/lib/razor/system-files.repo";
+	if (option_file)
+		razor_set_open_files(set, files);
 
 	query = razor_package_query_create(set);
 
@@ -362,6 +368,13 @@ get_query_packages(struct razor_set *set, int argc, const char *argv[])
 			add_property_packages(set, query,
 					      argv[i], NULL,
 					      RAZOR_PROPERTY_PROVIDES);
+	} else if (option_file) {
+		for (i = 0; i < argc; i++) {
+			pi = razor_package_iterator_create_for_file(set,
+								    argv[i]);
+			razor_package_query_add_iterator(query, pi);
+			razor_package_iterator_destroy(pi);
+		}
 	} else if (argc > 0) {
 		add_command_line_packages(set, query, argc, argv);
 	} else {

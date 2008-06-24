@@ -120,6 +120,15 @@ razor_package_iterator_create(struct razor_set *set);
 struct razor_package_iterator *
 razor_package_iterator_create_for_property(struct razor_set *set,
 					   struct razor_property *property);
+
+/**
+ * razor_package_iterator_create_for_file:
+ *
+ * Create a new #razor_package_iterator object for the packages that
+ * contain the given file name.
+ *
+ * Returns: the new #razor_package_iterator object.
+ **/
 struct razor_package_iterator *
 razor_package_iterator_create_for_file(struct razor_set *set,
 				       const char *filename);
