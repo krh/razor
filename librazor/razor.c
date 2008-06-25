@@ -510,7 +510,7 @@ razor_set_list_files(struct razor_set *set, const char *pattern)
 		}
 	}
 	e = razor_set_find_entry(set, set->files.data, buffer);
-	if (e->start != 0)
+	if (e && e->start != 0)
 		list_dir(set, e, buffer, base);
 }
 
