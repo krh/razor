@@ -391,10 +391,14 @@ razor_package_get_details(struct razor_set *set,
 {
 	const char *pool = set->details_string_pool.data;
 
-	*summary = &pool[package->summary];
-	*description = &pool[package->description];
-	*url = &pool[package->url];
-	*license = &pool[package->license];
+	if (summary != NULL)
+		*summary = &pool[package->summary];
+	if (description != NULL)
+		*description = &pool[package->description];
+	if (url != NULL)
+		*url = &pool[package->url];
+	if (license != NULL)
+		*license = &pool[package->license];
 }
 
 RAZOR_EXPORT const char *
