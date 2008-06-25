@@ -578,6 +578,9 @@ razor_set_list_package_files(struct razor_set *set, const char *name)
 	char buffer[512];
 
 	package = razor_set_get_package(set, name);
+	/* TODO: we should return the error to the caller */
+	if (!package)
+		return;
 
 	r = list_first(&package->files, &set->file_pool);
 	end = set->files.size / sizeof (struct razor_entry);
