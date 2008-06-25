@@ -85,9 +85,13 @@ list_properties(const char *package_name, uint32_t type)
 	uint32_t flags;
 
 	set = razor_set_open(repo_filename);
-	if (package_name)
+	if (package_name) {
 		package = razor_set_get_package(set, package_name);
-	else
+		if (!package) {
+			fprintf(stderr, "no package named \"%s\"\n", package_name);
+			return 1;
+		}
+	} else
 		package = NULL;
 
 	pi = razor_property_iterator_create(set, package);
