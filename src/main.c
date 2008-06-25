@@ -41,33 +41,75 @@ static const char *yum_url;
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
-static int
-command_list(int argc, const char *argv[])
+static struct razor_package_iterator *
+create_iterator_from_argv(struct razor_set *set, int argc, const char *argv[])
 {
-	struct razor_set *set;
-	struct razor_package_iterator *pi;
+	struct razor_package_query *query;
+	struct razor_package_iterator *iter;
 	struct razor_package *package;
-	const char *pattern, *name, *version, *arch;
-	int only_names = 0, i = 0;
+	const char *name, *version, *arch, *pattern;
+	int i, count;
 
-	if (i < argc && strcmp(argv[i], "--only-names") == 0) {
-		only_names = 1;
-		i++;
+	if (argc == 0)
+		return razor_package_iterator_create(set);
+
+	query = razor_package_query_create(set);
+
+	for (i = 0; i < argc; i++) {
+		iter = razor_package_iterator_create(set);
+		pattern = argv[i];
+		count = 0;
+		while (razor_package_iterator_next(iter, &package,
+						   &name, &version, &arch)) {
+			if (fnmatch(pattern, name, 0) != 0)
+				continue;
+
+			razor_package_query_add_package(query, package);
+			count++;
+		}
+		razor_package_iterator_destroy(iter);
+
+		if (count == 0)
+			fprintf(stderr,
+				"no package matches \"%s\"\n", pattern);
 	}
 
-	pattern = argv[i];
-	set = razor_set_open(repo_filename);
-	pi = razor_package_iterator_create(set);
-	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch)) {
-		if (pattern && fnmatch(pattern, name, 0) != 0)
-			continue;
+	return razor_package_query_finish(query);
+}
 
-		if (only_names)
+#define LIST_PACKAGES_ONLY_NAMES 0x01
+
+static void
+list_packages(struct razor_package_iterator *iter, uint32_t flags)
+{
+	struct razor_package *package;
+	const char *name, *version, *arch;
+
+	while (razor_package_iterator_next(iter, &package,
+					   &name, &version, &arch)) {
+		if (flags & LIST_PACKAGES_ONLY_NAMES)
 			printf("%s\n", name);
 		else
 			printf("%s-%s.%s\n", name, version, arch);
 	}
+}
+
+static int
+command_list(int argc, const char *argv[])
+{
+	struct razor_package_iterator *pi;
+	struct razor_set *set;
+	uint32_t flags = 0;
+	int i = 0;
+
+	if (i < argc && strcmp(argv[i], "--only-names") == 0) {
+		flags |= LIST_PACKAGES_ONLY_NAMES;
+		i++;
+	}
+
+	set = razor_set_open(repo_filename);
+	pi = create_iterator_from_argv(set, argc - i, argv + i);
+	list_packages(pi, flags);
 	razor_package_iterator_destroy(pi);
 	razor_set_destroy(set);
 
@@ -170,8 +212,6 @@ command_list_file_packages(int argc, const char *argv[])
 {
 	struct razor_set *set;
 	struct razor_package_iterator *pi;
-	struct razor_package *package;
-	const char *name, *version, *arch;
 
 	set = razor_set_open(repo_filename);
 	razor_set_open_files(set, "system-files.repo");
@@ -179,9 +219,7 @@ command_list_file_packages(int argc, const char *argv[])
 		return 1;
 
 	pi = razor_package_iterator_create_for_file(set, argv[0]);
-	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch))
-		printf("%s-%s\n", name, version);
+	list_packages(pi, 0);
 	razor_package_iterator_destroy(pi);
 
 	razor_set_destroy(set);
@@ -204,21 +242,6 @@ command_list_package_files(int argc, const char *argv[])
 	return 0;
 }
 
-static void
-list_packages_for_property(struct razor_set *set,
-			   struct razor_property *property)
-{
-	struct razor_package_iterator *pi;
-	struct razor_package *package;
-	const char *name, *version, *arch;
-
-	pi = razor_package_iterator_create_for_property(set, property);
-	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch))
-		printf("%s-%s.%s\n", name, version, arch);
-	razor_package_iterator_destroy(pi);
-}
-
 static int
 list_property_packages(const char *ref_name,
 		       const char *ref_version,
@@ -226,7 +249,8 @@ list_property_packages(const char *ref_name,
 {
 	struct razor_set *set;
 	struct razor_property *property;
-	struct razor_property_iterator *pi;
+	struct razor_property_iterator *prop_iter;
+	struct razor_package_iterator *pkg_iter;
 	const char *name, *version;
 	uint32_t flags;
 
@@ -237,8 +261,8 @@ list_property_packages(const char *ref_name,
 	if (set == NULL)
 		return 1;
 
-	pi = razor_property_iterator_create(set, NULL);
-	while (razor_property_iterator_next(pi, &property,
+	prop_iter = razor_property_iterator_create(set, NULL);
+	while (razor_property_iterator_next(prop_iter, &property,
 					    &name, &flags, &version)) {
 		if (strcmp(ref_name, name) != 0)
 			continue;
@@ -249,9 +273,13 @@ list_property_packages(const char *ref_name,
 		if ((flags & RAZOR_PROPERTY_TYPE_MASK) != type)
 			continue;
 
-		list_packages_for_property(set, property);
+		pkg_iter =
+			razor_package_iterator_create_for_property(set,
+								   property);
+		list_packages(pkg_iter, 0);
+		razor_package_iterator_destroy(pkg_iter);
 	}
-	razor_property_iterator_destroy(pi);
+	razor_property_iterator_destroy(prop_iter);
 
 	return 0;
 }
@@ -683,7 +711,7 @@ command_install(int argc, const char *argv[])
 	struct razor_root *root;
 	struct razor_set *system, *upstream, *next;
 	struct razor_transaction *trans;
-	int i = 0, errors, dependencies = 1;
+	int i = 0, dependencies = 1;
 
 	if (i < argc && strcmp(argv[i], "--no-dependencies") == 0) {
 		dependencies = 0;
