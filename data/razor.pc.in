@@ -6,7 +6,7 @@ includedir=@includedir@
 Name: razor
 Description: library for depsolving, installing and removing packages
 Version: @VERSION@
-Requires: expat curl
-Libs: -L${libdir} -lexpat -lz -lcurl
+Requires: libcurl
+Libs: -L${libdir} -lexpat -lz -lrazor
 Cflags: -I${includedir}/razor
 
