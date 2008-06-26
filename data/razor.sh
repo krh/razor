@@ -1,6 +1,6 @@
 __razor_commands () {
     local IFS=$'\n'
-    COMPREPLY=($(IFS=: compgen -S' ' -W "info:list-requires:list-provides:list-files:list-file-packages:list-package-files:what-requires:what-provides:import-yum:import-rpmdb:validate:update:diff:install:init:download" -- $1))
+    COMPREPLY=($(IFS=: compgen -S' ' -W "info:list-requires:list-provides:list-files:list-file-packages:list-package-files:what-requires:what-provides:import-yum:import-rpmdb:import-rpms:validate:update:diff:install:init:download" -- $1))
 }
 
 __razor_packages () {
