@@ -564,7 +564,8 @@ update_conflicted_packages(struct razor_transaction *trans)
 							 sp);
 		while (razor_package_iterator_next(&pkg_iter, &pkg,
 						   &name, &version, &arch)) {
-			fprintf(stderr, "updating %s %s because it conflicts with %s",
+			fprintf(stderr, "updating %s %s because it "
+				"conflicts with %s\n",
 				name, version, spi.pool + sp->name);
 			trans->system.packages[pkg - spkgs] |=
 				TRANS_PACKAGE_UPDATE;
