@@ -20,6 +20,8 @@
 #ifndef _RAZOR_H_
 #define _RAZOR_H_
 
+#include <stdint.h>
+
 enum razor_repo_file_type {
 	RAZOR_REPO_FILE_MAIN,
 	RAZOR_REPO_FILE_DETAILS,
