@@ -789,7 +789,7 @@ razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 	struct razor_property *p;
 
 	prop_iter_init(&pi, &trans->system);
-	while (prop_iter_next(&pi, flags, &p)) {
+	while (prop_iter_next(&pi, flags & RAZOR_PROPERTY_TYPE_MASK, &p)) {
 		if (!(trans->system.properties[p - pi.start] & TRANS_PROPERTY_SATISFIED) &&
 		    p->flags == flags &&
 		    strcmp(&pi.pool[p->name], name) == 0 &&
@@ -799,7 +799,7 @@ razor_transaction_unsatisfied_property(struct razor_transaction *trans,
 	}
 
 	prop_iter_init(&pi, &trans->upstream);
-	while (prop_iter_next(&pi, flags, &p)) {
+	while (prop_iter_next(&pi, flags & RAZOR_PROPERTY_TYPE_MASK, &p)) {
 		if (!(trans->upstream.properties[p - pi.start] & TRANS_PROPERTY_SATISFIED) &&
 		    p->flags == flags &&
 		    strcmp(&pi.pool[p->name], name) == 0 &&

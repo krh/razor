@@ -88,17 +88,17 @@ get_atts(const char **atts, ...)
 	va_end(ap);
 }
 
-static enum razor_version_relation
+static enum razor_property_flags
 parse_relation (const char *rel_str)
 {
 	if (!rel_str)
 		return -1;
 	if (rel_str[0] == 'L')
-		return rel_str[1] == 'E' ? RAZOR_VERSION_LESS_OR_EQUAL : RAZOR_VERSION_LESS;
+		return rel_str[1] == 'E' ? RAZOR_PROPERTY_LESS | RAZOR_PROPERTY_EQUAL : RAZOR_PROPERTY_LESS;
 	else if (rel_str[0] == 'G')
-		return rel_str[1] == 'E' ? RAZOR_VERSION_GREATER_OR_EQUAL : RAZOR_VERSION_GREATER;
+		return rel_str[1] == 'E' ? RAZOR_PROPERTY_GREATER | RAZOR_PROPERTY_EQUAL : RAZOR_PROPERTY_GREATER;
 	else if (rel_str[0] == 'E' || rel_str[1] == 'Q')
-		return RAZOR_VERSION_EQUAL;
+		return RAZOR_PROPERTY_EQUAL;
 	else
 		return -1;
 }
@@ -142,7 +142,7 @@ start_set(struct test_context *ctx, const char **atts)
 {
 	const char *name = NULL;
 
-	ctx->importer = razor_importer_new();
+	ctx->importer = razor_importer_create();
 	get_atts(atts, "name", &name, NULL);
 	if (!name)
 		ctx->importer_set = &ctx->result_set;
@@ -180,8 +180,8 @@ start_package(struct test_context *ctx, const char **atts)
 
 	razor_importer_begin_package(ctx->importer, name, version, arch);
 	razor_importer_add_property(ctx->importer, name,
-				    RAZOR_VERSION_EQUAL, version,
-				    RAZOR_PROPERTY_PROVIDES);
+				    RAZOR_PROPERTY_EQUAL | RAZOR_PROPERTY_PROVIDES,
+				    version);
 }
 
 static void
@@ -191,38 +191,53 @@ end_package(struct test_context *ctx)
 }
 
 static void
-add_property(struct test_context *ctx, enum razor_property_type type, const char *name, enum razor_version_relation rel, const char *version)
+add_property(struct test_context *ctx, enum razor_property_flags type, const char *name, enum razor_property_flags rel, const char *version)
 {
 	razor_importer_add_property(ctx->importer, name,
-				    rel, version, type);
+				    rel | type, version);
+}
+
+static const char*
+razor_property_flags_relation_to_string(enum razor_property_flags rel)
+{
+	if (rel == RAZOR_PROPERTY_LESS)
+		return "<";
+	if (rel == (RAZOR_PROPERTY_EQUAL | RAZOR_PROPERTY_LESS))
+		return "<=";
+	if (rel == RAZOR_PROPERTY_EQUAL)
+		return "=";
+	if (rel == (RAZOR_PROPERTY_EQUAL | RAZOR_PROPERTY_GREATER))
+		return ">=";
+	if (rel == RAZOR_PROPERTY_GREATER)
+		return ">";
+
+	return "";
 }
 
 static void
 check_unsatisfiable_property(struct test_context *ctx,
-			     enum razor_property_type type,
+			     enum razor_property_flags type,
 			     const char *name,
-			     enum razor_version_relation rel,
+			     enum razor_property_flags rel,
 			     const char *version)
 {
-	static const char *relation_string[] = { "<", "<=", "=", ">=", ">" };
-
 	if (!version)
 		version = "";
 
 	if (razor_transaction_unsatisfied_property(ctx->trans,
-						   name, rel, version, type))
+						   name, rel | type, version))
 		return;
 
 	fprintf(stderr, "  didn't get unsatisfiable '%s %s %s'\n",
-		name, relation_string[rel], version);
+		name, razor_property_flags_relation_to_string(rel), version);
 	ctx->errors++;
 }
 
 static void
-start_property(struct test_context *ctx, enum razor_property_type type, const char **atts)
+start_property(struct test_context *ctx, enum razor_property_flags type, const char **atts)
 {
 	const char *name = NULL, *rel_str = NULL, *version = NULL;
-	enum razor_version_relation rel;
+	enum razor_property_flags rel;
 
 	get_atts(atts, "name", &name, "relation", &rel_str, "version", &version, NULL);
 	if (name == NULL) {
@@ -236,7 +251,7 @@ start_property(struct test_context *ctx, enum razor_property_type type, const ch
 			exit(1);
 		}
 	} else
-		rel = RAZOR_VERSION_EQUAL;
+		rel = RAZOR_PROPERTY_EQUAL;
 
 	if (ctx->unsat)
 		check_unsatisfiable_property(ctx, type, name, rel, version);
@@ -273,7 +288,8 @@ end_transaction(struct test_context *ctx)
 		razor_transaction_remove_package(ctx->trans, pkg);
 	}
 
-	errors = razor_transaction_resolve(ctx->trans);
+	razor_transaction_resolve(ctx->trans);
+	errors = razor_transaction_describe(ctx->trans);
 	printf("\n");
 
 	while (ctx->n_install_pkgs--)
@@ -324,21 +340,22 @@ start_result(struct test_context *ctx, const char **atts)
 }
 
 static void
-diff_callback(const char *name,
-	      const char *old_version,
-	      const char *new_version,
+diff_callback(enum razor_diff_action action,
+	      struct razor_package *package,
+	      const char *name,
+	      const char *version,
 	      const char *arch,
 	      void *data)
 {
 	struct test_context *ctx = data;
 
 	ctx->errors++;
-	if (old_version) {
+	if (action == RAZOR_DIFF_ACTION_REMOVE) {
 		fprintf(stderr, "  result set should not contain %s %s\n",
-			name, old_version);
+			name, version);
 	} else {
 		fprintf(stderr, "  result set should contain %s %s\n",
-			name, new_version);
+			name, version);
 	}
 }
 

@@ -15,12 +15,18 @@ INCLUDES = \
 
 bin_PROGRAMS = razor
 noinst_PROGRAMS = rpm
+check_PROGRAMS = test-driver
 
 razor_SOURCES = main.c import-rpmdb.c import-yum.c
 razor_LDADD = $(RPM_LIBS) $(EXPAT_LIBS) $(CURL_LIBS) $(top_builddir)/librazor/librazor.la
 
 rpm_SOURCES = rpm.c
 rpm_LDADD = $(top_builddir)/librazor/librazor.la
+
+test_driver_SOURCES = test-driver.c
+test_driver_LDADD = $(EXPAT_LIBS) $(top_builddir)/librazor/librazor.la
+
+TESTS = test-driver
 
 clean-local :
 	rm -f *~
