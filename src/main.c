@@ -622,6 +622,8 @@ command_import_rpms(int argc, const char *argv[])
 	set = razor_importer_finish(importer);
 
 	razor_set_write(set, repo_filename, RAZOR_REPO_FILE_MAIN);
+	razor_set_write(set, "system-details.repo", RAZOR_REPO_FILE_DETAILS);
+	razor_set_write(set, "system-files.repo", RAZOR_REPO_FILE_FILES);
 	razor_set_destroy(set);
 	printf("wrote %s\n", repo_filename);
 
