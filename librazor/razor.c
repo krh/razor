@@ -119,7 +119,7 @@ razor_set_open(const char *filename)
 	return set;
 }
 
-RAZOR_EXPORT void
+RAZOR_EXPORT int
 razor_set_open_details(struct razor_set *set, const char *filename)
 {
 	struct razor_set_section *s;
@@ -129,10 +129,10 @@ razor_set_open_details(struct razor_set *set, const char *filename)
 
 	fd = open(filename, O_RDONLY);
 	if (fstat(fd, &stat) < 0)
-		return;
+		return -1;
 	set->details_header = mmap(NULL, stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
 	if (set->details_header == MAP_FAILED)
-		return;
+		return -1;
 
 	for (s = set->details_header->sections; ~s->type; s++) {
 		if (s->type >= ARRAY_SIZE(razor_details_sections))
@@ -145,9 +145,11 @@ razor_set_open_details(struct razor_set *set, const char *filename)
 		array->alloc = s->size;
 	}
 	close(fd);
+
+	return 0;
 }
 
-RAZOR_EXPORT void
+RAZOR_EXPORT int
 razor_set_open_files(struct razor_set *set, const char *filename)
 {
 	struct razor_set_section *s;
@@ -157,10 +159,10 @@ razor_set_open_files(struct razor_set *set, const char *filename)
 
 	fd = open(filename, O_RDONLY);
 	if (fstat(fd, &stat) < 0)
-		return;
+		return -1;
 	set->files_header = mmap(NULL, stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
 	if (set->files_header == MAP_FAILED)
-		return;
+		return -1;
 
 	for (s = set->files_header->sections; ~s->type; s++) {
 		if (s->type >= ARRAY_SIZE(razor_files_sections))
@@ -173,6 +175,8 @@ razor_set_open_files(struct razor_set *set, const char *filename)
 		array->alloc = s->size;
 	}
 	close(fd);
+
+	return 0;
 }
 
 RAZOR_EXPORT void

@@ -77,8 +77,8 @@ int razor_set_write_to_fd(struct razor_set *set, int fd,
 int razor_set_write(struct razor_set *set, const char *filename,
 		    enum razor_repo_file_type type);
 
-void razor_set_open_details(struct razor_set *set, const char *filename);
-void razor_set_open_files(struct razor_set *set, const char *filename);
+int razor_set_open_details(struct razor_set *set, const char *filename);
+int razor_set_open_files(struct razor_set *set, const char *filename);
 
 struct razor_package *
 razor_set_get_package(struct razor_set *set, const char *package);

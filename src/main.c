@@ -198,9 +198,11 @@ command_list_files(int argc, const char *argv[])
 	struct razor_set *set;
 
 	set = razor_set_open(repo_filename);
-	razor_set_open_files(set, "system-files.repo");
 	if (set == NULL)
 		return 1;
+	if (razor_set_open_files(set, "system-files.repo"))
+		return 1;
+
 	razor_set_list_files(set, argv[0]);
 	razor_set_destroy(set);
 
@@ -214,8 +216,9 @@ command_list_file_packages(int argc, const char *argv[])
 	struct razor_package_iterator *pi;
 
 	set = razor_set_open(repo_filename);
-	razor_set_open_files(set, "system-files.repo");
 	if (set == NULL)
+		return 1;
+	if (razor_set_open_files(set, "system-files.repo"))
 		return 1;
 
 	pi = razor_package_iterator_create_for_file(set, argv[0]);
@@ -233,9 +236,11 @@ command_list_package_files(int argc, const char *argv[])
 	struct razor_set *set;
 
 	set = razor_set_open(repo_filename);
-	razor_set_open_files(set, "system-files.repo");
 	if (set == NULL)
 		return 1;
+	if (razor_set_open_files(set, "system-files.repo"))
+		return 1;
+
 	razor_set_list_package_files(set, argv[0]);
 	razor_set_destroy(set);
 
@@ -824,7 +829,10 @@ command_info(int argc, const char *argv[])
 	const char *summary, *description, *url, *license;
 
 	set = razor_set_open(repo_filename);
-	razor_set_open_details(set, "system-details.repo");
+	if (set == NULL)
+		return 1;
+	if (razor_set_open_details(set, "system-details.repo"))
+		return 1;
 	pi = razor_package_iterator_create(set);
 	while (razor_package_iterator_next(pi, &package,
 					   &name, &version, &arch)) {

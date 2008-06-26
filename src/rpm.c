@@ -350,7 +350,8 @@ get_query_packages(struct razor_set *set, int argc, const char *argv[])
 
 	files = "install/var/lib/razor/system-files.repo";
 	if (option_file)
-		razor_set_open_files(set, files);
+		if (razor_set_open_files(set, files))
+			exit(1);
 
 	query = razor_package_query_create(set);
 
@@ -479,10 +480,12 @@ command_query(int argc, const char *argv[])
 	/* FIXME: We need to figure out how to do this right. */
 	details = "install/var/lib/razor/system-details.repo";
 	if (option_info)
-		razor_set_open_details(set, details);
+		if (razor_set_open_details(set, details))
+			return;
 	files = "install/var/lib/razor/system-files.repo";
 	if (option_list)
-		razor_set_open_files(set, files);
+		if (razor_set_open_files(set, files))
+			return;
 
 	while (razor_package_iterator_next(pi, &package,
 					   &name, &version, &arch)) {
