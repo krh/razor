@@ -473,19 +473,19 @@ command_query(int argc, const char *argv[])
 		option_all = 1;
 	} else {
 		set = razor_root_open_read_only(option_root);
+
+		/* FIXME: We need to figure out how to do this right. */
+		details = "install/var/lib/razor/system-details.repo";
+		if (option_info)
+			if (razor_set_open_details(set, details))
+				return;
+		files = "install/var/lib/razor/system-files.repo";
+		if (option_list)
+			if (razor_set_open_files(set, files))
+				return;
 	}
 
 	pi = get_query_packages(set, argc, argv);
-
-	/* FIXME: We need to figure out how to do this right. */
-	details = "install/var/lib/razor/system-details.repo";
-	if (option_info)
-		if (razor_set_open_details(set, details))
-			return;
-	files = "install/var/lib/razor/system-files.repo";
-	if (option_list)
-		if (razor_set_open_files(set, files))
-			return;
 
 	while (razor_package_iterator_next(pi, &package,
 					   &name, &version, &arch)) {

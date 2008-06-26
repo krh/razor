@@ -781,7 +781,8 @@ razor_rpm_close(struct razor_rpm *rpm)
 RAZOR_EXPORT int
 razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 {
-	const char *name, *version, *release, *arch, *summary;
+	const char *name, *version, *release, *arch;
+	const char *summary, *description, *url, *license;
 	const uint32_t *epoch;
 	char evr[128], buf[16];
 
@@ -790,7 +791,11 @@ razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 	version = razor_rpm_get_indirect(rpm, RPMTAG_VERSION, NULL);
 	release = razor_rpm_get_indirect(rpm, RPMTAG_RELEASE, NULL);
 	arch = razor_rpm_get_indirect(rpm, RPMTAG_ARCH, NULL);
+
 	summary = razor_rpm_get_indirect(rpm, RPMTAG_SUMMARY, NULL);
+	description = razor_rpm_get_indirect(rpm, RPMTAG_DESCRIPTION, NULL);
+	url = razor_rpm_get_indirect(rpm, RPMTAG_URL, NULL);
+	license = razor_rpm_get_indirect(rpm, RPMTAG_LICENSE, NULL);
 
 	if (epoch) {
 		snprintf(buf, sizeof buf, "%u", ntohl(*epoch));
@@ -799,6 +804,9 @@ razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 		razor_build_evr(evr, sizeof evr, NULL, version, release);
 	}
 	razor_importer_begin_package(importer, name, evr, arch);
+
+	razor_importer_add_details(importer, summary, description, url,
+				   license);
 
 	import_properties(importer, RAZOR_PROPERTY_REQUIRES, rpm,
 			  RPMTAG_REQUIRENAME,
