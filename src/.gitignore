@@ -2,6 +2,7 @@
 .libs
 razor
 rpm
+test-driver
 *.repo
 *.xml.gz
 install
