@@ -860,6 +860,52 @@ command_info(int argc, const char *argv[])
 	return 0;
 }
 
+#define SEARCH_MAX 256
+
+static int
+command_search(int argc, const char *argv[])
+{
+	struct razor_set *set;
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	char pattern[SEARCH_MAX];
+	const char *name, *version, *arch;
+	const char *summary, *description, *url, *license;
+
+	if (!argv[0]) {
+		fprintf(stderr, "must specify a search term\n");
+		return 1;
+	}
+
+	sprintf(pattern, "*%s*", argv[0]);
+
+	set = razor_set_open(repo_filename);
+	if (set == NULL)
+		return 1;
+	if (razor_set_open_details(set, "system-details.repo"))
+		return 1;
+
+	pi = razor_package_iterator_create(set);
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch)) {
+		if (!fnmatch(pattern, name, 0))
+			printf("%s-%s.%s\n", name, version, arch);
+		else {
+			razor_package_get_details (set, package, &summary,
+						   &description, &url,
+						   &license);
+			if (!fnmatch(pattern, url, 0) ||
+			    !fnmatch(pattern, summary, 0) ||
+			    !fnmatch(pattern, description, 0))
+				printf("%s-%s.%s\n", name, version, arch);
+		}
+	}
+	razor_package_iterator_destroy(pi);
+	razor_set_destroy(set);
+
+	return 0;
+}
+
 static struct {
 	const char *name;
 	const char *description;
@@ -884,7 +930,8 @@ static struct {
 	{ "install", "install rpm", command_install },
 	{ "init", "init razor root", command_init },
 	{ "download", "download packages", command_download },
-	{ "info", "display package details", command_info }
+	{ "info", "display package details", command_info },
+	{ "search", "search package details", command_search }
 };
 
 static int
