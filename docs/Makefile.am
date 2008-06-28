@@ -20,7 +20,11 @@ MKDB_OPTIONS=--sgml-mode --output-format=xml
 # Extra options to supply to gtkdoc-mktmpl
 MKTMPL_OPTIONS=
 
+if ENABLE_GTK_DOC
 include $(top_srcdir)/gtk-doc.make
+else
+EXTRA_DIST =
+endif
 
 # Version information for marking the documentation
 EXTRA_DIST += version.xml.in

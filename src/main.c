@@ -877,7 +877,7 @@ command_search(int argc, const char *argv[])
 		return 1;
 	}
 
-	sprintf(pattern, "*%s*", argv[0]);
+	snprintf(pattern, sizeof pattern, "*%s*", argv[0]);
 
 	set = razor_set_open(repo_filename);
 	if (set == NULL)

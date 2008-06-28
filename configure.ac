@@ -219,5 +219,5 @@ echo "
         cflags:                     ${CFLAGS}
         Maintainer mode:            ${USE_MAINTAINER_MODE}
         Building verbose mode:      ${enable_verbose_mode}
+        Building gtk-doc:           ${enable_gtk_doc}
 "
-
