@@ -140,9 +140,6 @@ Misc ideas:
   so we can roll back to yesterday, or see what got installed in the
   latest yum update.
 
-- transactions, proper recovery, make sure we don't poop our package
-  database (no more rm /var/lib/rpm/__cache*).
-
 - use hash table for package and property lists so we only store
   unique lists (like for string pool).
 
@@ -163,12 +160,6 @@ Misc ideas:
   different type of upgrades that way (obsoletes, conflicts, file
   conflicts, file/dir problems etc).  Or maybe just keep a simple file
   format ad use a custom importer to create the .repo files.
-
-- try to clean up the
-
-	do { ... } while (((e++)->name & RAZOR_ENTRY_LAST) == 0);
-
-  idiom for iteration of directories.
 
 - overlay package sets?  mount a read-only /usr over nfs or from the
   virt-host and have a local package set overlaid over the read-only
