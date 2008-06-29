@@ -32,6 +32,7 @@
 #include <errno.h>
 #include <ctype.h>
 #include <fnmatch.h>
+#include <assert.h>
 
 #include "razor-internal.h"
 #include "razor.h"
@@ -188,6 +189,9 @@ RAZOR_EXPORT void
 razor_transaction_install_package(struct razor_transaction *trans,
 				  struct razor_package *package)
 {
+	assert (trans != NULL);
+	assert (package != NULL);
+
 	transaction_set_install_package(&trans->upstream, package);
 	trans->changes++;
 }
@@ -196,6 +200,9 @@ RAZOR_EXPORT void
 razor_transaction_remove_package(struct razor_transaction *trans,
 				 struct razor_package *package)
 {
+	assert (trans != NULL);
+	assert (package != NULL);
+
 	transaction_set_remove_package(&trans->system, package);
 	trans->changes++;
 }
@@ -205,6 +212,9 @@ razor_transaction_update_package(struct razor_transaction *trans,
 				  struct razor_package *package)
 {
 	struct razor_package *spkgs, *upkgs, *end;
+
+	assert (trans != NULL);
+	assert (package != NULL);
 
 	spkgs = trans->system.set->packages.data;
 	upkgs = trans->upstream.set->packages.data;
@@ -531,6 +541,8 @@ razor_transaction_update_all(struct razor_transaction *trans)
 {
 	struct razor_package *p;
 	int i, count;
+
+	assert (trans != NULL);
 
 	count = trans->system.set->packages.size / sizeof *p;
 	for (i = 0; i < count; i++)
@@ -868,6 +880,8 @@ razor_transaction_finish(struct razor_transaction *trans)
 RAZOR_EXPORT void
 razor_transaction_destroy(struct razor_transaction *trans)
 {
+	assert (trans != NULL);
+
 	transaction_set_release(&trans->system);
 	transaction_set_release(&trans->upstream);
 	free(trans);

@@ -24,6 +24,8 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <assert.h>
+
 #include "razor.h"
 #include "razor-internal.h"
 
@@ -48,6 +50,8 @@ razor_root_create(const char *root)
 	struct stat buf;
 	struct razor_set *set;
 	char path[PATH_MAX], details_path[PATH_MAX], files_path[PATH_MAX];
+
+	assert (root != NULL);
 
 	if (stat(root, &buf) < 0) {
 		if (mkdir(root, 0777) < 0) {
@@ -100,6 +104,8 @@ razor_root_open(const char *root)
 {
 	struct razor_root *image;
 
+	assert (root != NULL);
+
 	image = malloc(sizeof *image);
 	if (image == NULL)
 		return NULL;
@@ -140,6 +146,8 @@ razor_root_open_read_only(const char *root)
 {
 	char path[PATH_MAX];
 
+	assert (root != NULL);
+
 	snprintf(path, sizeof path, "%s%s/%s",
 		 root, razor_root_path, system_repo_filename);
 
@@ -149,12 +157,16 @@ razor_root_open_read_only(const char *root)
 RAZOR_EXPORT struct razor_set *
 razor_root_get_system_set(struct razor_root *root)
 {
+	assert (root != NULL);
+
 	return root->system;
 }
 
 RAZOR_EXPORT int
 razor_root_close(struct razor_root *root)
 {
+	assert (root != NULL);
+
 	razor_set_destroy(root->system);
 	unlink(root->new_path);
 	close(root->fd);
@@ -166,6 +178,9 @@ razor_root_close(struct razor_root *root)
 RAZOR_EXPORT void
 razor_root_update(struct razor_root *root, struct razor_set *next)
 {
+	assert (root != NULL);
+	assert (next != NULL);
+
 	razor_set_write_to_fd(next, root->fd, RAZOR_REPO_FILE_MAIN);
 	root->next = next;
 
@@ -178,6 +193,8 @@ razor_root_update(struct razor_root *root, struct razor_set *next)
 RAZOR_EXPORT int
 razor_root_commit(struct razor_root *root)
 {
+	assert (root != NULL);
+
 	/* Make it so. */
 	rename(root->new_path, root->path);
 	printf("renamed %s to %s\n", root->new_path, root->path);

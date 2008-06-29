@@ -31,6 +31,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <zlib.h>
+#include <assert.h>
 
 #include "razor.h"
 #include "razor-internal.h"
@@ -356,6 +357,8 @@ razor_rpm_open(const char *filename)
 	unsigned int count, i, nindex, hsize;
 	const char *name;
 	int fd;
+
+	assert (filename != NULL);
 
 	rpm = malloc(sizeof *rpm);
 	if (rpm == NULL)
@@ -713,6 +716,9 @@ razor_rpm_install(struct razor_rpm *rpm, const char *root)
 	char *path;
 	size_t filesize;
 
+	assert (rpm != NULL);
+	assert (root != NULL);
+
 	installer.rpm = rpm;
 	installer.root = root;
 
@@ -771,6 +777,8 @@ razor_rpm_close(struct razor_rpm *rpm)
 {
 	int err;
 
+	assert (rpm != NULL);
+
 	free(rpm->dirs);
 	err = munmap(rpm->map, rpm->size);
 	free(rpm);
@@ -785,6 +793,9 @@ razor_importer_add_rpm(struct razor_importer *importer, struct razor_rpm *rpm)
 	const char *summary, *description, *url, *license;
 	const uint32_t *epoch;
 	char evr[128], buf[16];
+
+	assert (importer != NULL);
+	assert (rpm != NULL);
 
 	name = razor_rpm_get_indirect(rpm, RPMTAG_NAME, NULL);
 	epoch = razor_rpm_get_indirect(rpm, RPMTAG_EPOCH, NULL);

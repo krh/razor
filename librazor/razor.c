@@ -32,6 +32,7 @@
 #include <errno.h>
 #include <ctype.h>
 #include <fnmatch.h>
+#include <assert.h>
 
 #include "razor-internal.h"
 #include "razor.h"
@@ -127,6 +128,9 @@ razor_set_open_details(struct razor_set *set, const char *filename)
 	struct array *array;
 	int fd;
 
+	assert (set != NULL);
+	assert (filename != NULL);
+
 	fd = open(filename, O_RDONLY);
 	if (fstat(fd, &stat) < 0)
 		return -1;
@@ -157,6 +161,9 @@ razor_set_open_files(struct razor_set *set, const char *filename)
 	struct array *array;
 	int fd;
 
+	assert (set != NULL);
+	assert (filename != NULL);
+
 	fd = open(filename, O_RDONLY);
 	if (fstat(fd, &stat) < 0)
 		return -1;
@@ -185,6 +192,8 @@ razor_set_destroy(struct razor_set *set)
 	unsigned int size;
 	struct array *a;
 	int i;
+
+	assert (set != NULL);
 
 	if (set->header) {
 		for (i = 0; set->header->sections[i].type; i++)
@@ -340,6 +349,9 @@ razor_versioncmp(const char *s1, const char *s2)
 	long n1, n2;
 	int res;
 
+	assert (s1 != NULL);
+	assert (s2 != NULL);
+
 	n1 = strtol(s1, (char **) &p1, 10);
 	n2 = strtol(s2, (char **) &p2, 10);
 
@@ -377,6 +389,9 @@ razor_set_get_package(struct razor_set *set, const char *package)
 	struct razor_package *p;
 	const char *name, *version, *arch;
 
+	assert (set != NULL);
+	assert (package != NULL);
+
 	pi = razor_package_iterator_create(set);
 	while (razor_package_iterator_next(pi, &p, &name, &version, &arch)) {
 		if (strcmp(package, name) == 0)
@@ -395,6 +410,9 @@ razor_package_get_details(struct razor_set *set,
 {
 	const char *pool = set->details_string_pool.data;
 
+	assert (set != NULL);
+	assert (package != NULL);
+
 	if (summary != NULL)
 		*summary = &pool[package->summary];
 	if (description != NULL)
@@ -408,6 +426,8 @@ razor_package_get_details(struct razor_set *set,
 RAZOR_EXPORT const char *
 razor_property_relation_to_string(struct razor_property *p)
 {
+	assert (p != NULL);
+
 	switch (p->flags & RAZOR_PROPERTY_RELATION_MASK) {
 	case RAZOR_PROPERTY_LESS:
 		return "<";
@@ -432,6 +452,8 @@ razor_property_relation_to_string(struct razor_property *p)
 RAZOR_EXPORT const char *
 razor_property_type_to_string(struct razor_property *p)
 {
+	assert (p != NULL);
+
 	switch (p->flags & RAZOR_PROPERTY_TYPE_MASK) {
 	case RAZOR_PROPERTY_REQUIRES:
 		return "requires";
@@ -453,6 +475,10 @@ razor_set_find_entry(struct razor_set *set,
 	struct razor_entry *e;
 	const char *n, *pool = set->file_string_pool.data;
 	int len;
+
+	assert (set != NULL);
+	assert (dir != NULL);
+	assert (pattern != NULL);
 
 	e = (struct razor_entry *) set->files.data + dir->start;
 	do {
@@ -497,6 +523,8 @@ razor_set_list_files(struct razor_set *set, const char *pattern)
 {
 	struct razor_entry *e;
 	char buffer[512], *p, *base;
+
+	assert (set != NULL);
 
 	if (pattern == NULL || !strcmp (pattern, "/")) {
 		buffer[0] = '\0';
@@ -585,6 +613,9 @@ razor_set_list_package_files(struct razor_set *set, const char *name)
 	uint32_t end;
 	char buffer[512];
 
+	assert (set != NULL);
+	assert (name != NULL);
+
 	package = razor_set_get_package(set, name);
 	/* TODO: we should return the error to the caller */
 	if (!package)
@@ -609,6 +640,9 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
  	struct razor_package *p1, *p2;
 	const char *name1, *name2, *version1, *version2, *arch1, *arch2;
 	int res;
+
+	assert (set != NULL);
+	assert (upstream != NULL);
 
 	pi1 = razor_package_iterator_create(set);
 	pi2 = razor_package_iterator_create(upstream);
@@ -663,6 +697,9 @@ razor_set_create_remove_iterator(struct razor_set *set,
 	struct razor_package_query *query;
 	struct razor_package_iterator *pi;
 
+	assert (set != NULL);
+	assert (next != NULL);
+
 	query = razor_package_query_create(set);
 	razor_set_diff(next, set, add_new_package, query);
 
@@ -682,6 +719,9 @@ razor_set_create_install_iterator(struct razor_set *set,
 {
 	struct razor_package_query *query;
 	struct razor_package_iterator *pi;
+
+	assert (set != NULL);
+	assert (next != NULL);
 
 	query = razor_package_query_create(next);
 	razor_set_diff(set, next, add_new_package, query);

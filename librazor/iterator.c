@@ -20,6 +20,8 @@
 #define _GNU_SOURCE
 
 #include <string.h>
+#include <assert.h>
+
 #include "razor-internal.h"
 #include "razor.h"
 
@@ -48,6 +50,8 @@ razor_package_iterator_create(struct razor_set *set)
 {
 	struct razor_package_iterator *pi;
 
+	assert (set != NULL);
+
 	pi = zalloc(sizeof *pi);
 	pi->set = set;
 	pi->end = set->packages.data + set->packages.size;
@@ -61,6 +65,10 @@ razor_package_iterator_init_for_property(struct razor_package_iterator *pi,
 					 struct razor_set *set,
 					 struct razor_property *property)
 {
+	assert (pi != NULL);
+	assert (set != NULL);
+	assert (property != NULL);
+
 	memset(pi, 0, sizeof *pi);
 	pi->set = set;
 	pi->index = list_first(&property->packages, &set->package_pool);
@@ -72,6 +80,9 @@ razor_package_iterator_create_for_property(struct razor_set *set,
 {
 	struct list *index;
 
+	assert (set != NULL);
+	assert (property != NULL);
+
 	index = list_first(&property->packages, &set->package_pool);
 	return razor_package_iterator_create_with_index(set, index);
 }
@@ -82,6 +93,9 @@ razor_package_iterator_create_for_file(struct razor_set *set,
 {
 	struct razor_entry *entry;
 	struct list *index;
+
+	assert (set != NULL);
+	assert (filename != NULL);
 
 	entry = razor_set_find_entry(set, set->files.data, filename);
 	if (entry == NULL)
@@ -101,6 +115,8 @@ razor_package_iterator_next(struct razor_package_iterator *pi,
 	char *pool;
 	int valid;
 	struct razor_package *p, *packages;
+
+	assert (pi != NULL);
 
 	if (pi->package) {
 		p = pi->package++;
@@ -129,6 +145,8 @@ razor_package_iterator_next(struct razor_package_iterator *pi,
 RAZOR_EXPORT void
 razor_package_iterator_destroy(struct razor_package_iterator *pi)
 {
+	assert (pi != NULL);
+
 	if (pi->free_index)
 		free(pi->index);
 
@@ -140,6 +158,9 @@ razor_property_iterator_create(struct razor_set *set,
 			       struct razor_package *package)
 {
 	struct razor_property_iterator *pi;
+
+	assert (set != NULL);
+	assert (package != NULL);
 
 	pi = zalloc(sizeof *pi);
 	pi->set = set;
@@ -165,6 +186,8 @@ razor_property_iterator_next(struct razor_property_iterator *pi,
 	char *pool;
 	int valid;
 	struct razor_property *p, *properties;
+
+	assert (pi != NULL);
 
 	if (pi->property) {
 		p = pi->property++;
@@ -208,6 +231,8 @@ razor_package_query_create(struct razor_set *set)
 	struct razor_package_query *pq;
 	int count;
 
+	assert (set != NULL);
+
 	pq = zalloc(sizeof *pq);
 	pq->set = set;
 	count = set->packages.size / sizeof(struct razor_package);
@@ -222,6 +247,9 @@ razor_package_query_add_package(struct razor_package_query *pq,
 {
 	struct razor_package *packages;
 
+	assert (pq != NULL);
+	assert (p != NULL);
+
 	packages = pq->set->packages.data;
 	pq->count += pq->vector[p - packages] ^ 1;
 	pq->vector[p - packages] = 1;
@@ -233,6 +261,9 @@ razor_package_query_add_iterator(struct razor_package_query *pq,
 {
 	struct razor_package *packages, *p;
 	const char *name, *version, *arch;
+
+	assert (pq != NULL);
+	assert (pi != NULL);
 
 	packages = pq->set->packages.data;
 	while (razor_package_iterator_next(pi, &p, &name, &version, &arch)) {
@@ -248,6 +279,8 @@ razor_package_query_finish(struct razor_package_query *pq)
 	struct razor_set *set;
 	struct list *index;
 	int i, j;
+
+	assert (pq != NULL);
 
 	set = pq->set;
 	if (pq->count > 0)
