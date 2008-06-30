@@ -19,6 +19,7 @@
 
 #define _GNU_SOURCE
 
+#include <stdarg.h>
 #include <string.h>
 #include <assert.h>
 
@@ -105,14 +106,21 @@ razor_package_iterator_create_for_file(struct razor_set *set,
 	return razor_package_iterator_create_with_index(set, index);
 }
 
+/**
+ * razor_package_iterator_next:
+ * @pi: a %razor_package_iterator
+ * @package: a %razor_package
+ *
+ * Gets the next iteratr along with any vararg data.
+ * The vararg must be terminated with zero.
+ *
+ * Example: razor_package_iterator_next (pi, package, RAZOR_DETAIL_NAME, &name, 0);
+ **/
 RAZOR_EXPORT int
 razor_package_iterator_next(struct razor_package_iterator *pi,
-			    struct razor_package **package,
-			    const char **name,
-			    const char **version,
-			    const char **arch)
+			    struct razor_package **package, ...)
 {
-	char *pool;
+	va_list args;
 	int valid;
 	struct razor_package *p, *packages;
 
@@ -129,16 +137,17 @@ razor_package_iterator_next(struct razor_package_iterator *pi,
 	} else
 		valid = 0;
 
-	if (valid) {
-		pool = pi->set->string_pool.data;
-		*package = p;
-		*name = &pool[p->name];
-		*version = &pool[p->version];
-		*arch = &pool[p->arch];
-	} else {
+	if (valid == 0) {
 		*package = NULL;
+		goto out;
 	}
 
+	*package = p;
+
+	va_start(args, NULL);
+	razor_package_get_details_varg (pi->set, p, args);
+	va_end (args);
+out:
 	return valid;
 }
 
@@ -260,13 +269,12 @@ razor_package_query_add_iterator(struct razor_package_query *pq,
 				 struct razor_package_iterator *pi)
 {
 	struct razor_package *packages, *p;
-	const char *name, *version, *arch;
 
 	assert (pq != NULL);
 	assert (pi != NULL);
 
 	packages = pq->set->packages.data;
-	while (razor_package_iterator_next(pi, &p, &name, &version, &arch)) {
+	while (razor_package_iterator_next(pi, &p, 0)) {
 		pq->count += pq->vector[p - packages] ^ 1;
 		pq->vector[p - packages] = 1;
 	}

@@ -47,7 +47,7 @@ create_iterator_from_argv(struct razor_set *set, int argc, const char *argv[])
 	struct razor_package_query *query;
 	struct razor_package_iterator *iter;
 	struct razor_package *package;
-	const char *name, *version, *arch, *pattern;
+	const char *name, *pattern;
 	int i, count;
 
 	if (argc == 0)
@@ -59,8 +59,7 @@ create_iterator_from_argv(struct razor_set *set, int argc, const char *argv[])
 		iter = razor_package_iterator_create(set);
 		pattern = argv[i];
 		count = 0;
-		while (razor_package_iterator_next(iter, &package,
-						   &name, &version, &arch)) {
+		while (razor_package_iterator_next(iter, &package, RAZOR_DETAIL_NAME, &name, 0)) {
 			if (fnmatch(pattern, name, 0) != 0)
 				continue;
 
@@ -86,7 +85,9 @@ list_packages(struct razor_package_iterator *iter, uint32_t flags)
 	const char *name, *version, *arch;
 
 	while (razor_package_iterator_next(iter, &package,
-					   &name, &version, &arch)) {
+					   RAZOR_DETAIL_NAME, &name,
+					   RAZOR_DETAIL_VERSION, &version,
+					   RAZOR_DETAIL_ARCH, &arch, 0)) {
 		if (flags & LIST_PACKAGES_ONLY_NAMES)
 			printf("%s\n", name);
 		else
@@ -425,12 +426,12 @@ mark_packages_for_update(struct razor_transaction *trans,
 {
 	struct razor_package_iterator *pi;
 	struct razor_package *package;
-	const char *name, *version, *arch;
+	const char *name;
 	int matches = 0;
 
 	pi = razor_package_iterator_create(set);
 	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch)) {
+					   RAZOR_DETAIL_NAME, &name, 0)) {
 		if (pattern && fnmatch(pattern, name, 0) == 0) {
 			razor_transaction_update_package(trans, package);
 			matches++;
@@ -447,12 +448,11 @@ mark_packages_for_removal(struct razor_transaction *trans,
 {
 	struct razor_package_iterator *pi;
 	struct razor_package *package;
-	const char *name, *version, *arch;
+	const char *name;
 	int matches = 0;
 
 	pi = razor_package_iterator_create(set);
-	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch)) {
+	while (razor_package_iterator_next(pi, &package, RAZOR_DETAIL_NAME, &name, 0)) {
 		if (pattern && fnmatch(pattern, name, 0) == 0) {
 			razor_transaction_remove_package(trans, package);
 			matches++;
@@ -660,7 +660,9 @@ download_packages(struct razor_set *system, struct razor_set *next)
 	pi = razor_set_create_install_iterator(system, next);
 	errors = 0;
 	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch)) {
+					   RAZOR_DETAIL_NAME, &name,
+					   RAZOR_DETAIL_VERSION, &version,
+					   RAZOR_DETAIL_ARCH, &arch, 0)) {
 		snprintf(url, sizeof url,
 			 "%s/Packages/%s",
 			 yum_url, rpm_filename(name, version, arch));
@@ -690,7 +692,9 @@ install_packages(struct razor_set *system, struct razor_set *next)
 
 	pi = razor_set_create_install_iterator(system, next);
 	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch)) {
+					   RAZOR_DETAIL_NAME, &name,
+					   RAZOR_DETAIL_VERSION, &version,
+					   RAZOR_DETAIL_ARCH, &arch, 0)) {
 		printf("install %s-%s\n", name, version);
 
 		snprintf(file, sizeof file,
@@ -796,7 +800,9 @@ command_download(int argc, const char *argv[])
 	set = razor_set_open(rawhide_repo_filename);
 	pi = razor_package_iterator_create(set);
 	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch)) {
+					   RAZOR_DETAIL_NAME, &name,
+					   RAZOR_DETAIL_VERSION, &version,
+					   RAZOR_DETAIL_ARCH, &arch, 0)) {
 		if (pattern && fnmatch(pattern, name, 0) != 0)
 			continue;
 
@@ -837,12 +843,18 @@ command_info(int argc, const char *argv[])
 		return 1;
 	pi = razor_package_iterator_create(set);
 	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch)) {
+					   RAZOR_DETAIL_NAME, &name,
+					   RAZOR_DETAIL_VERSION, &version,
+					   RAZOR_DETAIL_ARCH, &arch, 0)) {
 		if (pattern && fnmatch(pattern, name, 0) != 0)
 			continue;
 
-		razor_package_get_details (set, package, &summary, &description,
-					   &url, &license);
+		razor_package_get_details (set, package,
+					   RAZOR_DETAIL_SUMMARY, &summary,
+					   RAZOR_DETAIL_DESCRIPTION, &description,
+					   RAZOR_DETAIL_URL, &url,
+					   RAZOR_DETAIL_LICENSE, &license,
+					   0);
 
 		printf ("Name:        %s\n", name);
 		printf ("Arch:        %s\n", arch);

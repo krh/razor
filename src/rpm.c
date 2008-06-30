@@ -303,7 +303,7 @@ add_command_line_packages(struct razor_set *set,
 {
 	struct razor_package *package;
 	struct razor_package_iterator *pi;
-	const char *name, *version, *arch;
+	const char *name;
 	int i, cmp, errors;
 
 	qsort(argv, argc, sizeof(*argv), strcmpp);
@@ -313,7 +313,7 @@ add_command_line_packages(struct razor_set *set,
 	pi = razor_package_iterator_create(set);
 
 	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch)) {
+					   RAZOR_DETAIL_NAME, &name, 0)) {
 		while (cmp = strcmp(argv[i], name), cmp < 0 && i < argc) {
 			fprintf(stderr, "error: package %s is not installed\n",
 				argv[i]);
@@ -417,8 +417,12 @@ print_package_info(struct razor_set *set, struct razor_package *package,
 {
 	const char *summary, *description, *url, *license;
 
-	razor_package_get_details(set, package, &summary, &description,
-				  &url, &license);
+	razor_package_get_details (set, package,
+				   RAZOR_DETAIL_SUMMARY, &summary,
+				   RAZOR_DETAIL_DESCRIPTION, &description,
+				   RAZOR_DETAIL_URL, &url,
+				   RAZOR_DETAIL_LICENSE, &license,
+				   0);
 
 	printf("Name:        %s\n", name);
 	printf("Arch:        %s\n", arch);
@@ -488,7 +492,9 @@ command_query(int argc, const char *argv[])
 	pi = get_query_packages(set, argc, argv);
 
 	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch)) {
+					   RAZOR_DETAIL_NAME, &name,
+					   RAZOR_DETAIL_VERSION, &version,
+					   RAZOR_DETAIL_ARCH, &arch, 0)) {
 		if (option_conflicts)
 			print_package_properties(set, package,
 						 RAZOR_PROPERTY_CONFLICTS);
@@ -540,7 +546,9 @@ command_verify(int argc, const char *argv[])
 	pi = get_query_packages(set, argc, argv);
 
 	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch)) {
+					   RAZOR_DETAIL_NAME, &name,
+					   RAZOR_DETAIL_VERSION, &version,
+					   RAZOR_DETAIL_ARCH, &arch, 0)) {
 		printf("verify %s-%s.%s - not implemented\n",
 		       name, version, arch);
 	}
@@ -570,7 +578,6 @@ command_erase(int argc, const char *argv[])
 	struct razor_package_query *query;
 	struct razor_package_iterator *pi;
 	struct razor_package *package;
-	const char *name, *version, *arch;
 
 	if (argc == 0) {
 		printf("no packages given for erase\n");
@@ -586,8 +593,7 @@ command_erase(int argc, const char *argv[])
 	add_command_line_packages(set, query, argc, argv);
 
 	pi = razor_package_query_finish(query);
-	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch))
+	while (razor_package_iterator_next(pi, &package, 0))
 		razor_transaction_remove_package(trans, package);
 	razor_package_iterator_destroy(pi);
 
@@ -617,7 +623,6 @@ command_install(int argc, const char *argv[])
 	struct razor_transaction *trans;
 	struct razor_package_iterator *pi;
 	struct razor_package *package;
-	const char *name, *version, *arch;
 
 	if (argc == 0) {
 		printf("no packages given for install\n");
@@ -630,8 +635,7 @@ command_install(int argc, const char *argv[])
 	trans = razor_transaction_create(set, upstream);
 
 	pi = razor_package_iterator_create(upstream);
-	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch))
+	while (razor_package_iterator_next(pi, &package, 0))
 		razor_transaction_install_package(trans, package);
 	razor_package_iterator_destroy(pi);
 
@@ -661,7 +665,6 @@ command_update(int argc, const char *argv[])
 	struct razor_transaction *trans;
 	struct razor_package_iterator *pi;
 	struct razor_package *package;
-	const char *name, *version, *arch;
 
 	if (argc == 0) {
 		printf("no packages given for update\n");
@@ -674,8 +677,7 @@ command_update(int argc, const char *argv[])
 	trans = razor_transaction_create(set, upstream);
 
 	pi = razor_package_iterator_create(upstream);
-	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch))
+	while (razor_package_iterator_next(pi, &package, 0))
 		razor_transaction_update_package(trans, package);
 	razor_package_iterator_destroy(pi);
 

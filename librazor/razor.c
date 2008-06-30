@@ -23,6 +23,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -387,13 +388,13 @@ razor_set_get_package(struct razor_set *set, const char *package)
 {
 	struct razor_package_iterator *pi;
 	struct razor_package *p;
-	const char *name, *version, *arch;
+	const char *name;
 
 	assert (set != NULL);
 	assert (package != NULL);
 
 	pi = razor_package_iterator_create(set);
-	while (razor_package_iterator_next(pi, &p, &name, &version, &arch)) {
+	while (razor_package_iterator_next(pi, &p, RAZOR_DETAIL_NAME, &name, 0)) {
 		if (strcmp(package, name) == 0)
 			break;
 	}
@@ -402,25 +403,94 @@ razor_set_get_package(struct razor_set *set, const char *package)
 	return p;
 }
 
-RAZOR_EXPORT void
-razor_package_get_details(struct razor_set *set,
-			  struct razor_package *package,
-			  const char **summary, const char **description,
-			  const char **url, const char **license)
+static const char *
+razor_package_get_details_type(struct razor_set *set,
+			       struct razor_package *package,
+			       enum razor_detail_type type)
 {
-	const char *pool = set->details_string_pool.data;
+	const char *pool;
+
+	switch (type) {
+	case RAZOR_DETAIL_NAME:
+		pool = set->string_pool.data;
+		return &pool[package->name];
+
+	case RAZOR_DETAIL_VERSION:
+		pool = set->string_pool.data;
+		return &pool[package->version];
+
+	case RAZOR_DETAIL_ARCH:
+		pool = set->string_pool.data;
+		return &pool[package->arch];
+
+	case RAZOR_DETAIL_SUMMARY:
+		pool = set->details_string_pool.data;
+		return &pool[package->summary];
+
+	case RAZOR_DETAIL_DESCRIPTION:
+		pool = set->details_string_pool.data;
+		return &pool[package->description];
+
+	case RAZOR_DETAIL_URL:
+		pool = set->details_string_pool.data;
+		return &pool[package->url];
+
+	case RAZOR_DETAIL_LICENSE:
+		pool = set->details_string_pool.data;
+		return &pool[package->license];
+
+	default:
+		fprintf(stderr, "type %u not found\n", type);
+		return NULL;
+	}
+}
+
+/**
+ * razor_package_get_details_varg:
+ * @set: a %razor_set
+ * @package: a %razor_package
+ * @args: a va_list of arguments to set
+ **/
+void
+razor_package_get_details_varg(struct razor_set *set,
+			       struct razor_package *package,
+			       va_list args)
+{
+	int i;
+	enum razor_detail_type type;
+	const char **data;
+
+	for (i = 0;; i += 2) {
+		type = va_arg(args, enum razor_detail_type);
+		if (type == 0)
+			break;
+		data = va_arg(args, const char **);
+		*data = razor_package_get_details_type(set, package, type);
+	}
+
+}
+
+/**
+ * razor_package_get_details:
+ * @set: a %razor_set
+ * @package: a %razor_package
+ *
+ * Gets details about a package using a varg interface
+ * The vararg must be terminated with zero.
+ *
+ * Example: razor_package_get_details (set, package, RAZOR_DETAIL_URL, &url, 0);
+ **/
+RAZOR_EXPORT void
+razor_package_get_details(struct razor_set *set, struct razor_package *package, ...)
+{
+	va_list args;
 
 	assert (set != NULL);
 	assert (package != NULL);
 
-	if (summary != NULL)
-		*summary = &pool[package->summary];
-	if (description != NULL)
-		*description = &pool[package->description];
-	if (url != NULL)
-		*url = &pool[package->url];
-	if (license != NULL)
-		*license = &pool[package->license];
+	va_start(args, NULL);
+	razor_package_get_details_varg (set, package, args);
+	va_end (args);
 }
 
 RAZOR_EXPORT const char *
@@ -647,8 +717,16 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 	pi1 = razor_package_iterator_create(set);
 	pi2 = razor_package_iterator_create(upstream);
 
-	razor_package_iterator_next(pi1, &p1, &name1, &version1, &arch1);
-	razor_package_iterator_next(pi2, &p2, &name2, &version2, &arch2);
+	razor_package_iterator_next(pi1, &p1,
+				    RAZOR_DETAIL_NAME, &name1,
+				    RAZOR_DETAIL_VERSION, &version1,
+				    RAZOR_DETAIL_ARCH, &arch1,
+				    0);
+	razor_package_iterator_next(pi2, &p2,
+				    RAZOR_DETAIL_NAME, &name2,
+				    RAZOR_DETAIL_VERSION, &version2,
+				    RAZOR_DETAIL_ARCH, &arch2,
+				    0);
 
 	while (p1 || p2) {
 		if (p1 && p2) {
@@ -668,10 +746,16 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 
 		if (p1 != NULL && res <= 0)
 			razor_package_iterator_next(pi1, &p1,
-						    &name1, &version1, &arch1);
+						    RAZOR_DETAIL_NAME, &name1,
+						    RAZOR_DETAIL_VERSION, &version1,
+						    RAZOR_DETAIL_ARCH, &arch1,
+						    0);
 		if (p2 != NULL && res >= 0)
 			razor_package_iterator_next(pi2, &p2,
-						    &name2, &version2, &arch2);
+						    RAZOR_DETAIL_NAME, &name2,
+						    RAZOR_DETAIL_VERSION, &version2,
+						    RAZOR_DETAIL_ARCH, &arch2,
+						    0);
 	}
 
 	razor_package_iterator_destroy(pi1);

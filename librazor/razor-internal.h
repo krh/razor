@@ -22,6 +22,9 @@
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdarg.h>
+
+#include "razor.h"
 
 /* GCC visibility */
 #if defined(__GNUC__) && __GNUC__ >= 4
@@ -206,6 +209,11 @@ struct razor_set *
 razor_merger_finish(struct razor_merger *merger);
 
 /* Utility functions */
+
+void
+razor_package_get_details_varg(struct razor_set *set,
+			       struct razor_package *package,
+			       va_list args);
 
 int razor_create_dir(const char *root, const char *path);
 int razor_write(int fd, const void *data, size_t size);

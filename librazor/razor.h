@@ -28,6 +28,16 @@ enum razor_repo_file_type {
 	RAZOR_REPO_FILE_FILES
 };
 
+enum razor_detail_type {
+	RAZOR_DETAIL_NAME = 1, /* 0 is the marker for the vararg */
+	RAZOR_DETAIL_VERSION,
+	RAZOR_DETAIL_ARCH,
+	RAZOR_DETAIL_SUMMARY,
+	RAZOR_DETAIL_DESCRIPTION,
+	RAZOR_DETAIL_URL,
+	RAZOR_DETAIL_LICENSE
+};
+
 enum razor_property_flags {
 	RAZOR_PROPERTY_LESS		= 1 << 0,
 	RAZOR_PROPERTY_GREATER		= 1 << 1,
@@ -84,9 +94,7 @@ struct razor_package *
 razor_set_get_package(struct razor_set *set, const char *package);
 
 void
-razor_package_get_details(struct razor_set *set, struct razor_package *package,
-			  const char **summary, const char **description,
-			  const char **url, const char **license);
+razor_package_get_details(struct razor_set *set, struct razor_package *package, ...);
 
 
 /**
@@ -136,10 +144,7 @@ razor_package_iterator_create_for_file(struct razor_set *set,
 				       const char *filename);
 
 int razor_package_iterator_next(struct razor_package_iterator *pi,
-				struct razor_package **package,
-				const char **name,
-				const char **version,
-				const char **arch);
+				struct razor_package **package, ...);
 void razor_package_iterator_destroy(struct razor_package_iterator *pi);
 
 struct razor_package_query *
