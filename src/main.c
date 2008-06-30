@@ -119,25 +119,14 @@ command_list(int argc, const char *argv[])
 	return 0;
 }
 
-static int
-list_properties(const char *package_name, uint32_t type)
+static void
+list_package_properties(struct razor_set *set,
+			struct razor_package *package, uint32_t type)
 {
-	struct razor_set *set;
-	struct razor_property *property;
-	struct razor_package *package;
 	struct razor_property_iterator *pi;
+	struct razor_property *property;
 	const char *name, *version;
 	uint32_t flags;
-
-	set = razor_set_open(repo_filename);
-	if (package_name) {
-		package = razor_set_get_package(set, package_name);
-		if (!package) {
-			fprintf(stderr, "no package named \"%s\"\n", package_name);
-			return 1;
-		}
-	} else
-		package = NULL;
 
 	pi = razor_property_iterator_create(set, package);
 	while (razor_property_iterator_next(pi, &property,
@@ -165,7 +154,22 @@ list_properties(const char *package_name, uint32_t type)
 		printf("\n");
 	}
 	razor_property_iterator_destroy(pi);
+}
 
+static int
+list_properties(int argc, const char *argv[], uint32_t type)
+{
+	struct razor_set *set;
+	struct razor_package *package;
+	struct razor_package_iterator *pi;
+	const char *name, *version, *arch;
+
+	set = razor_set_open(repo_filename);
+	pi = create_iterator_from_argv(set, argc, argv);
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch))
+		list_package_properties(set, package, type);
+	razor_package_iterator_destroy(pi);
 	razor_set_destroy(set);
 
 	return 0;
@@ -174,25 +178,25 @@ list_properties(const char *package_name, uint32_t type)
 static int
 command_list_requires(int argc, const char *argv[])
 {
-	return list_properties(argv[0], RAZOR_PROPERTY_REQUIRES);
+	return list_properties(argc, argv, RAZOR_PROPERTY_REQUIRES);
 }
 
 static int
 command_list_provides(int argc, const char *argv[])
 {
-	return list_properties(argv[0], RAZOR_PROPERTY_PROVIDES);
+	return list_properties(argc, argv, RAZOR_PROPERTY_PROVIDES);
 }
 
 static int
 command_list_obsoletes(int argc, const char *argv[])
 {
-	return list_properties(argv[0], RAZOR_PROPERTY_OBSOLETES);
+	return list_properties(argc, argv, RAZOR_PROPERTY_OBSOLETES);
 }
 
 static int
 command_list_conflicts(int argc, const char *argv[])
 {
-	return list_properties(argv[0], RAZOR_PROPERTY_CONFLICTS);
+	return list_properties(argc, argv, RAZOR_PROPERTY_CONFLICTS);
 }
 
 static int
@@ -237,6 +241,9 @@ static int
 command_list_package_files(int argc, const char *argv[])
 {
 	struct razor_set *set;
+	struct razor_package_iterator *pi;
+	struct razor_package *package;
+	const char *name, *version, *arch;
 
 	set = razor_set_open(repo_filename);
 	if (set == NULL)
@@ -244,7 +251,12 @@ command_list_package_files(int argc, const char *argv[])
 	if (razor_set_open_files(set, "system-files.repo"))
 		return 1;
 
-	razor_set_list_package_files(set, argv[0]);
+	pi = create_iterator_from_argv(set, argc, argv);
+	while (razor_package_iterator_next(pi, &package,
+					   &name, &version, &arch))
+		razor_set_list_package_files(set, package);
+	razor_package_iterator_destroy(pi);
+
 	razor_set_destroy(set);
 
 	return 0;

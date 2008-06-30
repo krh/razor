@@ -383,26 +383,6 @@ razor_versioncmp(const char *s1, const char *s2)
 	return *p1 - *p2;
 }
 
-RAZOR_EXPORT struct razor_package *
-razor_set_get_package(struct razor_set *set, const char *package)
-{
-	struct razor_package_iterator *pi;
-	struct razor_package *p;
-	const char *name;
-
-	assert (set != NULL);
-	assert (package != NULL);
-
-	pi = razor_package_iterator_create(set);
-	while (razor_package_iterator_next(pi, &p, RAZOR_DETAIL_NAME, &name, NULL)) {
-		if (strcmp(package, name) == 0)
-			break;
-	}
-	razor_package_iterator_destroy(pi);
-
-	return p;
-}
-
 static const char *
 razor_package_get_details_type(struct razor_set *set,
 			       struct razor_package *package,
@@ -676,20 +656,15 @@ list_package_files(struct razor_set *set, struct list *r,
 }
 
 RAZOR_EXPORT void
-razor_set_list_package_files(struct razor_set *set, const char *name)
+razor_set_list_package_files(struct razor_set *set,
+			     struct razor_package *package)
 {
-	struct razor_package *package;
 	struct list *r;
 	uint32_t end;
 	char buffer[512];
 
 	assert (set != NULL);
-	assert (name != NULL);
-
-	package = razor_set_get_package(set, name);
-	/* TODO: we should return the error to the caller */
-	if (!package)
-		return;
+	assert (package != NULL);
 
 	r = list_first(&package->files, &set->file_pool);
 	end = set->files.size / sizeof (struct razor_entry);

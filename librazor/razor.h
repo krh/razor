@@ -181,7 +181,8 @@ void
 razor_property_iterator_destroy(struct razor_property_iterator *pi);
 
 void razor_set_list_files(struct razor_set *set, const char *prefix);
-void razor_set_list_package_files(struct razor_set *set, const char *name);
+void razor_set_list_package_files(struct razor_set *set,
+				  struct razor_package *package);
 
 enum razor_diff_action {
 	RAZOR_DIFF_ACTION_ADD,

@@ -8,7 +8,6 @@ razor_set_write_to_fd
 razor_set_write
 razor_set_open_details
 razor_set_open_files
-razor_set_get_package
 razor_set_list_files
 razor_set_list_package_files
 razor_set_list_unsatisfied

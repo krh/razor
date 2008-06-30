@@ -512,7 +512,7 @@ command_query(int argc, const char *argv[])
 		if (option_changelog)
 			print_package_changelog(set, package);
 		if (option_list)
-			razor_set_list_package_files(set, name);
+			razor_set_list_package_files(set, package);
 
 		if (option_conflicts + option_obsoletes +
 		    option_requires + option_provides +

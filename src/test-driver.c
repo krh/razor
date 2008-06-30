@@ -285,6 +285,23 @@ start_transaction(struct test_context *ctx, const char **atts)
 	ctx->n_remove_pkgs = 0;
 }
 
+static struct razor_package *
+get_package(struct razor_set *set, const char *package)
+{
+	struct razor_package_iterator *pi;
+	struct razor_package *p;
+	const char *name, *version, *arch;
+
+	pi = razor_package_iterator_create(set);
+	while (razor_package_iterator_next(pi, &p, &name, &version, &arch)) {
+		if (strcmp(package, name) == 0)
+			break;
+	}
+	razor_package_iterator_destroy(pi);
+
+	return p;
+}
+
 static void
 end_transaction(struct test_context *ctx)
 {
@@ -293,16 +310,13 @@ end_transaction(struct test_context *ctx)
 
 	ctx->trans = razor_transaction_create(ctx->system_set, ctx->repo_set);
 	for (i = 0; i < ctx->n_install_pkgs; i++) {
-		pkg = razor_set_get_package(ctx->repo_set,
-					    ctx->install_pkgs[i]);
+		pkg = get_package(ctx->repo_set, ctx->install_pkgs[i]);
 		razor_transaction_install_package(ctx->trans, pkg);
 	}
 	for (i = 0; i < ctx->n_remove_pkgs; i++) {
-		pkg = razor_set_get_package(ctx->system_set,
-					    ctx->remove_pkgs[i]);
+		pkg = get_package(ctx->system_set, ctx->remove_pkgs[i]);
 		if (!pkg)
-			pkg = razor_set_get_package(ctx->repo_set,
-						    ctx->remove_pkgs[i]);
+			pkg = get_package(ctx->repo_set, ctx->remove_pkgs[i]);
 
 		razor_transaction_remove_package(ctx->trans, pkg);
 	}
