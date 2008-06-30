@@ -17,6 +17,8 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#define _GNU_SOURCE
+
 #include <stdlib.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -891,31 +893,27 @@ command_search(int argc, const char *argv[])
 
 	snprintf(pattern, sizeof pattern, "*%s*", argv[0]);
 
-	set = razor_set_open(repo_filename);
+	set = razor_set_open(rawhide_repo_filename);
 	if (set == NULL)
 		return 1;
-	if (razor_set_open_details(set, "system-details.repo"))
+	if (razor_set_open_details(set, "rawhide-details.repo"))
 		return 1;
 
 	pi = razor_package_iterator_create(set);
 	while (razor_package_iterator_next(pi, &package,
 					   RAZOR_DETAIL_NAME, &name,
 					   RAZOR_DETAIL_VERSION, &version,
-					   RAZOR_DETAIL_ARCH, &arch, NULL)) {
-		if (!fnmatch(pattern, name, 0))
-			printf("%s-%s.%s\n", name, version, arch);
-		else {
-			razor_package_get_details (set, package,
-						   RAZOR_DETAIL_SUMMARY, &summary,
-						   RAZOR_DETAIL_DESCRIPTION, &description,
-						   RAZOR_DETAIL_URL, &url,
-						   RAZOR_DETAIL_LICENSE, &license,
-						   NULL);
-			if (!fnmatch(pattern, url, 0) ||
-			    !fnmatch(pattern, summary, 0) ||
-			    !fnmatch(pattern, description, 0))
-				printf("%s-%s.%s\n", name, version, arch);
-		}
+					   RAZOR_DETAIL_ARCH, &arch,
+					   RAZOR_DETAIL_SUMMARY, &summary,
+					   RAZOR_DETAIL_DESCRIPTION, &description,
+					   RAZOR_DETAIL_URL, &url,
+					   RAZOR_DETAIL_LICENSE, &license,
+					   NULL)) {
+		if (!fnmatch(pattern, name, FNM_CASEFOLD) ||
+		    !fnmatch(pattern, url, FNM_CASEFOLD) ||
+		    !fnmatch(pattern, summary, FNM_CASEFOLD) ||
+		    !fnmatch(pattern, description, FNM_CASEFOLD))
+			printf("%s-%s.%s: %s\n", name, version, arch, summary);
 	}
 	razor_package_iterator_destroy(pi);
 	razor_set_destroy(set);
