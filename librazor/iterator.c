@@ -112,7 +112,7 @@ razor_package_iterator_create_for_file(struct razor_set *set,
  * @package: a %razor_package
  *
  * Gets the next iteratr along with any vararg data.
- * The vararg must be terminated with zero.
+ * The vararg must be terminated with NULL.
  *
  * Example: razor_package_iterator_next (pi, package, RAZOR_DETAIL_NAME, &name, 0);
  **/
@@ -273,7 +273,7 @@ razor_package_query_add_iterator(struct razor_package_query *pq,
 	assert (pi != NULL);
 
 	packages = pq->set->packages.data;
-	while (razor_package_iterator_next(pi, &p, 0)) {
+	while (razor_package_iterator_next(pi, &p, NULL)) {
 		pq->count += pq->vector[p - packages] ^ 1;
 		pq->vector[p - packages] = 1;
 	}

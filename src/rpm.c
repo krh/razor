@@ -313,7 +313,7 @@ add_command_line_packages(struct razor_set *set,
 	pi = razor_package_iterator_create(set);
 
 	while (razor_package_iterator_next(pi, &package,
-					   RAZOR_DETAIL_NAME, &name, 0)) {
+					   RAZOR_DETAIL_NAME, &name, NULL)) {
 		while (cmp = strcmp(argv[i], name), cmp < 0 && i < argc) {
 			fprintf(stderr, "error: package %s is not installed\n",
 				argv[i]);
@@ -422,7 +422,7 @@ print_package_info(struct razor_set *set, struct razor_package *package,
 				   RAZOR_DETAIL_DESCRIPTION, &description,
 				   RAZOR_DETAIL_URL, &url,
 				   RAZOR_DETAIL_LICENSE, &license,
-				   0);
+				   NULL);
 
 	printf("Name:        %s\n", name);
 	printf("Arch:        %s\n", arch);
@@ -494,7 +494,7 @@ command_query(int argc, const char *argv[])
 	while (razor_package_iterator_next(pi, &package,
 					   RAZOR_DETAIL_NAME, &name,
 					   RAZOR_DETAIL_VERSION, &version,
-					   RAZOR_DETAIL_ARCH, &arch, 0)) {
+					   RAZOR_DETAIL_ARCH, &arch, NULL)) {
 		if (option_conflicts)
 			print_package_properties(set, package,
 						 RAZOR_PROPERTY_CONFLICTS);
@@ -548,7 +548,7 @@ command_verify(int argc, const char *argv[])
 	while (razor_package_iterator_next(pi, &package,
 					   RAZOR_DETAIL_NAME, &name,
 					   RAZOR_DETAIL_VERSION, &version,
-					   RAZOR_DETAIL_ARCH, &arch, 0)) {
+					   RAZOR_DETAIL_ARCH, &arch, NULL)) {
 		printf("verify %s-%s.%s - not implemented\n",
 		       name, version, arch);
 	}
@@ -593,7 +593,7 @@ command_erase(int argc, const char *argv[])
 	add_command_line_packages(set, query, argc, argv);
 
 	pi = razor_package_query_finish(query);
-	while (razor_package_iterator_next(pi, &package, 0))
+	while (razor_package_iterator_next(pi, &package, NULL))
 		razor_transaction_remove_package(trans, package);
 	razor_package_iterator_destroy(pi);
 
@@ -635,7 +635,7 @@ command_install(int argc, const char *argv[])
 	trans = razor_transaction_create(set, upstream);
 
 	pi = razor_package_iterator_create(upstream);
-	while (razor_package_iterator_next(pi, &package, 0))
+	while (razor_package_iterator_next(pi, &package, NULL))
 		razor_transaction_install_package(trans, package);
 	razor_package_iterator_destroy(pi);
 
@@ -677,7 +677,7 @@ command_update(int argc, const char *argv[])
 	trans = razor_transaction_create(set, upstream);
 
 	pi = razor_package_iterator_create(upstream);
-	while (razor_package_iterator_next(pi, &package, 0))
+	while (razor_package_iterator_next(pi, &package, NULL))
 		razor_transaction_update_package(trans, package);
 	razor_package_iterator_destroy(pi);
 
