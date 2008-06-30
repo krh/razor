@@ -169,7 +169,6 @@ razor_property_iterator_create(struct razor_set *set,
 	struct razor_property_iterator *pi;
 
 	assert (set != NULL);
-	assert (package != NULL);
 
 	pi = zalloc(sizeof *pi);
 	pi->set = set;
