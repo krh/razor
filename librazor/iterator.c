@@ -112,7 +112,7 @@ razor_package_iterator_create_for_file(struct razor_set *set,
  * @package: a %razor_package
  *
  * Gets the next iteratr along with any vararg data.
- * The vararg must be terminated with NULL.
+ * The vararg must be terminated with %RAZOR_DETAIL_LAST.
  *
  * Example: razor_package_iterator_next (pi, package,
  *					 RAZOR_DETAIL_NAME, &name,

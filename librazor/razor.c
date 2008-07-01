@@ -456,7 +456,7 @@ razor_package_get_details_varg(struct razor_set *set,
  * @package: a %razor_package
  *
  * Gets details about a package using a varg interface
- * The vararg must be terminated with %NULL.
+ * The vararg must be terminated with %RAZOR_DETAIL_LAST.
  *
  * Example: razor_package_get_details (set, package,
  *				       RAZOR_DETAIL_URL, &url,
