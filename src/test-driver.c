@@ -293,7 +293,10 @@ get_package(struct razor_set *set, const char *package)
 	const char *name, *version, *arch;
 
 	pi = razor_package_iterator_create(set);
-	while (razor_package_iterator_next(pi, &p, &name, &version, &arch)) {
+	while (razor_package_iterator_next(pi, &p, RAZOR_DETAIL_NAME, &name,
+					   RAZOR_DETAIL_VERSION, &version,
+					   RAZOR_DETAIL_ARCH, &arch,
+					   RAZOR_DETAIL_LAST)) {
 		if (strcmp(package, name) == 0)
 			break;
 	}

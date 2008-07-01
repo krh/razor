@@ -318,7 +318,8 @@ remove_matching_providers(struct razor_transaction *trans,
 		razor_package_iterator_init_for_property(&pkg_iter, set, p);
 		while (razor_package_iterator_next(&pkg_iter, &pkg,
 						   RAZOR_DETAIL_NAME, &n,
-						   RAZOR_DETAIL_VERSION, &v, NULL)) {
+						   RAZOR_DETAIL_VERSION, &v,
+						   RAZOR_DETAIL_LAST)) {
 			fprintf(stderr, "removing %s-%s\n", n, v);
 			razor_transaction_remove_package(trans, pkg);
 		}
@@ -364,7 +365,8 @@ flag_matching_providers(struct razor_transaction *trans,
 		razor_package_iterator_init_for_property(&pkg_iter, set, p);
 		while (razor_package_iterator_next(&pkg_iter, &pkg,
 						   RAZOR_DETAIL_NAME, &name,
-						   RAZOR_DETAIL_VERSION, &version, NULL)) {
+						   RAZOR_DETAIL_VERSION, &version,
+						   RAZOR_DETAIL_LAST)) {
 
 			fprintf(stderr, "flagging %s-%s for providing %s matching %s %s\n",
 				name, version,
@@ -526,7 +528,8 @@ update_unsatisfied_packages(struct razor_transaction *trans)
 							 trans->system.set,
 							 sp);
 		while (razor_package_iterator_next(&pkg_iter, &pkg,
-						   RAZOR_DETAIL_NAME, &name, NULL)) {
+						   RAZOR_DETAIL_NAME, &name,
+						   RAZOR_DETAIL_LAST)) {
 			fprintf(stderr, "updating %s because %s %s %s "
 				"isn't satisfied\n",
 				name, spi.pool + sp->name,
@@ -578,7 +581,8 @@ update_conflicted_packages(struct razor_transaction *trans)
 							 sp);
 		while (razor_package_iterator_next(&pkg_iter, &pkg,
 						   RAZOR_DETAIL_NAME, &name,
-						   RAZOR_DETAIL_VERSION, &version, NULL)) {
+						   RAZOR_DETAIL_VERSION, &version,
+						   RAZOR_DETAIL_LAST)) {
 			fprintf(stderr, "updating %s %s because it "
 				"conflicts with %s\n",
 				name, version, spi.pool + sp->name);
@@ -668,7 +672,8 @@ flush_scheduled_system_updates(struct razor_transaction *trans)
 
 	while (razor_package_iterator_next(pi, &p,
 					   RAZOR_DETAIL_NAME, &name,
-					   RAZOR_DETAIL_VERSION, &version, NULL)) {
+					   RAZOR_DETAIL_VERSION, &version,
+					   RAZOR_DETAIL_LAST)) {
 		if (!(trans->system.packages[p - spkgs] & TRANS_PACKAGE_UPDATE))
 			continue;
 
@@ -705,7 +710,8 @@ flush_scheduled_upstream_updates(struct razor_transaction *trans)
 
 	while (razor_package_iterator_next(pi, &p,
 					   RAZOR_DETAIL_NAME, &name,
-					   RAZOR_DETAIL_VERSION, &version, NULL)) {
+					   RAZOR_DETAIL_VERSION, &version,
+					   RAZOR_DETAIL_LAST)) {
 		if (!(trans->upstream.packages[p - upkgs] & TRANS_PACKAGE_UPDATE))
 			continue;
 
@@ -754,7 +760,8 @@ describe_unsatisfied(struct razor_set *set, struct razor_property *rp)
 		while (razor_package_iterator_next(&pi, &pkg,
 						   RAZOR_DETAIL_NAME, &name,
 						   RAZOR_DETAIL_VERSION, &version,
-						   RAZOR_DETAIL_ARCH, &arch, NULL))
+						   RAZOR_DETAIL_ARCH, &arch,
+						   RAZOR_DETAIL_LAST))
 			fprintf(stderr, "%s is needed by %s-%s.%s\n",
 				&pool[rp->name],
 				name, version, arch);
@@ -763,7 +770,8 @@ describe_unsatisfied(struct razor_set *set, struct razor_property *rp)
 		while (razor_package_iterator_next(&pi, &pkg,
 						   RAZOR_DETAIL_NAME, &name,
 						   RAZOR_DETAIL_VERSION, &version,
-						   RAZOR_DETAIL_ARCH, &arch, NULL))
+						   RAZOR_DETAIL_ARCH, &arch,
+						   RAZOR_DETAIL_LAST))
 			fprintf(stderr, "%s %s %s is needed by %s-%s.%s\n",
 				&pool[rp->name],
 				razor_property_relation_to_string(rp),

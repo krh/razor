@@ -61,7 +61,9 @@ create_iterator_from_argv(struct razor_set *set, int argc, const char *argv[])
 		iter = razor_package_iterator_create(set);
 		pattern = argv[i];
 		count = 0;
-		while (razor_package_iterator_next(iter, &package, RAZOR_DETAIL_NAME, &name, NULL)) {
+		while (razor_package_iterator_next(iter, &package,
+						   RAZOR_DETAIL_NAME, &name,
+						   RAZOR_DETAIL_LAST)) {
 			if (fnmatch(pattern, name, 0) != 0)
 				continue;
 
@@ -89,7 +91,8 @@ list_packages(struct razor_package_iterator *iter, uint32_t flags)
 	while (razor_package_iterator_next(iter, &package,
 					   RAZOR_DETAIL_NAME, &name,
 					   RAZOR_DETAIL_VERSION, &version,
-					   RAZOR_DETAIL_ARCH, &arch, NULL)) {
+					   RAZOR_DETAIL_ARCH, &arch,
+					   RAZOR_DETAIL_LAST)) {
 		if (flags & LIST_PACKAGES_ONLY_NAMES)
 			printf("%s\n", name);
 		else
@@ -167,7 +170,10 @@ list_properties(int argc, const char *argv[], uint32_t type)
 	set = razor_set_open(repo_filename);
 	pi = create_iterator_from_argv(set, argc, argv);
 	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch))
+					   RAZOR_DETAIL_NAME, &name,
+					   RAZOR_DETAIL_VERSION, &version,
+					   RAZOR_DETAIL_ARCH, &arch,
+					   RAZOR_DETAIL_LAST))
 		list_package_properties(set, package, type);
 	razor_package_iterator_destroy(pi);
 	razor_set_destroy(set);
@@ -253,7 +259,10 @@ command_list_package_files(int argc, const char *argv[])
 
 	pi = create_iterator_from_argv(set, argc, argv);
 	while (razor_package_iterator_next(pi, &package,
-					   &name, &version, &arch))
+					   RAZOR_DETAIL_NAME, &name,
+					   RAZOR_DETAIL_VERSION, &version,
+					   RAZOR_DETAIL_ARCH, &arch,
+					   RAZOR_DETAIL_LAST))
 		razor_set_list_package_files(set, package);
 	razor_package_iterator_destroy(pi);
 
@@ -445,7 +454,8 @@ mark_packages_for_update(struct razor_transaction *trans,
 
 	pi = razor_package_iterator_create(set);
 	while (razor_package_iterator_next(pi, &package,
-					   RAZOR_DETAIL_NAME, &name, NULL)) {
+					   RAZOR_DETAIL_NAME, &name,
+					   RAZOR_DETAIL_LAST)) {
 		if (pattern && fnmatch(pattern, name, 0) == 0) {
 			razor_transaction_update_package(trans, package);
 			matches++;
@@ -466,7 +476,9 @@ mark_packages_for_removal(struct razor_transaction *trans,
 	int matches = 0;
 
 	pi = razor_package_iterator_create(set);
-	while (razor_package_iterator_next(pi, &package, RAZOR_DETAIL_NAME, &name, NULL)) {
+	while (razor_package_iterator_next(pi, &package,
+					   RAZOR_DETAIL_NAME, &name,
+					   RAZOR_DETAIL_LAST)) {
 		if (pattern && fnmatch(pattern, name, 0) == 0) {
 			razor_transaction_remove_package(trans, package);
 			matches++;
@@ -676,7 +688,8 @@ download_packages(struct razor_set *system, struct razor_set *next)
 	while (razor_package_iterator_next(pi, &package,
 					   RAZOR_DETAIL_NAME, &name,
 					   RAZOR_DETAIL_VERSION, &version,
-					   RAZOR_DETAIL_ARCH, &arch, NULL)) {
+					   RAZOR_DETAIL_ARCH, &arch,
+					   RAZOR_DETAIL_LAST)) {
 		snprintf(url, sizeof url,
 			 "%s/Packages/%s",
 			 yum_url, rpm_filename(name, version, arch));
@@ -708,7 +721,8 @@ install_packages(struct razor_set *system, struct razor_set *next)
 	while (razor_package_iterator_next(pi, &package,
 					   RAZOR_DETAIL_NAME, &name,
 					   RAZOR_DETAIL_VERSION, &version,
-					   RAZOR_DETAIL_ARCH, &arch, NULL)) {
+					   RAZOR_DETAIL_ARCH, &arch,
+					   RAZOR_DETAIL_LAST)) {
 		printf("install %s-%s\n", name, version);
 
 		snprintf(file, sizeof file,
@@ -816,7 +830,8 @@ command_download(int argc, const char *argv[])
 	while (razor_package_iterator_next(pi, &package,
 					   RAZOR_DETAIL_NAME, &name,
 					   RAZOR_DETAIL_VERSION, &version,
-					   RAZOR_DETAIL_ARCH, &arch, NULL)) {
+					   RAZOR_DETAIL_ARCH, &arch,
+					   RAZOR_DETAIL_LAST)) {
 		if (pattern && fnmatch(pattern, name, 0) != 0)
 			continue;
 
@@ -859,7 +874,8 @@ command_info(int argc, const char *argv[])
 	while (razor_package_iterator_next(pi, &package,
 					   RAZOR_DETAIL_NAME, &name,
 					   RAZOR_DETAIL_VERSION, &version,
-					   RAZOR_DETAIL_ARCH, &arch, NULL)) {
+					   RAZOR_DETAIL_ARCH, &arch,
+					   RAZOR_DETAIL_LAST)) {
 		if (pattern && fnmatch(pattern, name, 0) != 0)
 			continue;
 
@@ -868,7 +884,7 @@ command_info(int argc, const char *argv[])
 					   RAZOR_DETAIL_DESCRIPTION, &description,
 					   RAZOR_DETAIL_URL, &url,
 					   RAZOR_DETAIL_LICENSE, &license,
-					   NULL);
+					   RAZOR_DETAIL_LAST);
 
 		printf ("Name:        %s\n", name);
 		printf ("Arch:        %s\n", arch);
@@ -920,7 +936,7 @@ command_search(int argc, const char *argv[])
 					   RAZOR_DETAIL_DESCRIPTION, &description,
 					   RAZOR_DETAIL_URL, &url,
 					   RAZOR_DETAIL_LICENSE, &license,
-					   NULL)) {
+					   RAZOR_DETAIL_LAST)) {
 		if (!fnmatch(pattern, name, FNM_CASEFOLD) ||
 		    !fnmatch(pattern, url, FNM_CASEFOLD) ||
 		    !fnmatch(pattern, summary, FNM_CASEFOLD) ||

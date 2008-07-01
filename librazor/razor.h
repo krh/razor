@@ -22,13 +22,6 @@
 
 #include <stdint.h>
 
-/* GCC sentinel */
-#if defined(__GNUC__) && __GNUC__ >= 4
-#define RAZOR_SENTINEL __attribute__ ((__sentinel__(0)));
-#else
-#define RAZOR_SENTINEL
-#endif
-
 enum razor_repo_file_type {
 	RAZOR_REPO_FILE_MAIN,
 	RAZOR_REPO_FILE_DETAILS,
@@ -36,7 +29,8 @@ enum razor_repo_file_type {
 };
 
 enum razor_detail_type {
-	RAZOR_DETAIL_NAME = 1, /* NULL (0 on 32 bit) is the sentinel */
+	RAZOR_DETAIL_LAST = 0,	/* the sentinel */
+	RAZOR_DETAIL_NAME,
 	RAZOR_DETAIL_VERSION,
 	RAZOR_DETAIL_ARCH,
 	RAZOR_DETAIL_SUMMARY,
@@ -102,8 +96,7 @@ razor_set_get_package(struct razor_set *set, const char *package);
 
 void
 razor_package_get_details(struct razor_set *set,
-			  struct razor_package *package, ...)
-			  RAZOR_SENTINEL;
+			  struct razor_package *package, ...);
 
 
 /**
@@ -153,8 +146,7 @@ razor_package_iterator_create_for_file(struct razor_set *set,
 				       const char *filename);
 
 int razor_package_iterator_next(struct razor_package_iterator *pi,
-				struct razor_package **package, ...)
-				RAZOR_SENTINEL;
+				struct razor_package **package, ...);
 void razor_package_iterator_destroy(struct razor_package_iterator *pi);
 
 struct razor_package_query *

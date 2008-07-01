@@ -442,7 +442,7 @@ razor_package_get_details_varg(struct razor_set *set,
 
 	for (i = 0;; i += 2) {
 		type = va_arg(args, enum razor_detail_type);
-		if (type == 0)
+		if (type == RAZOR_DETAIL_LAST)
 			break;
 		data = va_arg(args, const char **);
 		*data = razor_package_get_details_type(set, package, type);
@@ -458,7 +458,9 @@ razor_package_get_details_varg(struct razor_set *set,
  * Gets details about a package using a varg interface
  * The vararg must be terminated with %NULL.
  *
- * Example: razor_package_get_details (set, package, RAZOR_DETAIL_URL, &url, 0);
+ * Example: razor_package_get_details (set, package,
+ *				       RAZOR_DETAIL_URL, &url,
+ *				       RAZOR_DETAIL_LAST);
  **/
 RAZOR_EXPORT void
 razor_package_get_details(struct razor_set *set, struct razor_package *package, ...)
@@ -696,12 +698,12 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 				    RAZOR_DETAIL_NAME, &name1,
 				    RAZOR_DETAIL_VERSION, &version1,
 				    RAZOR_DETAIL_ARCH, &arch1,
-				    NULL);
+				    RAZOR_DETAIL_LAST);
 	razor_package_iterator_next(pi2, &p2,
 				    RAZOR_DETAIL_NAME, &name2,
 				    RAZOR_DETAIL_VERSION, &version2,
 				    RAZOR_DETAIL_ARCH, &arch2,
-				    NULL);
+				    RAZOR_DETAIL_LAST);
 
 	while (p1 || p2) {
 		if (p1 && p2) {
@@ -724,13 +726,13 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 						    RAZOR_DETAIL_NAME, &name1,
 						    RAZOR_DETAIL_VERSION, &version1,
 						    RAZOR_DETAIL_ARCH, &arch1,
-						    NULL);
+						    RAZOR_DETAIL_LAST);
 		if (p2 != NULL && res >= 0)
 			razor_package_iterator_next(pi2, &p2,
 						    RAZOR_DETAIL_NAME, &name2,
 						    RAZOR_DETAIL_VERSION, &version2,
 						    RAZOR_DETAIL_ARCH, &arch2,
-						    NULL);
+						    RAZOR_DETAIL_LAST);
 	}
 
 	razor_package_iterator_destroy(pi1);
