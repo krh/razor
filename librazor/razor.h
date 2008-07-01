@@ -247,8 +247,38 @@ int razor_rpm_close(struct razor_rpm *rpm);
  * @title: Importer
  * @short_description: A mechanism for building #razor_set objects
  *
- * For building a razor set from external sources, like yum, rpmdb or
- * RPM files.
+ * The %razor_importer is a helper object for building a razor set
+ * from external sources, like yum metadata, the RPM database or RPM
+ * files.
+ *
+ * The importer is a stateful object; it has the notion of a current
+ * package, and the caller can provide meta data such as properties,
+ * files and similiar for the package as it becomes available.  Once a
+ * package is fully described, the next pacakge can begin.  When all
+ * packages have been described to the importer, the importer will
+ * create a new %razor_set with the specified packages.
+ *
+ * A typical use
+ * of the importer will follow this template:
+ * |[
+ * importer = razor_importer_create();
+ *
+ * while ( /<!-- -->* more packages to import *<!-- -->/; ) {
+ *   /<!-- -->* get name, version and arch of next package *<!-- -->/
+ *   razor_importer_begin_package(importer, name, version, arch);
+ *   razor_importer_add_details(importer, summary, description, url, license);
+ *
+ *   while ( /<!-- -->* more properties to add *<!-- -->/ )
+ *     razor_importer_add_property(importer, name, flags, version);
+ *
+ *   while ( /<!-- -->* [more files to add *<!-- -->/ )
+ *     razor_importer_add_file(importer, name);
+ *
+ *   razor_importer_finish_package(importer);
+ * }
+ *
+ * return razor_importer_finish(importer);
+ * ]|
  **/
 struct razor_importer;
 

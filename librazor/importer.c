@@ -23,6 +23,59 @@
 #include "razor-internal.h"
 #include "razor.h"
 
+/**
+ * razor_importer_create:
+ *
+ * Create a new %razor_importer.
+ *
+ * Returns: the new %razor_importer.
+ **/
+RAZOR_EXPORT struct razor_importer *
+razor_importer_create(void)
+{
+	struct razor_importer *importer;
+
+	importer = zalloc(sizeof *importer);
+	importer->set = razor_set_create();
+	hashtable_init(&importer->table, &importer->set->string_pool);
+	hashtable_init(&importer->details_table,
+		       &importer->set->details_string_pool);
+	hashtable_init(&importer->file_table,
+		       &importer->set->file_string_pool);
+
+	return importer;
+}
+
+/**
+ * razor_importer_destroy:
+ * @importer: the %razor_importer
+ *
+ * Destroy an importer without creating a %razor_set.  Normally,
+ * %razor_importer_finish will create a new %razor_set and destroy the
+ * importer.  If the import must be aborted without creating the set,
+ * just destroy the import using this function.
+ **/
+RAZOR_EXPORT void
+razor_importer_destroy(struct razor_importer *importer)
+{
+	/* FIXME: write this */
+}
+
+
+/**
+ * razor_importer_begin_package:
+ * @importer: the %razor_importer
+ * @name: the name of the new package
+ * @version: the version of the new package
+ * @arch: the architechture of the new package.
+ *
+ * Begin describing a new package to the importer.  This creates a new
+ * package and sets the %name, %version and %arch.  Subsequent calls
+ * to %razor_importer_add_details, %razor_importer_add_property and
+ * %razor_importer_add_file further describe this package and
+ * %razor_importer_finish_package marks the end of meta data for this
+ * package.
+ **/
 RAZOR_EXPORT void
 razor_importer_begin_package(struct razor_importer *importer,
 			     const char *name,
@@ -41,7 +94,12 @@ razor_importer_begin_package(struct razor_importer *importer,
 	array_init(&importer->properties);
 }
 
-
+/**
+ * razor_importer_finish_package:
+ * @importer: the %razor_importer
+ *
+ * Tells the importer that the current package is complete.
+ **/
 RAZOR_EXPORT void
 razor_importer_finish_package(struct razor_importer *importer)
 {
@@ -53,6 +111,16 @@ razor_importer_finish_package(struct razor_importer *importer)
 	array_release(&importer->properties);
 }
 
+/**
+ * razor_importer_add_details:
+ * @importer: the %razor_importer
+ * @summary: the package summary
+ * @description: the package description
+ * @url: the package url
+ * @license: the package license
+ *
+ * Provide additional information for the current package.
+ **/
 RAZOR_EXPORT void
 razor_importer_add_details(struct razor_importer *importer,
 			   const char *summary,
@@ -66,6 +134,19 @@ razor_importer_add_details(struct razor_importer *importer,
 	importer->package->license = hashtable_tokenize(&importer->details_table, license);
 }
 
+/**
+ * razor_importer_add_property:
+ * @importer: the %razor_importer
+ * @name: name of the property
+ * @flags: property flags
+ * @version: version of the property or %NULL
+ *
+ * Add a property for the current package.  The %flags parameter
+ * determines the type of the property and optionally the relation to
+ * the specified version and the availability constraint.  See
+ * %razor_property_flags for further information about the flag
+ * parameter.
+ **/
 RAZOR_EXPORT void
 razor_importer_add_property(struct razor_importer *importer,
 			    const char *name,
@@ -92,6 +173,13 @@ razor_importer_add_property(struct razor_importer *importer,
 	}
 }
 
+/**
+ * razor_importer_add_file:
+ * @importer: the %razor_importer
+ * @name: name of the file
+ *
+ * Add a file to the current package.
+ **/
 RAZOR_EXPORT void
 razor_importer_add_file(struct razor_importer *importer, const char *name)
 {
@@ -102,29 +190,6 @@ razor_importer_add_file(struct razor_importer *importer, const char *name)
 	e->package = importer->package -
 		(struct razor_package *) importer->set->packages.data;
 	e->name = strdup(name);
-}
-
-RAZOR_EXPORT struct razor_importer *
-razor_importer_create(void)
-{
-	struct razor_importer *importer;
-
-	importer = zalloc(sizeof *importer);
-	importer->set = razor_set_create();
-	hashtable_init(&importer->table, &importer->set->string_pool);
-	hashtable_init(&importer->details_table,
-		       &importer->set->details_string_pool);
-	hashtable_init(&importer->file_table,
-		       &importer->set->file_string_pool);
-
-	return importer;
-}
-
-/* Destroy an importer without creating the set. */
-RAZOR_EXPORT void
-razor_importer_destroy(struct razor_importer *importer)
-{
-	/* FIXME: write this */
 }
 
 static int
@@ -469,6 +534,17 @@ build_package_file_lists(struct razor_set *set, uint32_t *rmap)
 	free(pkgs);
 }
 
+/**
+ * razor_importer_finish:
+ * @importer: the %razor_importer
+ *
+ * Finish importing packages and create the package set.  This sorts
+ * and indexes all the packages, properties and files in the importer
+ * and creates a new %razor_set.  After creating the new package set,
+ * the importer is destroyed.
+ *
+ * Returns: the new %razor_set
+ **/
 RAZOR_EXPORT struct razor_set *
 razor_importer_finish(struct razor_importer *importer)
 {
