@@ -30,7 +30,8 @@ endif
 EXTRA_DIST += version.xml.in
 
 docsdir = $(datadir)/doc/razor
-dist_docs_DATA = 		\
-	DEPSOLVE.txt 		\
-	REPO.txt
+
+content_files =					\
+	package-set.xml				\
+	solver.xml
 

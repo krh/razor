@@ -59,6 +59,8 @@
 	This part presents the design documentation for razor.
       </para>
     </partintro>
+    <xi:include href="package-set.xml" />
+    <xi:include href="solver.xml" />
   </reference>
 
   <reference id="ref-core">

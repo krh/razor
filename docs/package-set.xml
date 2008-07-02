@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE book PUBLIC "-//OASIS//DTD DocBook XML V4.1.2//EN" "http://www.oasis-open.org/docbook/xml/4.1.2/docbookx.dtd">
+
+<chapter id="file-format">
+  <title>Package Set File Format</title>
+  
+  <sect2 id="file-header">
+    <title>File header</title>
+    
+    <para>
+      The repo starts with a header, containing some number of
+      sections, terminated by a section with type 0:
+    </para>
+
+    <programlisting><![CDATA[
+struct razor_set_header {
+	uint32_t magic;
+	uint32_t version;
+	struct razor_set_section sections[0];
+};
+
+struct razor_set_section {
+	uint32_t type;
+	uint32_t offset;
+	uint32_t size;
+};
+]]></programlisting>
+
+    <para>
+      razor_set_open() mmaps the repo file, and creates a struct razor_set:
+    </para>
+
+    <programlisting><![CDATA[
+struct razor_set {
+	struct array string_pool;
+ 	struct array packages;
+ 	struct array properties;
+ 	struct array files;
+	struct array package_pool;
+ 	struct array property_pool;
+ 	struct array file_pool;
+	struct razor_set_header *header;
+};
+]]></programlisting>
+
+    <para>
+      by finding the sections with those IDs and creating struct
+      array's pointing to the right places in the mmapped data. (This
+      is the only processing needed when reading in the file;
+      everything else is used exactly as-is.)
+    </para>
+
+  </sect2>
+
+  <sect2 id="sections">
+    <title>The sections</title>
+
+    <itemizedlist>
+      <listitem>
+        <para>
+          <emphasis>RAZOR_STRING_POOL</emphasis> Stores one copy of
+	  each string that appears in the repo. (At the moment, this
+	  is: package names, package versions, property names,
+	  property versions, and (basenames of) filenames.) The
+	  strings are arbitrarily-sized, 0-terminated, and not in any
+	  particular order (although the empty string always ends up
+	  being at offset 0).
+	</para>
+      </listitem>
+
+      <listitem>
+        <para>
+          <emphasis>RAZOR_PACKAGES</emphasis> Array of struct
+	  razor_package; one for each package in the set, sorted by
+	  name.
+	</para>
+      </listitem>
+
+      <listitem>
+        <para>
+          <emphasis>RAZOR_PROPERTIES</emphasis> Array of struct
+	  razor_property; one for each unique property in the set,
+	  sorted by type, then name, then relation type (eg, "&lt;" or
+	  "&gt;="), then version. (Properties with no version have
+	  relation type RAZOR_VERSION_EQUAL, and version "".)
+	</para>
+      </listitem>
+	    
+      <listitem>
+        <para>
+          <emphasis>RAZOR_FILES</emphasis> Array of struct
+	  razor_entry; one for each file owned by any package in the
+	  set. The current sort order (which is subject to change)
+	  is breadth-first, sorted by basename. So eg: /, /bin,
+	  /dev, /etc, /bin/false, /bin/true, /dev/null, /etc/passwd.
+	</para>
+      </listitem>
+
+      <listitem>
+        <para>
+          <emphasis>RAZOR_PACKAGE_POOL</emphasis> Array of struct
+	  list, with each list item containing the index of a struct
+	  razor_package in the packages section. See the discussion
+	  of lists below.
+	</para>
+      </listitem>
+
+      <listitem>
+        <para>
+          <emphasis>RAZOR_PROPERTY_POOL</emphasis> Array of struct
+	  list, with each list item containing the index of a struct
+	  razor_property in the properties section. See the
+	  discussion of lists below.
+	</para>
+      </listitem>
+
+      <listitem>
+        <para>
+          <emphasis>RAZOR_FILE_POOL</emphasis> Array of struct list,
+	  with each list item containing the index of a struct
+	  razor_entry in the files section. See the discussion of
+	  lists below.
+	</para>
+      </listitem>
+    </itemizedlist>
+  </sect2>
+
+  <sect2 id="data-types">
+    <title>Data types</title>
+
+    <para>
+      Note that the exact layout of bits involves some historical
+      accidents.  (Particularly the fact that the "name" field in most
+      structs loses its high bits to a flags field.)
+    </para>
+
+    <programlisting><![CDATA[
+struct list_head
+	uint list_ptr : 24;
+	uint flags    : 8;
+
+struct list
+	uint data  : 24;
+	uint flags : 8;
+]]></programlisting>
+
+    <para>
+      Used to store lists of package, property, or file IDs. "struct
+      list_head" stores the head of the list, which points to one or
+      more "struct list"s in the appropriate "pool" section.  ("struct
+      list" should probably be called "struct list_item".)
+    </para>
+
+    <para>
+      "list_first(&amp;head, &amp;pool)" returns a "struct list *"
+      pointing to the first element of the list (or NULL for an empty
+      list), and "list_next(list)" will return successive elements,
+      until NULL is returned. Each "list->data" contains the index of
+      a package, property, or file in the corresponding section of the
+      set.
+    </para>
+
+    <para>
+      Peeking underneath the abstraction, a list_head's "flags" is
+      0xff if the list is empty, 0x80 if it contains a single element,
+      or 0x00 if it contains more than one element. In the
+      single-element case, that element is actually stored in the
+      list_head directly rather than being stored in a pool (and so
+      list_first() just casts the list_head* to a list* and returns
+      it). For multi-element lists, list_ptr is the index in the pool
+      of the first element of this list; the list continues through
+      successive elements of the pool until one with non-zero flags is
+      reached, indicating the end of the list.
+    </para>
+
+    <programlisting><![CDATA[
+struct razor_package
+	uint name    : 24;
+	uint flags   : 8;
+	uint version : 32;
+	struct list_head properties;
+	struct list_head files;
+]]></programlisting>
+
+    <para>
+      name and version are indexes into string_pool. properties is a
+      list of all of the package's properties, and files is a list of
+      its files. flags is currently only used during razor_set
+      merging, to keep track of which set a package came from.
+    </para>
+
+    <programlisting><![CDATA[
+struct razor_property
+	uint name     : 24;
+	uint flags    : 6;
+	uint type     : 2;
+	uint relation : 32;
+	uint version  : 32;
+	struct list_head packages;
+]]></programlisting>
+
+    <para>
+      name and version are indexes into string_pool. type is an enum
+      razor_property_type (eg, RAZOR_PROPERTY_REQUIRES), and relation
+      is an enum razor_version_relation (eg,
+      RAZOR_VERSION_GREATER_OR_EQUAL). packages is a list of the
+      packages that have this property. flags is currently unused.
+    </para>
+
+    <programlisting><![CDATA[
+struct razor_entry
+	uint name  : 24;
+	uint flags : 8;
+	uint start : 32;
+	struct list_head packages;
+]]></programlisting>
+
+    <para>
+      name is an index into string_pool, giving the basename of the
+      file. start is either 0, or an index pointing to another
+      razor_entry that is the first child of this entry (for a
+      non-empty directory). (Entry 0 is always the root of the tree,
+      so no entry could have entry 0 as a child.) flags is 0x80
+      (RAZOR_ENTRY_LAST) if an entry is the last entry in its
+      directory. Otherwise it is 0.
+    </para>
+
+    <para>
+      Note that given a pointer to a struct_razor_entry (eg, from a
+      package's "files" list), there is no way to reconstruct its full
+      name without walking the entire files array up to that
+      point. Because of this and other problems (fix_file_map()), it
+      seems like razor_entry should be modified to include a pointer
+      to its parent. (Storing full paths instead of just basenames
+      would also fix this problem, but that would use much more
+      memory.)
+    </para>
+  </sect2>
+</chapter>

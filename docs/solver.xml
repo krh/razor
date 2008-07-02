@@ -1,8 +1,12 @@
-YUM vs RAZOR
-------------
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE book PUBLIC "-//OASIS//DTD DocBook XML V4.1.2//EN" "http://www.oasis-open.org/docbook/xml/4.1.2/docbookx.dtd">
 
-At a very high level, yum's depsolver does something roughly
-equivalent to:
+<chapter id="solver">
+  <title>Dependency Solver</title>
+
+  <para>
+    At a very high level, yum's depsolver does something roughly
+    equivalent to:
 
     - For each package being installed or removed
 
@@ -12,8 +16,8 @@ equivalent to:
 	    - Figure out what additional packages need to be added to
 	      or removed from the system to satisfy this property
 
-which ends up being roughly O(N^2 * M) where N is the total number of
-properties and M is the number of packages being acted on.
+    which ends up being roughly O(N^2 * M) where N is the total number of
+    properties and M is the number of packages being acted on.
 
 (I just figured that out off the top of my head, and I'm not totally
 familiar with the yum code, so it may be wrong.)
@@ -36,7 +40,7 @@ adjacent to one another in the array, allowing many dependencies to be
 satisified in essentially constant time. (Actually... we've been
 calling it constant, but it's really O(log N) for heavily-depended-on
 packages, because the more packages you have, the more variations on
-"requires foo", "requires foo = 1.1", "requires foo > 1.0", etc you're
+"requires foo", "requires foo = 1.1", "requires foo &gt; 1.0", etc you're
 going to have to scan through.)
 
 Ideally though, each iteration of the inner loop body happens in
@@ -362,3 +366,5 @@ Depsolver algorithm:
 		  of this property, because if there are any, they
 		  will cause a CONTRADICTION error when we try to
 		  re-satisfy them the next time through.)
+  </para>
+</chapter>
