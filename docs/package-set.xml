@@ -8,7 +8,7 @@
     <title>File header</title>
     
     <para>
-      The repo starts with a header, containing some number of
+      The rzdb file starts with a header, containing some number of
       sections, terminated by a section with type 0:
     </para>
 
@@ -27,7 +27,7 @@ struct razor_set_section {
 ]]></programlisting>
 
     <para>
-      razor_set_open() mmaps the repo file, and creates a struct razor_set:
+      razor_set_open() mmaps the rzdb file, and creates a struct razor_set:
     </para>
 
     <programlisting><![CDATA[
@@ -59,8 +59,8 @@ struct razor_set {
       <listitem>
         <para>
           <emphasis>RAZOR_STRING_POOL</emphasis> Stores one copy of
-	  each string that appears in the repo. (At the moment, this
-	  is: package names, package versions, property names,
+	  each string that appears in the rzdb file. (At the moment,
+	  this is: package names, package versions, property names,
 	  property versions, and (basenames of) filenames.) The
 	  strings are arbitrarily-sized, 0-terminated, and not in any
 	  particular order (although the empty string always ends up
