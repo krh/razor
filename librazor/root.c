@@ -29,11 +29,11 @@
 #include "razor.h"
 #include "razor-internal.h"
 
-static const char system_repo_filename[] = "system.repo";
-static const char system_repo_details_filename[] = "system-details.repo";
-static const char system_repo_files_filename[] = "system-files.repo";
+static const char system_repo_filename[] = "system.rzdb";
+static const char system_repo_details_filename[] = "system-details.rzdb";
+static const char system_repo_files_filename[] = "system-files.rzdb";
 
-static const char next_repo_filename[] = "system-next.repo";
+static const char next_repo_filename[] = "system-next.rzdb";
 static const char razor_root_path[] = "/var/lib/razor";
 
 struct razor_root {

@@ -51,7 +51,7 @@ Towards replacing rpm + yum (0.1):
   as a target, we can restart if needed.  Probably don't need to, can
   just do a new update.  During a sub-transaction we should keep the
   target set (i.e. the current set to be) around as a lock file
-  (system.repo.lock or so, see git) so that razor updates are
+  (system.rzdb.lock or so, see git) so that razor updates are
   prevented if the systems crashes during an update.
 
 - implement depsolving between multiple package sets by creating an
@@ -65,7 +65,7 @@ Towards replacing rpm + yum (0.1):
   and a read-write set from a r/w fs.
 
 - locking: we use advisory file locking on the system set
-  (/var/lib/razor/system.repo) to indicate a transaction is in
+  (/var/lib/razor/system.rzdb) to indicate a transaction is in
   progress.  The locking algorithm is as follows:
 
     1. obtain advisory lock on system set.  if this is already taken,
@@ -73,17 +73,17 @@ Towards replacing rpm + yum (0.1):
        we have to wait.  there's a fcntl that lets you block for the
        lock to go away.
 
-    2. if a system-next.repo file already exists an earlier razor
+    2. if a system-next.rzdb file already exists an earlier razor
        process was interrupted or crashed and we may want to clean
-       that up.  the system-next.repo file will record what the
+       that up.  the system-next.rzdb file will record what the
        previous instance was trying to do and we can just replay that
        to clean up.
 
     3. create the new package set whichever way and write it to
-       system-next.repo, then start installing/removing rpms.
+       system-next.rzdb, then start installing/removing rpms.
 
-    4. When the update is complete, rename system-next.repo to
-       system.repo and remove the advisory lock.
+    4. When the update is complete, rename system-next.rzdb to
+       system.rzdb and remove the advisory lock.
 
   we should probably introduce a new object that encapsulates this
   sequence, the filename conventions, rpm cache, e.g. struct
@@ -125,7 +125,7 @@ Package set file format items:
   string so its index is 0), or maybe just require that it's the first
   section in the file.
 
-- nail down byte-order of repo file.
+- nail down byte-order of rzdb file.
 
 - version the sections in the file, put the element size in the header
   so we can add stuff to elements in a backwards compatible way.
@@ -156,10 +156,10 @@ Misc ideas:
   way we can assign them unique IDs immediately (like tokenizing
   strings).
 
-- test suite should be easy, just keep .repo files around and test
+- test suite should be easy, just keep .rzdb files around and test
   different type of upgrades that way (obsoletes, conflicts, file
   conflicts, file/dir problems etc).  Or maybe just keep a simple file
-  format ad use a custom importer to create the .repo files.
+  format ad use a custom importer to create the .rzdb files.
 
 - overlay package sets?  mount a read-only /usr over nfs or from the
   virt-host and have a local package set overlaid over the read-only
@@ -174,14 +174,14 @@ Misc ideas:
   base.
 
 - incremental rawhide repo updates? instead of downloading 10MB zipped
-  repo every time, download a diff repo?  Should be pretty small,
+  repo every time, download a diff rzdb?  Should be pretty small,
   especially if we don't have file checksums in metadata.  Filenames
   and properties are for the most part already present, typically just
   a version bump plus maybe tweaking a couple requires.  The upstream
   repo can store multiple incremental updates in one big file and
   provide an index file that maps updates for a given date (we should
   use repo-file checksums though) to a range in the file: Download the
-  index file, search for a match for your latest rawhide.repo file,
+  index file, search for a match for your latest rawhide.rzdb file,
   download range of updates that brings it up to date.
 
 - use hash tables for dirs when importing files to avoid qsorting all

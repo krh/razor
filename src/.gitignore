@@ -3,7 +3,7 @@
 razor
 rpm
 test-driver
-*.repo
+*.rzdb
 *.xml.gz
 install
 rpms

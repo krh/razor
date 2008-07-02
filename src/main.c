@@ -33,10 +33,10 @@
 #include <errno.h>
 #include "razor.h"
 
-static const char system_repo_filename[] = "system.repo";
-static const char next_repo_filename[] = "system-next.repo";
-static const char rawhide_repo_filename[] = "rawhide.repo";
-static const char updated_repo_filename[] = "system-updated.repo";
+static const char system_repo_filename[] = "system.rzdb";
+static const char next_repo_filename[] = "system-next.rzdb";
+static const char rawhide_repo_filename[] = "rawhide.rzdb";
+static const char updated_repo_filename[] = "system-updated.rzdb";
 static const char install_root[] = "install";
 static const char *repo_filename = system_repo_filename;
 static const char *yum_url;
@@ -213,7 +213,7 @@ command_list_files(int argc, const char *argv[])
 	set = razor_set_open(repo_filename);
 	if (set == NULL)
 		return 1;
-	if (razor_set_open_files(set, "system-files.repo"))
+	if (razor_set_open_files(set, "system-files.rzdb"))
 		return 1;
 
 	razor_set_list_files(set, argv[0]);
@@ -231,7 +231,7 @@ command_list_file_packages(int argc, const char *argv[])
 	set = razor_set_open(repo_filename);
 	if (set == NULL)
 		return 1;
-	if (razor_set_open_files(set, "system-files.repo"))
+	if (razor_set_open_files(set, "system-files.rzdb"))
 		return 1;
 
 	pi = razor_package_iterator_create_for_file(set, argv[0]);
@@ -254,7 +254,7 @@ command_list_package_files(int argc, const char *argv[])
 	set = razor_set_open(repo_filename);
 	if (set == NULL)
 		return 1;
-	if (razor_set_open_files(set, "system-files.repo"))
+	if (razor_set_open_files(set, "system-files.rzdb"))
 		return 1;
 
 	pi = create_iterator_from_argv(set, argc, argv);
@@ -418,8 +418,8 @@ command_import_yum(int argc, const char *argv[])
 	if (set == NULL)
 		return 1;
 	razor_set_write(set, rawhide_repo_filename, RAZOR_REPO_FILE_MAIN);
-	razor_set_write(set, "rawhide-details.repo", RAZOR_REPO_FILE_DETAILS);
-	razor_set_write(set, "rawhide-files.repo", RAZOR_REPO_FILE_FILES);
+	razor_set_write(set, "rawhide-details.rzdb", RAZOR_REPO_FILE_DETAILS);
+	razor_set_write(set, "rawhide-files.rzdb", RAZOR_REPO_FILE_FILES);
 	razor_set_destroy(set);
 	printf("wrote %s\n", rawhide_repo_filename);
 
@@ -435,8 +435,8 @@ command_import_rpmdb(int argc, const char *argv[])
 	if (set == NULL)
 		return 1;
 	razor_set_write(set, repo_filename, RAZOR_REPO_FILE_MAIN);
-	razor_set_write(set, "system-details.repo", RAZOR_REPO_FILE_DETAILS);
-	razor_set_write(set, "system-files.repo", RAZOR_REPO_FILE_FILES);
+	razor_set_write(set, "system-details.rzdb", RAZOR_REPO_FILE_DETAILS);
+	razor_set_write(set, "system-files.rzdb", RAZOR_REPO_FILE_FILES);
 	razor_set_destroy(set);
 	printf("wrote %s\n", repo_filename);
 
@@ -522,7 +522,7 @@ command_update(int argc, const char *argv[])
 	razor_set_write(set, updated_repo_filename, RAZOR_REPO_FILE_MAIN);
 	razor_set_destroy(set);
 	razor_set_destroy(upstream);
-	printf("wrote system-updated.repo\n");
+	printf("wrote system-updated.rzdb\n");
 
 	return 0;
 }
@@ -555,7 +555,7 @@ command_remove(int argc, const char *argv[])
 	razor_set_write(set, updated_repo_filename, RAZOR_REPO_FILE_MAIN);
 	razor_set_destroy(set);
 	razor_set_destroy(upstream);
-	printf("wrote system-updated.repo\n");
+	printf("wrote system-updated.rzdb\n");
 
 	return 0;
 }
@@ -648,8 +648,8 @@ command_import_rpms(int argc, const char *argv[])
 	set = razor_importer_finish(importer);
 
 	razor_set_write(set, repo_filename, RAZOR_REPO_FILE_MAIN);
-	razor_set_write(set, "system-details.repo", RAZOR_REPO_FILE_DETAILS);
-	razor_set_write(set, "system-files.repo", RAZOR_REPO_FILE_FILES);
+	razor_set_write(set, "system-details.rzdb", RAZOR_REPO_FILE_DETAILS);
+	razor_set_write(set, "system-files.rzdb", RAZOR_REPO_FILE_FILES);
 	razor_set_destroy(set);
 	printf("wrote %s\n", repo_filename);
 
@@ -868,7 +868,7 @@ command_info(int argc, const char *argv[])
 	set = razor_set_open(repo_filename);
 	if (set == NULL)
 		return 1;
-	if (razor_set_open_details(set, "system-details.repo"))
+	if (razor_set_open_details(set, "system-details.rzdb"))
 		return 1;
 	pi = razor_package_iterator_create(set);
 	while (razor_package_iterator_next(pi, &package,
@@ -924,7 +924,8 @@ command_search(int argc, const char *argv[])
 	set = razor_set_open(rawhide_repo_filename);
 	if (set == NULL)
 		return 1;
-	if (razor_set_open_details(set, "rawhide-details.repo"))
+
+	if (razor_set_open_details(set, "rawhide-details.rzdb"))
 		return 1;
 
 	pi = razor_package_iterator_create(set);

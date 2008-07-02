@@ -12,7 +12,7 @@ __razor_packages () {
 __razor_upstream_packages () {
     local IFS=$'\n'
 
-    COMPREPLY=($(RAZOR_REPO=rawhide.repo razor list --only-names "$1*" | while read p; do echo "$p "; done))
+    COMPREPLY=($(RAZOR_REPO=rawhide.rzdb razor list --only-names "$1*" | while read p; do echo "$p "; done))
 }
 
 __razor_files() {

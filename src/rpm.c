@@ -246,7 +246,7 @@ static const struct option rpm_options[] = {
 	{ }
 };
 
-static const char system_repo_filename[] = "system.repo";
+static const char system_repo_filename[] = "system.rzdb";
 static const char *repo_filename = system_repo_filename;
 
 static void
@@ -349,7 +349,7 @@ get_query_packages(struct razor_set *set, int argc, const char *argv[])
 		exit(1);
 	}
 
-	files = "install/var/lib/razor/system-files.repo";
+	files = "install/var/lib/razor/system-files.rzdb";
 	if (option_file)
 		if (razor_set_open_files(set, files))
 			exit(1);
@@ -480,11 +480,11 @@ command_query(int argc, const char *argv[])
 		set = razor_root_open_read_only(option_root);
 
 		/* FIXME: We need to figure out how to do this right. */
-		details = "install/var/lib/razor/system-details.repo";
+		details = "install/var/lib/razor/system-details.rzdb";
 		if (option_info)
 			if (razor_set_open_details(set, details))
 				return;
-		files = "install/var/lib/razor/system-files.repo";
+		files = "install/var/lib/razor/system-files.rzdb";
 		if (option_list)
 			if (razor_set_open_files(set, files))
 				return;

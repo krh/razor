@@ -179,7 +179,7 @@ requested installations and removals.
     FIXME: what about multiple upstream repos? Having to deal with
     arbitrary numbers of razor_sets is possible, but will probably be
     messy... It might be easier to either store all upstream repo data
-    in a single .repo file, or else merge all upstream .repo files
+    in a single .rzdb file, or else merge all upstream .rzdb files
     together into a single razor_set at startup. (Or some combination
     of those.)
 
