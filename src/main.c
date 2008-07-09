@@ -37,7 +37,7 @@ static const char system_repo_filename[] = "system.rzdb";
 static const char next_repo_filename[] = "system-next.rzdb";
 static const char rawhide_repo_filename[] = "rawhide.rzdb";
 static const char updated_repo_filename[] = "system-updated.rzdb";
-static const char install_root[] = "install";
+static const char *install_root = "";
 static const char *repo_filename = system_repo_filename;
 static const char *yum_url;
 
@@ -113,7 +113,10 @@ command_list(int argc, const char *argv[])
 		i++;
 	}
 
-	set = razor_set_open(repo_filename);
+	set = razor_root_open_read_only(install_root);
+	if (set == NULL)
+		return 1;
+
 	pi = create_iterator_from_argv(set, argc - i, argv + i);
 	list_packages(pi, flags);
 	razor_package_iterator_destroy(pi);
@@ -167,7 +170,10 @@ list_properties(int argc, const char *argv[], uint32_t type)
 	struct razor_package_iterator *pi;
 	const char *name, *version, *arch;
 
-	set = razor_set_open(repo_filename);
+	set = razor_root_open_read_only(install_root);
+	if (set == NULL)
+		return 1;
+
 	pi = create_iterator_from_argv(set, argc, argv);
 	while (razor_package_iterator_next(pi, &package,
 					   RAZOR_DETAIL_NAME, &name,
@@ -210,9 +216,10 @@ command_list_files(int argc, const char *argv[])
 {
 	struct razor_set *set;
 
-	set = razor_set_open(repo_filename);
+	set = razor_root_open_read_only(install_root);
 	if (set == NULL)
 		return 1;
+
 	if (razor_set_open_files(set, "system-files.rzdb"))
 		return 1;
 
@@ -228,10 +235,8 @@ command_list_file_packages(int argc, const char *argv[])
 	struct razor_set *set;
 	struct razor_package_iterator *pi;
 
-	set = razor_set_open(repo_filename);
+	set = razor_root_open_read_only(install_root);
 	if (set == NULL)
-		return 1;
-	if (razor_set_open_files(set, "system-files.rzdb"))
 		return 1;
 
 	pi = razor_package_iterator_create_for_file(set, argv[0]);
@@ -251,10 +256,8 @@ command_list_package_files(int argc, const char *argv[])
 	struct razor_package *package;
 	const char *name, *version, *arch;
 
-	set = razor_set_open(repo_filename);
+	set = razor_root_open_read_only(install_root);
 	if (set == NULL)
-		return 1;
-	if (razor_set_open_files(set, "system-files.rzdb"))
 		return 1;
 
 	pi = create_iterator_from_argv(set, argc, argv);
@@ -286,7 +289,7 @@ list_property_packages(const char *ref_name,
 	if (ref_name == NULL)
 		return 0;
 
-	set = razor_set_open(repo_filename);
+	set = razor_root_open_read_only(install_root);
 	if (set == NULL)
 		return 1;
 
@@ -309,6 +312,8 @@ list_property_packages(const char *ref_name,
 		razor_package_iterator_destroy(pkg_iter);
 	}
 	razor_property_iterator_destroy(prop_iter);
+
+	razor_set_destroy(set);
 
 	return 0;
 }
@@ -430,17 +435,19 @@ static int
 command_import_rpmdb(int argc, const char *argv[])
 {
 	struct razor_set *set;
+	struct razor_root *root;
+
+	root = razor_root_open(install_root);
+	if (root == NULL)
+		return 1;
 
 	set = razor_set_create_from_rpmdb();
 	if (set == NULL)
 		return 1;
-	razor_set_write(set, repo_filename, RAZOR_REPO_FILE_MAIN);
-	razor_set_write(set, "system-details.rzdb", RAZOR_REPO_FILE_DETAILS);
-	razor_set_write(set, "system-files.rzdb", RAZOR_REPO_FILE_FILES);
-	razor_set_destroy(set);
-	printf("wrote %s\n", repo_filename);
 
-	return 0;
+	razor_root_update(root, set);
+
+	return razor_root_commit(root);
 }
 
 static int
@@ -496,10 +503,8 @@ command_update(int argc, const char *argv[])
 	struct razor_transaction *trans;
 	int i, errors;
 
-	set = razor_set_open(repo_filename);
-	if (set == NULL ||
-	    razor_set_open_details(set, "system-details.rzdb") ||
-	    razor_set_open_files(set, "system-files.rzdb"))
+	set = razor_root_open_read_only(install_root);
+	if (set == NULL)
 		return 1;
 
 	upstream = razor_set_open(rawhide_repo_filename);
@@ -541,7 +546,7 @@ command_remove(int argc, const char *argv[])
 	struct razor_transaction *trans;
 	int i, errors;
 
-	set = razor_set_open(repo_filename);
+	set = razor_root_open_read_only(install_root);
 	if (set == NULL)
 		return 1;
 
@@ -586,7 +591,7 @@ command_diff(int argc, const char *argv[])
 {
 	struct razor_set *set, *updated;
 
-	set = razor_set_open(repo_filename);
+	set = razor_root_open_read_only(install_root);
 	updated = razor_set_open(updated_repo_filename);
 	if (set == NULL || updated == NULL)
 		return 1;
@@ -896,11 +901,10 @@ command_info(int argc, const char *argv[])
 	const char *pattern = argv[0], *name, *version, *arch;
 	const char *summary, *description, *url, *license;
 
-	set = razor_set_open(repo_filename);
+	set = razor_root_open_read_only(install_root);
 	if (set == NULL)
 		return 1;
-	if (razor_set_open_details(set, "system-details.rzdb"))
-		return 1;
+
 	pi = razor_package_iterator_create(set);
 	while (razor_package_iterator_next(pi, &package,
 					   RAZOR_DETAIL_NAME, &name,
@@ -1025,12 +1029,16 @@ usage(void)
 int
 main(int argc, const char *argv[])
 {
-	char *repo;
+	char *repo, *root;
 	int i;
 
 	repo = getenv("RAZOR_REPO");
 	if (repo != NULL)
 		repo_filename = repo;
+
+	root = getenv("RAZOR_ROOT");
+	if (root != NULL)
+		install_root = root;
 
 	yum_url = getenv("YUM_URL");
 	if (yum_url == NULL)

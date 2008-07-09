@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <unistd.h>
@@ -40,6 +41,7 @@ struct razor_root {
 	struct razor_set *system;
 	struct razor_set *next;
 	int fd;
+	char root[PATH_MAX];
 	char path[PATH_MAX];
 	char new_path[PATH_MAX];
 };
@@ -53,7 +55,9 @@ razor_root_create(const char *root)
 
 	assert (root != NULL);
 
-	if (stat(root, &buf) < 0) {
+	if (root[0] == '\0') {
+		/* root is file system root */
+	} else if (stat(root, &buf) < 0) {
 		if (mkdir(root, 0777) < 0) {
 			fprintf(stderr,
 				"could not create install root \"%s\"\n",
@@ -136,6 +140,10 @@ razor_root_open(const char *root)
 	snprintf(files_path, sizeof files_path,
 		 "%s%s/%s", root, razor_root_path, system_repo_files_filename);
 
+	/* FIXME: We store the root path to make the hack in
+	 * razor_root_update() work.  Need to get rid of this. */
+	strcpy(image->root, root);
+
 	image->system = razor_set_open(image->path);
 	if (image->system == NULL ||
 	    razor_set_open_details(image->system, details_path) ||
@@ -152,14 +160,30 @@ razor_root_open(const char *root)
 RAZOR_EXPORT struct razor_set *
 razor_root_open_read_only(const char *root)
 {
-	char path[PATH_MAX];
+	char path[PATH_MAX], details_path[PATH_MAX], files_path[PATH_MAX];
+	struct razor_set *set;
 
 	assert (root != NULL);
 
 	snprintf(path, sizeof path, "%s%s/%s",
 		 root, razor_root_path, system_repo_filename);
+	snprintf(details_path, sizeof details_path,
+		 "%s%s/%s", root, razor_root_path, system_repo_details_filename);
+	snprintf(files_path, sizeof files_path,
+		 "%s%s/%s", root, razor_root_path, system_repo_files_filename);
 
-	return razor_set_open(path);
+
+	set = razor_set_open(path);
+	if (set == NULL)
+		return NULL;
+
+	if (razor_set_open_details(set, details_path) ||
+	    razor_set_open_files(set, files_path)) {
+		razor_set_destroy(set);
+		return NULL;
+	}
+
+	return set;
 }
 
 RAZOR_EXPORT struct razor_set *
@@ -186,11 +210,25 @@ razor_root_close(struct razor_root *root)
 RAZOR_EXPORT void
 razor_root_update(struct razor_root *root, struct razor_set *next)
 {
+	char path[PATH_MAX];
+
 	assert (root != NULL);
 	assert (next != NULL);
 
 	razor_set_write_to_fd(next, root->fd, RAZOR_REPO_FILE_MAIN);
 	root->next = next;
+
+	/* FIXME: This is a pretty bad hack that just overwrites the
+	 * system details and files rzdb files before the transaction
+	 * succeeds.  We need to fix this by merging the separate
+	 * details and files rzdb files back into the main rzdb
+	 * file. */
+	snprintf(path, sizeof path,
+		 "%s%s/%s", root->root, razor_root_path, system_repo_details_filename);
+	razor_set_write(next, path, RAZOR_REPO_FILE_DETAILS);
+	snprintf(path, sizeof path,
+		 "%s%s/%s", root->root, razor_root_path, system_repo_files_filename);
+	razor_set_write(next, path, RAZOR_REPO_FILE_FILES);
 
 	/* Sync the new repo file so the new package set is on disk
 	 * before we start upgrading. */
