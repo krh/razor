@@ -739,60 +739,96 @@ razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 	razor_package_iterator_destroy(pi2);
 }
 
+struct install_action {
+	enum razor_install_action action;
+	struct razor_package *package;
+};
+
+struct razor_install_iterator {
+	struct razor_set *set;
+	struct razor_set *next;
+	struct array actions;
+	struct install_action *a, *end;
+};
+
 static void
-add_new_package(enum razor_diff_action action,
-		struct razor_package *package,
-		const char *name,
-		const char *version,
-		const char *arch,
-		void *data)
+add_action(enum razor_diff_action action,
+	   struct razor_package *package,
+	   const char *name,
+	   const char *version,
+	   const char *arch,
+	   void *data)
 {
-	if (action == RAZOR_DIFF_ACTION_ADD)
-		razor_package_query_add_package(data, package);
+	struct razor_install_iterator *ii = data;
+	struct install_action *a;
+
+	a = array_add(&ii->actions, sizeof *a);
+	a->package = package;
+
+	switch (action) {
+	case RAZOR_DIFF_ACTION_ADD:
+		a->action = RAZOR_INSTALL_ACTION_ADD;
+		break;
+	case RAZOR_DIFF_ACTION_REMOVE:
+		a->action = RAZOR_INSTALL_ACTION_REMOVE;
+		break;
+	}
 }
 
-RAZOR_EXPORT struct razor_package_iterator *
-razor_set_create_remove_iterator(struct razor_set *set,
-				 struct razor_set *next)
-{
-	struct razor_package_query *query;
-	struct razor_package_iterator *pi;
-
-	assert (set != NULL);
-	assert (next != NULL);
-
-	query = razor_package_query_create(set);
-	razor_set_diff(next, set, add_new_package, query);
-
-	pi = razor_package_query_finish(query);
-
-	/* FIXME: We need to figure out the right install order here,
-	 * so the post and pre scripts can run. */
-
-	/* sort */
-
-	return pi;
-}
-
-RAZOR_EXPORT struct razor_package_iterator *
+RAZOR_EXPORT struct razor_install_iterator *
 razor_set_create_install_iterator(struct razor_set *set,
 				  struct razor_set *next)
 {
-	struct razor_package_query *query;
-	struct razor_package_iterator *pi;
+	struct razor_install_iterator *ii;
 
 	assert (set != NULL);
 	assert (next != NULL);
 
-	query = razor_package_query_create(next);
-	razor_set_diff(set, next, add_new_package, query);
+	ii = zalloc(sizeof *ii);
+	ii->set = set;
+	ii->next = next;
+	
+	razor_set_diff(set, next, add_action, ii);
 
-	pi = razor_package_query_finish(query);
+	ii->a = ii->actions.data;
+	ii->end = ii->actions.data + ii->actions.size;
 
 	/* FIXME: We need to figure out the right install order here,
 	 * so the post and pre scripts can run. */
 
-	/* sort */
+	return ii;
+}
 
-	return pi;
+RAZOR_EXPORT int
+razor_install_iterator_next(struct razor_install_iterator *ii,
+			    struct razor_set **set,
+			    struct razor_package **package,
+			    enum razor_install_action *action,
+			    int *count)
+{
+	if (ii->a == ii->end)
+		return 0;
+
+	switch (ii->a->action) {
+	case RAZOR_INSTALL_ACTION_ADD:
+		*set = ii->next;
+		break;
+	case RAZOR_INSTALL_ACTION_REMOVE:
+		*set = ii->set;
+		break;
+	}
+
+	*package = ii->a->package;
+	*action = ii->a->action;
+	*count = 0;
+	ii->a++;
+
+	return 1;
+}
+
+RAZOR_EXPORT void
+razor_install_iterator_destroy(struct razor_install_iterator *ii)
+{
+	array_release(&ii->actions);
+	free(ii);
 }

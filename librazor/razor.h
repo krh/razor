@@ -191,12 +191,25 @@ typedef void (*razor_diff_callback_t)(enum razor_diff_action action,
 void
 razor_set_diff(struct razor_set *set, struct razor_set *upstream,
 	       razor_diff_callback_t callback, void *data);
-struct razor_package_iterator *
-razor_set_create_remove_iterator(struct razor_set *set,
-				 struct razor_set *next);
-struct razor_package_iterator *
+
+struct razor_install_iterator;
+
+enum razor_install_action {
+	RAZOR_INSTALL_ACTION_ADD,
+	RAZOR_INSTALL_ACTION_REMOVE
+};
+
+struct razor_install_iterator *
 razor_set_create_install_iterator(struct razor_set *set,
 				  struct razor_set *next);
+
+int razor_install_iterator_next(struct razor_install_iterator *ii,
+				struct razor_set **set,
+				struct razor_package **package,
+				enum razor_install_action *action,
+				int *count);
+
+void razor_install_iterator_destroy(struct razor_install_iterator *ii);
 
 /**
  * SECTION:transaction

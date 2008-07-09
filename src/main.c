@@ -684,19 +684,26 @@ rpm_filename(const char *name, const char *version, const char *arch)
 static int
 download_packages(struct razor_set *system, struct razor_set *next)
 {
-	struct razor_package_iterator *pi;
+	struct razor_install_iterator *ii;
 	struct razor_package *package;
+	struct razor_set *set;
+	enum razor_install_action action;
 	const char *name, *version, *arch;
 	char file[PATH_MAX], url[256];
-	int errors;
- 
-	pi = razor_set_create_install_iterator(system, next);
-	errors = 0;
-	while (razor_package_iterator_next(pi, &package,
-					   RAZOR_DETAIL_NAME, &name,
-					   RAZOR_DETAIL_VERSION, &version,
-					   RAZOR_DETAIL_ARCH, &arch,
-					   RAZOR_DETAIL_LAST)) {
+	int errors = 0, count;
+
+	ii = razor_set_create_install_iterator(system, next);
+	while (razor_install_iterator_next(ii, &set, &package,
+					   &action, &count)) {
+		if (action == RAZOR_INSTALL_ACTION_REMOVE)
+			continue;
+
+		razor_package_get_details(set, package,
+					  RAZOR_DETAIL_NAME, &name,
+					  RAZOR_DETAIL_VERSION, &version,
+					  RAZOR_DETAIL_ARCH, &arch,
+					  RAZOR_DETAIL_LAST);
+		
 		snprintf(url, sizeof url,
 			 "%s/Packages/%s",
 			 yum_url, rpm_filename(name, version, arch));
@@ -705,7 +712,7 @@ download_packages(struct razor_set *system, struct razor_set *next)
 		if (download_if_missing(url, file) < 0)
 			errors++;
 	}
-	razor_package_iterator_destroy(pi);
+	razor_install_iterator_destroy(ii);
 
 	if (errors > 0) {
 		fprintf(stderr, "failed to download %d packages\n", errors);
@@ -718,18 +725,27 @@ download_packages(struct razor_set *system, struct razor_set *next)
 static int
 install_packages(struct razor_set *system, struct razor_set *next)
 {
-	struct razor_package_iterator *pi;
+	struct razor_install_iterator *ii;
 	struct razor_package *package;
+	struct razor_set *set;
+	enum razor_install_action action;
 	struct razor_rpm *rpm;
 	const char *name, *version, *arch;
 	char file[PATH_MAX];
+	int count;
 
-	pi = razor_set_create_install_iterator(system, next);
-	while (razor_package_iterator_next(pi, &package,
-					   RAZOR_DETAIL_NAME, &name,
-					   RAZOR_DETAIL_VERSION, &version,
-					   RAZOR_DETAIL_ARCH, &arch,
-					   RAZOR_DETAIL_LAST)) {
+	ii = razor_set_create_install_iterator(system, next);
+	while (razor_install_iterator_next(ii, &set, &package,
+					   &action, &count)) {
+		if (action == RAZOR_INSTALL_ACTION_REMOVE)
+			continue;
+
+		razor_package_get_details(set, package,
+					  RAZOR_DETAIL_NAME, &name,
+					  RAZOR_DETAIL_VERSION, &version,
+					  RAZOR_DETAIL_ARCH, &arch,
+					  RAZOR_DETAIL_LAST);
+
 		printf("install %s-%s\n", name, version);
 
 		snprintf(file, sizeof file,
@@ -746,7 +762,7 @@ install_packages(struct razor_set *system, struct razor_set *next)
 		}
 		razor_rpm_close(rpm);
 	}
-	razor_package_iterator_destroy(pi);
+	razor_install_iterator_destroy(ii);
 
 	return 0;
 }
