@@ -261,8 +261,8 @@ merge_one_directory(struct razor_merger *merger, struct merge_directory *md)
 	set2 = merger->source2.set;
 	map1 = merger->source1.file_map;
 	map2 = merger->source2.file_map;
-	pool1 = set1->string_pool.data;
-	pool2 = set2->string_pool.data;
+	pool1 = set1->file_string_pool.data;
+	pool2 = set2->file_string_pool.data;
 	root1 = (struct razor_entry *) set1->files.data;
 	root2 = (struct razor_entry *) set2->files.data;
 
