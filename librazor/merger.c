@@ -284,7 +284,7 @@ merge_one_directory(struct razor_merger *merger, struct merge_directory *md)
 			continue;
 		}
 		if (e1 && !map1[e1 - root1] &&
-		    e2 && !map1[e2 - root2]) {
+		    e2 && !map2[e2 - root2]) {
 			if ((e1++)->flags & RAZOR_ENTRY_LAST)
 				e1 = NULL;
 			if ((e2++)->flags & RAZOR_ENTRY_LAST)
