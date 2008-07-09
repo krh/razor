@@ -497,8 +497,15 @@ command_update(int argc, const char *argv[])
 	int i, errors;
 
 	set = razor_set_open(repo_filename);
+	if (set == NULL ||
+	    razor_set_open_details(set, "system-details.rzdb") ||
+	    razor_set_open_files(set, "system-files.rzdb"))
+		return 1;
+
 	upstream = razor_set_open(rawhide_repo_filename);
-	if (set == NULL || upstream == NULL)
+	if (upstream == NULL ||
+	    razor_set_open_details(upstream, "rawhide-details.rzdb") ||
+	    razor_set_open_files(upstream, "rawhide-files.rzdb"))
 		return 1;
 
 	trans = razor_transaction_create(set, upstream);
@@ -763,6 +770,14 @@ command_install(int argc, const char *argv[])
 
 	system = razor_root_get_system_set(root);
 	upstream = razor_set_open(rawhide_repo_filename);
+	if (upstream == NULL ||
+	    razor_set_open_details(upstream, "rawhide-details.rzdb") ||
+	    razor_set_open_files(upstream, "rawhide-files.rzdb")) {
+			fprintf(stderr, "couldn't open rawhide repo\n");
+			razor_root_close(root);
+			return 1;
+	}		
+
 	trans = razor_transaction_create(system, upstream);
 
 	for (; i < argc; i++) {

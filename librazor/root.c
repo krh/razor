@@ -103,6 +103,7 @@ RAZOR_EXPORT struct razor_root *
 razor_root_open(const char *root)
 {
 	struct razor_root *image;
+	char details_path[PATH_MAX], files_path[PATH_MAX];
 
 	assert (root != NULL);
 
@@ -130,8 +131,15 @@ razor_root_open(const char *root)
 
 	snprintf(image->path, sizeof image->path,
 		 "%s%s/%s", root, razor_root_path, system_repo_filename);
+	snprintf(details_path, sizeof details_path,
+		 "%s%s/%s", root, razor_root_path, system_repo_details_filename);
+	snprintf(files_path, sizeof files_path,
+		 "%s%s/%s", root, razor_root_path, system_repo_files_filename);
+
 	image->system = razor_set_open(image->path);
-	if (image->system == NULL) {
+	if (image->system == NULL ||
+	    razor_set_open_details(image->system, details_path) ||
+	    razor_set_open_files(image->system, files_path)) {
 		unlink(image->new_path);
 		close(image->fd);
 		free(image);
