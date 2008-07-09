@@ -49,7 +49,12 @@ zalloc(size_t size)
 	return p;
 }
 
-struct razor_set_section razor_sections[] = {
+struct razor_set_section_index {
+	const char *name;
+	uint32_t offset;
+};
+
+struct razor_set_section_index razor_sections[] = {
 	{ RAZOR_STRING_POOL,	offsetof(struct razor_set, string_pool) },
 	{ RAZOR_PACKAGES,	offsetof(struct razor_set, packages) },
 	{ RAZOR_PROPERTIES,	offsetof(struct razor_set, properties) },
@@ -57,13 +62,13 @@ struct razor_set_section razor_sections[] = {
 	{ RAZOR_PROPERTY_POOL,	offsetof(struct razor_set, property_pool) },
 };
 
-struct razor_set_section razor_files_sections[] = {
+struct razor_set_section_index razor_files_sections[] = {
 	{ RAZOR_FILES,			offsetof(struct razor_set, files) },
 	{ RAZOR_FILE_POOL,		offsetof(struct razor_set, file_pool) },
 	{ RAZOR_FILE_STRING_POOL,	offsetof(struct razor_set, file_string_pool) },
 };
 
-struct razor_set_section razor_details_sections[] = {
+struct razor_set_section_index razor_details_sections[] = {
 	{ RAZOR_DETAILS_STRING_POOL,	offsetof(struct razor_set, details_string_pool) },
 };
 
@@ -87,120 +92,95 @@ razor_set_create(void)
 	return set;
 }
 
-RAZOR_EXPORT struct razor_set *
-razor_set_open(const char *filename)
+static int
+razor_set_bind_sections(struct razor_set *set,
+			struct razor_set_header **header,
+			size_t *header_size,
+			struct razor_set_section_index section_index[],
+			int section_index_size,
+			const char *filename)
 {
-	struct razor_set *set;
-	struct razor_set_section *s;
+	struct razor_set_section *s, *sections;
 	struct stat stat;
 	struct array *array;
-	int fd;
+	const char *pool;
+	int fd, i;
 
-	set = zalloc(sizeof *set);
 	fd = open(filename, O_RDONLY);
 	if (fstat(fd, &stat) < 0)
-		return NULL;
-	set->header = mmap(NULL, stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-	if (set->header == MAP_FAILED) {
-		free(set);
-		return NULL;
-	}
+		return -1;
+	*header = mmap(NULL, stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+	if (*header == MAP_FAILED)
+		return -1;
+	*header_size = stat.st_size;
 
-	for (s = set->header->sections; ~s->type; s++) {
-		if (s->type >= ARRAY_SIZE(razor_sections))
+	sections = (void *) *header + sizeof **header;
+	pool = (void *) sections + (*header)->num_sections * sizeof *sections;
+
+	for (i = 0; i < (*header)->num_sections; i++) {
+		int j;
+		s = sections + i;
+		for (j = 0; j < section_index_size; j++)
+			if (!strcmp(section_index[j].name,
+				    &pool[s->name]))
+				break;
+		if (j == section_index_size)
 			continue;
-		if (s->type != razor_sections[s->type].type)
-			continue;
-		array = (void *) set + razor_sections[s->type].offset;
-		array->data = (void *) set->header + s->offset;
+		array = (void *) set + section_index[j].offset;
+		array->data = (void *) *header + s->offset;
 		array->size = s->size;
 		array->alloc = s->size;
 	}
 	close(fd);
 
+	return 0;
+}
+
+RAZOR_EXPORT struct razor_set *
+razor_set_open(const char *filename)
+{
+	struct razor_set *set;
+
+	set = zalloc(sizeof *set);
+	if (razor_set_bind_sections(set, &set->header, &set->header_size,
+				    razor_sections, ARRAY_SIZE(razor_sections),
+				    filename)){
+		free(set);
+		return NULL;
+	}
 	return set;
 }
 
 RAZOR_EXPORT int
 razor_set_open_details(struct razor_set *set, const char *filename)
 {
-	struct razor_set_section *s;
-	struct stat stat;
-	struct array *array;
-	int fd;
-
-	assert (set != NULL);
-	assert (filename != NULL);
-
-	fd = open(filename, O_RDONLY);
-	if (fstat(fd, &stat) < 0)
-		return -1;
-	set->details_header = mmap(NULL, stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-	if (set->details_header == MAP_FAILED)
-		return -1;
-
-	for (s = set->details_header->sections; ~s->type; s++) {
-		if (s->type >= ARRAY_SIZE(razor_details_sections))
-			continue;
-		if (s->type != razor_details_sections[s->type].type)
-			continue;
-		array = (void *) set + razor_details_sections[s->type].offset;
-		array->data = (void *) set->details_header + s->offset;
-		array->size = s->size;
-		array->alloc = s->size;
-	}
-	close(fd);
-
-	return 0;
+	return razor_set_bind_sections(set, &set->details_header,
+				       &set->details_header_size,
+				       razor_details_sections,
+				       ARRAY_SIZE(razor_details_sections),
+				       filename);
 }
 
 RAZOR_EXPORT int
 razor_set_open_files(struct razor_set *set, const char *filename)
 {
-	struct razor_set_section *s;
-	struct stat stat;
-	struct array *array;
-	int fd;
-
-	assert (set != NULL);
-	assert (filename != NULL);
-
-	fd = open(filename, O_RDONLY);
-	if (fstat(fd, &stat) < 0)
-		return -1;
-	set->files_header = mmap(NULL, stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-	if (set->files_header == MAP_FAILED)
-		return -1;
-
-	for (s = set->files_header->sections; ~s->type; s++) {
-		if (s->type >= ARRAY_SIZE(razor_files_sections))
-			continue;
-		if (s->type != razor_files_sections[s->type].type)
-			continue;
-		array = (void *) set + razor_files_sections[s->type].offset;
-		array->data = (void *) set->files_header + s->offset;
-		array->size = s->size;
-		array->alloc = s->size;
-	}
-	close(fd);
-
-	return 0;
+	return razor_set_bind_sections(set, &set->files_header,
+				       &set->files_header_size,
+				       razor_files_sections,
+				       ARRAY_SIZE(razor_files_sections),
+				       filename);
 }
 
 RAZOR_EXPORT void
 razor_set_destroy(struct razor_set *set)
 {
-	unsigned int size;
 	struct array *a;
 	int i;
 
 	assert (set != NULL);
 
 	if (set->header) {
-		for (i = 0; set->header->sections[i].type; i++)
-			;
-		size = set->header->sections[i].type;
-		munmap(set->header, size);
+		munmap(set->header, set->header_size);
 	} else {
 		for (i = 0; i < ARRAY_SIZE(razor_sections); i++) {
 			a = (void *) set + razor_sections[i].offset;
@@ -209,10 +189,7 @@ razor_set_destroy(struct razor_set *set)
 	}
 
 	if (set->details_header) {
-		for (i = 0; set->details_header->sections[i].type; i++)
-			;
-		size = set->details_header->sections[i].type;
-		munmap(set->details_header, size);
+		munmap(set->details_header, set->details_header_size);
 	} else {
 		for (i = 0; i < ARRAY_SIZE(razor_details_sections); i++) {
 			a = (void *) set + razor_details_sections[i].offset;
@@ -221,10 +198,7 @@ razor_set_destroy(struct razor_set *set)
 	}
 
 	if (set->files_header) {
-		for (i = 0; set->files_header->sections[i].type; i++)
-			;
-		size = set->files_header->sections[i].type;
-		munmap(set->files_header, size);
+		munmap(set->files_header, set->files_header_size);
 	} else {
 		for (i = 0; i < ARRAY_SIZE(razor_files_sections); i++) {
 			a = (void *) set + razor_files_sections[i].offset;
@@ -236,44 +210,49 @@ razor_set_destroy(struct razor_set *set)
 }
 
 static int
-razor_set_write_sections_to_fd(struct razor_set *set, int fd, int magic,
-			       struct razor_set_section *sections,
+razor_set_write_sections_to_fd(struct razor_set *set, int fd,
+			       struct razor_set_section_index *sections,
 			       size_t array_size)
 {
-	char data[4096];
-	struct razor_set_header *header = (struct razor_set_header *) data;
-	struct array *a;
+	struct razor_set_header header;
+	struct razor_set_section *out_sections =
+		malloc(array_size * sizeof *out_sections);
+	struct hashtable table;
+	struct array *a, pool;
 	uint32_t offset;
 	int i;
 
-	memset(data, 0, sizeof data);
-	header->magic = magic;
-	header->version = RAZOR_VERSION;
-	offset = sizeof data;
+	header.magic = RAZOR_MAGIC;
+	header.version = RAZOR_VERSION;
+	header.num_sections = array_size;
+	offset = sizeof header + array_size * sizeof *out_sections;
+
+	array_init(&pool);
+	hashtable_init(&table, &pool);
+
+	for (i = 0; i < array_size; i++)
+		out_sections[i].name =
+			hashtable_tokenize(&table, sections[i].name);
+
+	offset += pool.size;
 
 	for (i = 0; i < array_size; i++) {
-		if (sections[i].type != i)
-			continue;
 		a = (void *) set + sections[i].offset;
-		header->sections[i].type = i;
-		header->sections[i].offset = offset;
-		header->sections[i].size = a->size;
-		offset += ALIGN(a->size, 4096);
+		out_sections[i].offset = offset;
+		out_sections[i].size = a->size;
+		offset += a->size;
 	}
 
-	header->sections[i].type = ~0;
-	header->sections[i].offset = 0;
-	header->sections[i].size = 0;
+	razor_write(fd, &header, sizeof header);
+	razor_write(fd, out_sections, array_size * sizeof *out_sections);
+	razor_write(fd, pool.data, pool.size);
 
-	razor_write(fd, data, sizeof data);
-	memset(data, 0, sizeof data);
 	for (i = 0; i < array_size; i++) {
-		if (sections[i].type != i)
-			continue;
 		a = (void *) set + sections[i].offset;
 		razor_write(fd, a->data, a->size);
-		razor_write(fd, data, ALIGN(a->size, 4096) - a->size);
 	}
+
+	free(out_sections);
 
 	return 0;
 }
@@ -284,16 +263,16 @@ razor_set_write_to_fd(struct razor_set *set, int fd,
 {
 	switch (type) {
 	case RAZOR_REPO_FILE_MAIN:
-		return razor_set_write_sections_to_fd(set, fd, RAZOR_MAGIC,
+		return razor_set_write_sections_to_fd(set, fd,
 						      razor_sections,
 						      ARRAY_SIZE(razor_sections));
 
 	case RAZOR_REPO_FILE_DETAILS:
-		return razor_set_write_sections_to_fd(set, fd, RAZOR_DETAILS_MAGIC,
+		return razor_set_write_sections_to_fd(set, fd,
 						      razor_details_sections,
 						      ARRAY_SIZE(razor_details_sections));
 	case RAZOR_REPO_FILE_FILES:
-		return razor_set_write_sections_to_fd(set, fd, RAZOR_FILES_MAGIC,
+		return razor_set_write_sections_to_fd(set, fd,
 						      razor_files_sections,
 						      ARRAY_SIZE(razor_files_sections));
 	default:

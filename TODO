@@ -118,14 +118,7 @@ Towards replacing rpm + yum (0.1):
 
 Package set file format items:
 
-- drop the 4k section alignment
-
-- just use strings for header identifiers, make the string pool
-  section have a fixed string (maybe make "strings" always the first
-  string so its index is 0), or maybe just require that it's the first
-  section in the file.
-
-- nail down byte-order of rzdb file.
+- nail down byte-order of repo file.
 
 - version the sections in the file, put the element size in the header
   so we can add stuff to elements in a backwards compatible way.

@@ -82,7 +82,7 @@ uint32_t hashtable_tokenize(struct hashtable *table, const char *string);
 
 
 struct razor_set_section {
-	uint32_t type;
+	uint32_t name;
 	uint32_t offset;
 	uint32_t size;
 };
@@ -90,25 +90,23 @@ struct razor_set_section {
 struct razor_set_header {
 	uint32_t magic;
 	uint32_t version;
-	struct razor_set_section sections[0];
+	uint32_t num_sections;
 };
 
-#define RAZOR_MAGIC 		0x7a7a7a7a
-#define RAZOR_DETAILS_MAGIC 	0x7a7a7a7b
-#define RAZOR_FILES_MAGIC 	0x7a7a7a7c
-#define RAZOR_VERSION 1
+#define RAZOR_MAGIC 	0x525a4442
+#define RAZOR_VERSION	1
 
-#define RAZOR_STRING_POOL		0
-#define RAZOR_PACKAGES			1
-#define RAZOR_PROPERTIES		2
-#define RAZOR_PACKAGE_POOL		3
-#define RAZOR_PROPERTY_POOL		4
+#define RAZOR_STRING_POOL		"string_pool"
+#define RAZOR_PACKAGES			"packages"
+#define RAZOR_PROPERTIES		"properties"
+#define RAZOR_PACKAGE_POOL		"package_pool"
+#define RAZOR_PROPERTY_POOL		"property_pool"
 
-#define RAZOR_DETAILS_STRING_POOL	0
+#define RAZOR_DETAILS_STRING_POOL	"details_string_pool"
 
-#define RAZOR_FILES			0
-#define RAZOR_FILE_POOL			1
-#define RAZOR_FILE_STRING_POOL		2
+#define RAZOR_FILES			"files"
+#define RAZOR_FILE_POOL			"file_pool"
+#define RAZOR_FILE_STRING_POOL		"file_string_pool"
 
 struct razor_package {
 	uint name  : 24;
@@ -150,9 +148,15 @@ struct razor_set {
  	struct array file_pool;
 	struct array file_string_pool;
 	struct array details_string_pool;
+
 	struct razor_set_header *header;
+	size_t header_size;
+
 	struct razor_set_header *details_header;
+	size_t details_header_size;
+
 	struct razor_set_header *files_header;
+	size_t files_header_size;
 };
 
 struct import_entry {
