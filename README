@@ -45,7 +45,7 @@ Just random notes at this point:
    If there is a system crash, razor will notice the temporary file on
    boot and resume the update.  
 
- - We want to keep the numer of dependencies down in a system critical
+ - We want to keep the number of dependencies down in a system critical
    component such as the package manager.  Between rpm and yum we're
    pulling in berkeley db, sqlite, expat, python.
 
